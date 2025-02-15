@@ -6,11 +6,15 @@ namespace garge_api.Models
     {
         [Key]
         public int Id { get; set; }
+
+        [Required]
         [MaxLength(50)]
-        public string Username { get; set; }
+        public required string Username { get; set; }
+
         [Required]
         [MaxLength(50)]
         public required string Email { get; set; }
+
         [Required]
         public required string Password { get; set; }
     }
