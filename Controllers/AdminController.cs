@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Swashbuckle.AspNetCore.Annotations;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -36,6 +37,10 @@ namespace garge_api.Controllers
         /// <param name="roleName">The role name.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("create-role")]
+        [SwaggerOperation(Summary = "Creates a new role.")]
+        [SwaggerResponse(200, "Role created successfully.")]
+        [SwaggerResponse(409, "Role already exists.")]
+        [SwaggerResponse(400, "Invalid request.")]
         public async Task<IActionResult> CreateRole(string roleName)
         {
             if (await _roleManager.RoleExistsAsync(roleName))
@@ -59,6 +64,10 @@ namespace garge_api.Controllers
         /// <param name="roleName">The role name.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("assign-role")]
+        [SwaggerOperation(Summary = "Assigns a role to a user.")]
+        [SwaggerResponse(200, "Role assigned successfully.")]
+        [SwaggerResponse(404, "User not found.")]
+        [SwaggerResponse(400, "Invalid request.")]
         public async Task<IActionResult> AssignRole(string userEmail, string roleName)
         {
             var user = await _userManager.FindByEmailAsync(userEmail);
@@ -83,6 +92,10 @@ namespace garge_api.Controllers
         /// <param name="permission">The permission.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("assign-permission")]
+        [SwaggerOperation(Summary = "Assigns a permission to a role.")]
+        [SwaggerResponse(200, "Permission assigned successfully.")]
+        [SwaggerResponse(404, "Role not found.")]
+        [SwaggerResponse(400, "Invalid request.")]
         public async Task<IActionResult> AssignPermission(string roleName, string permission)
         {
             if (!await _roleManager.RoleExistsAsync(roleName))
@@ -107,6 +120,8 @@ namespace garge_api.Controllers
         /// </summary>
         /// <returns>An IActionResult.</returns>
         [HttpGet("roles")]
+        [SwaggerOperation(Summary = "Gets all roles.")]
+        [SwaggerResponse(200, "Roles retrieved successfully.")]
         public IActionResult GetRoles()
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -122,6 +137,8 @@ namespace garge_api.Controllers
         /// </summary>
         /// <returns>An IActionResult.</returns>
         [HttpGet("users")]
+        [SwaggerOperation(Summary = "Gets all users.")]
+        [SwaggerResponse(200, "Users retrieved successfully.")]
         public IActionResult GetUsers()
         {
             var users = _userManager.Users.Select(user => new UserDto
@@ -137,4 +154,3 @@ namespace garge_api.Controllers
         }
     }
 }
-

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using Swashbuckle.AspNetCore.Annotations;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -35,24 +36,36 @@ namespace garge_api.Controllers
         /// <summary>
         /// Registers a new user.
         /// </summary>
-        /// <param name="model">The registration model.</param>
+        /// <param name="registerUserDto">The registration data.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("register")]
         [AllowAnonymous]
-        public async Task<IActionResult> Register([FromBody] ApplicationUser user, string password)
+        [SwaggerOperation(Summary = "Registers a new user.")]
+        [SwaggerResponse(200, "User registered successfully.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        [SwaggerResponse(409, "Email is already registered.")]
+        public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto)
         {
-            if (string.IsNullOrEmpty(user.Email))
+            if (string.IsNullOrEmpty(registerUserDto.Email))
             {
                 return BadRequest(new { message = "Email is required!" });
             }
 
-            var existingUser = await _userManager.FindByEmailAsync(user.Email);
+            var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
             if (existingUser != null)
             {
                 return Conflict(new { message = "Email is already registered!" });
             }
 
-            var result = await _userManager.CreateAsync(user, password);
+            var user = new ApplicationUser
+            {
+                UserName = registerUserDto.UserName,
+                Email = registerUserDto.Email,
+                FirstName = registerUserDto.FirstName,
+                LastName = registerUserDto.LastName
+            };
+
+            var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
             {
                 var userProfile = new UserProfile
@@ -79,6 +92,10 @@ namespace garge_api.Controllers
         /// <returns>An IActionResult.</returns>
         [HttpPost("login")]
         [AllowAnonymous]
+        [SwaggerOperation(Summary = "Logs in a user.")]
+        [SwaggerResponse(200, "User logged in successfully.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        [SwaggerResponse(401, "Invalid credentials.")]
         public async Task<IActionResult> Login([FromBody] LoginModel login)
         {
             if (string.IsNullOrEmpty(login.Email) || string.IsNullOrEmpty(login.Password))
@@ -104,11 +121,11 @@ namespace garge_api.Controllers
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
             var claims = new List<Claim>
-    {
-        new Claim(JwtRegisteredClaimNames.Sub, user.Id?.ToString() ?? string.Empty),
-        new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
-        new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
-    };
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id?.ToString() ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
+            };
 
             claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
 

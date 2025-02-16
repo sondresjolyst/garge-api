@@ -8,6 +8,8 @@ namespace garge_api.Models
     {
         public DbSet<UserProfile> UserProfiles { get; set; }
         public DbSet<RolePermission> RolePermissions { get; set; }
+        public DbSet<Sensor> Sensors { get; set; }
+        public DbSet<SensorData> SensorData { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -20,6 +22,10 @@ namespace garge_api.Models
 
             modelBuilder.Entity<RolePermission>()
                 .HasIndex(rp => new { rp.RoleName, rp.Permission })
+                .IsUnique();
+
+            modelBuilder.Entity<Sensor>()
+                .HasIndex(s => s.Name)
                 .IsUnique();
 
             OnModelCreatingPartial(modelBuilder);
