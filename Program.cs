@@ -1,10 +1,12 @@
 using garge_api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi.Models;
+using System.Reflection;
 
 namespace garge_api
 {
@@ -14,16 +16,22 @@ namespace garge_api
         {
             var builder = WebApplication.CreateBuilder(args);
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
-            var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>();
+            var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
+
+            builder.Services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+            builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+                .AddEntityFrameworkStores<ApplicationDbContext>()
+                .AddDefaultTokenProviders();
 
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
                     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
                 });
+
             builder.Services.AddEndpointsApiExplorer();
-            var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-            builder.Services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(connectionString));
 
             builder.Services.AddAuthentication(options =>
             {
@@ -43,6 +51,11 @@ namespace garge_api
                 };
             });
 
+            builder.Services.AddAuthorization(options =>
+            {
+                options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+            });
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAllOrigins",
@@ -54,9 +67,12 @@ namespace garge_api
                     });
             });
 
+            var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
             builder.Services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Garge API", Version = "v1" });
+                c.IncludeXmlComments(xmlPath);
 
                 // Add JWT Authentication
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -98,9 +114,6 @@ namespace garge_api
 
             app.UseHttpsRedirection();
             app.UseCors("AllowAllOrigins");
-
-            // Add the request logging middleware
-            //app.UseMiddleware<RequestLoggingMiddleware>();
 
             app.UseAuthentication();
             app.UseAuthorization();

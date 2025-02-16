@@ -1,12 +1,12 @@
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 
 namespace garge_api.Models
 {
-    public class UserProfile
+    public class RegisterModel
     {
-        [Key, ForeignKey("User")]
-        public required string Id { get; set; }
+        [Required]
+        [MaxLength(50)]
+        public required string UserName { get; set; }
 
         [Required]
         [MaxLength(50)]
@@ -20,6 +20,7 @@ namespace garge_api.Models
         [MaxLength(50)]
         public required string Email { get; set; }
 
-        public required ApplicationUser User { get; set; }
+        [Required]
+        public required string Password { get; set; }
     }
 }
