@@ -17,6 +17,7 @@ namespace garge_api
             var builder = WebApplication.CreateBuilder(args);
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
             var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
+            builder.Configuration.AddEnvironmentVariables();
 
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -112,9 +113,9 @@ namespace garge_api
                 });
             }
 
-            app.UseHttpsRedirection();
             app.UseCors("AllowAllOrigins");
-
+            app.UseStaticFiles();
+            app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapControllers();
