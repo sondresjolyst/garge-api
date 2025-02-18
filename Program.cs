@@ -7,6 +7,10 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using System.Data.Common;
+using Microsoft.Extensions.Logging.Console;
 
 namespace garge_api
 {
@@ -19,8 +23,21 @@ namespace garge_api
             var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
             builder.Configuration.AddEnvironmentVariables();
 
-            builder.Services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+            builder.Logging.ClearProviders();
+            builder.Logging.AddSimpleConsole(options =>
+            {
+                options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+                options.IncludeScopes = true;
+            });
+            builder.Logging.AddFilter((category, level) =>
+                category == DbLoggerCategory.Database.Command.Name && level == LogLevel.None);
+
+            builder.Services.AddScoped<CustomDbCommandInterceptor>();
+
+            builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
+                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
+                       .EnableSensitiveDataLogging()
+                       .AddInterceptors(serviceProvider.GetRequiredService<CustomDbCommandInterceptor>()));
 
             builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationDbContext>()
@@ -113,13 +130,42 @@ namespace garge_api
                 });
             }
 
-            app.UseCors("AllowAllOrigins");
             app.UseStaticFiles();
             app.UseRouting();
+            app.UseCors("AllowAllOrigins");
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapControllers();
             app.Run();
         }
     }
+
+    public class CustomDbCommandInterceptor : DbCommandInterceptor
+    {
+        private readonly ILogger<CustomDbCommandInterceptor> _logger;
+
+        public CustomDbCommandInterceptor(ILogger<CustomDbCommandInterceptor> logger)
+        {
+            _logger = logger;
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            LogCommand(command, eventData);
+            return base.ReaderExecuting(command, eventData, result);
+        }
+
+        private void LogCommand(DbCommand command, CommandEventData eventData)
+        {
+            _logger.LogInformation("Executing DbCommand: {CommandText} with parameters: {Parameters} at {Timestamp}",
+                command.CommandText,
+                string.Join(", ", command.Parameters.Cast<DbParameter>().Select(p => $"{p.ParameterName}={p.Value}")),
+                DateTime.UtcNow);
+        }
+    }
 }
+
+

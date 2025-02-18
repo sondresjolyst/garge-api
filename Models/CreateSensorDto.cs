@@ -2,7 +2,7 @@ namespace garge_api.Models
 {
     public class CreateSensorDto
     {
-        public string Name { get; set; }
-        public string Type { get; set; }
+        public required string Name { get; set; }
+        public required string Type { get; set; }
     }
 }

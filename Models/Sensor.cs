@@ -14,14 +14,14 @@ namespace garge_api.Models
 
         [Required]
         [MaxLength(50)]
-        public string Name { get; set; }
+        public required string Name { get; set; }
 
         [Required]
         [MaxLength(50)]
-        public string Type { get; set; }
+        public required string Type { get; set; }
 
         [Required]
         [MaxLength(50)]
-        public string Role { get; set; }
+        public required string Role { get; set; }
     }
 }

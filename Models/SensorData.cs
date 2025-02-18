@@ -12,10 +12,10 @@ namespace garge_api.Models
         public int SensorId { get; set; }
 
         [ForeignKey("SensorId")]
-        public Sensor Sensor { get; set; }
+        public Sensor? Sensor { get; set; }
 
         [Required]
-        public string Value { get; set; }
+        public required string Value { get; set; }
 
         [Required]
         public DateTime Timestamp { get; set; }

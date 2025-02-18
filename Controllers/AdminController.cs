@@ -122,10 +122,21 @@ namespace garge_api.Controllers
         [HttpGet("roles")]
         [SwaggerOperation(Summary = "Gets all roles.")]
         [SwaggerResponse(200, "Roles retrieved successfully.")]
-        public IActionResult GetRoles()
+        public async Task<IActionResult> GetRoles()
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            var userRoles = _userManager.GetRolesAsync(_userManager.FindByIdAsync(userId).Result).Result;
+            if (userId == null)
+            {
+                return BadRequest(new { message = "User ID not found in claims." });
+            }
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found!" });
+            }
+
+            var userRoles = await _userManager.GetRolesAsync(user);
             _logger.LogInformation($"User {userId} has roles: {string.Join(", ", userRoles)}");
 
             var roles = _roleManager.Roles;
