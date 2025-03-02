@@ -163,5 +163,104 @@ namespace garge_api.Controllers
 
             return Ok(users);
         }
+
+        /// <summary>
+        /// Deletes a user by their ID.
+        /// </summary>
+        /// <param name="id">The ID of the user to delete.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("user/{id}")]
+        [SwaggerOperation(Summary = "Deletes a user by their ID.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> DeleteUser(string id)
+        {
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found!" });
+            }
+
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Deletes a user by their email.
+        /// </summary>
+        /// <param name="email">The email of the user to delete.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("user/{email}")]
+        [SwaggerOperation(Summary = "Deletes a user by their email.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> DeleteUserByEmail(string email)
+        {
+            var user = await _userManager.FindByEmailAsync(email);
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found!" });
+            }
+
+            _context.Users.Remove(user);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Deletes a role by its name.
+        /// </summary>
+        /// <param name="roleName">The name of the role to delete.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("role/{roleName}")]
+        [SwaggerOperation(Summary = "Deletes a role by its name.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "Role not found.")]
+        public async Task<IActionResult> DeleteRole(string roleName)
+        {
+            var role = await _roleManager.FindByNameAsync(roleName);
+            if (role == null)
+            {
+                return NotFound(new { message = "Role not found!" });
+            }
+
+            var result = await _roleManager.DeleteAsync(role);
+            if (result.Succeeded)
+            {
+                return NoContent();
+            }
+
+            return BadRequest(result.Errors);
+        }
+
+        /// <summary>
+        /// Deletes a role assignment for a user.
+        /// </summary>
+        /// <param name="userEmail">The user's email.</param>
+        /// <param name="roleName">The name of the role to remove.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("role-assignment")]
+        [SwaggerOperation(Summary = "Deletes a role assignment for a user.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "User or role not found.")]
+        public async Task<IActionResult> DeleteRoleAssignment(string userEmail, string roleName)
+        {
+            var user = await _userManager.FindByEmailAsync(userEmail);
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found!" });
+            }
+
+            var result = await _userManager.RemoveFromRoleAsync(user, roleName);
+            if (result.Succeeded)
+            {
+                return NoContent();
+            }
+
+            return BadRequest(result.Errors);
+        }
     }
 }

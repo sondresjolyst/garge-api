@@ -28,6 +28,12 @@ namespace garge_api.Models
                 .HasIndex(s => s.Name)
                 .IsUnique();
 
+            modelBuilder.Entity<SensorData>()
+                .HasIndex(sd => sd.SensorId);
+
+            modelBuilder.Entity<SensorData>()
+                .HasIndex(sd => sd.Timestamp);
+
             OnModelCreatingPartial(modelBuilder);
         }
 

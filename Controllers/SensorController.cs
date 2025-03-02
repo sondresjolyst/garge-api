@@ -88,13 +88,18 @@ namespace garge_api.Controllers
         /// Retrieves data for a specific sensor.
         /// </summary>
         /// <param name="sensorId">The ID of the sensor to retrieve data for.</param>
+        /// <param name="timeRange">The time range for the data (e.g., 5m, 10m, 30m, 1h). Takes precedence over startDate and endDate.</param>
+        /// <param name="startDate">The start date for the data range.</param>
+        /// <param name="endDate">The end date for the data range.</param>
+        /// <param name="average">Whether to return averaged data.</param>
+        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day").</param>
         /// <returns>The data for the specified sensor.</returns>
         [HttpGet("{sensorId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific sensor.")]
         [SwaggerResponse(200, "The data for the specified sensor.", typeof(IEnumerable<SensorData>))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSensorData(int sensorId)
+        public async Task<IActionResult> GetSensorData(int sensorId, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -107,12 +112,186 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var sensorData = await _context.SensorData
+            var query = _context.SensorData
+                .Include(sd => sd.Sensor)
                 .Where(sd => sd.SensorId == sensorId)
-                .OrderBy(sd => sd.Timestamp) // Sort by Timestamp
+                .AsQueryable();
+
+            // Use timeRange if provided, otherwise use startDate and endDate
+            if (!string.IsNullOrEmpty(timeRange))
+            {
+                var now = DateTime.UtcNow;
+                var timeSpan = ParseTimeRange(timeRange);
+                if (timeSpan.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
+                }
+            }
+            else
+            {
+                if (startDate.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
+                }
+
+                if (endDate.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
+                }
+            }
+
+            var sensorDataList = await query
+                .OrderBy(sd => sd.Timestamp)
                 .ToListAsync();
 
-            return Ok(sensorData);
+            if (average)
+            {
+                var groupedData = sensorDataList
+                    .GroupBy(sd => new
+                    {
+                        Year = sd.Timestamp.Year,
+                        Month = groupBy == "month" || groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Month : 1,
+                        Day = groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Day : 1,
+                        Hour = groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Hour : 0,
+                        Minute = groupBy == "minute" ? sd.Timestamp.Minute : 0
+                    })
+                    .Select(g => new SensorData
+                    {
+                        Id = g.First().Id, // Use the Id of the first item in the group
+                        SensorId = sensorId,
+                        Sensor = sensor,
+                        Timestamp = new DateTime(g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.Minute, 0),
+                        Value = g.Average(sd => double.Parse(sd.Value)).ToString()
+                    })
+                    .OrderBy(sd => sd.Timestamp)
+                    .ToList();
+
+                return Ok(groupedData);
+            }
+            else
+            {
+                return Ok(sensorDataList);
+            }
+        }
+
+        /// <summary>
+        /// Retrieves data for multiple sensors.
+        /// </summary>
+        /// <param name="sensorIds">The IDs of the sensors to retrieve data for.</param>
+        /// <param name="timeRange">The time range for the data (e.g., 5m, 10m, 30m, 1h). Takes precedence over startDate and endDate.</param>
+        /// <param name="startDate">The start date for the data range.</param>
+        /// <param name="endDate">The end date for the data range.</param>
+        /// <param name="average">Whether to return averaged data.</param>
+        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day").</param>
+        /// <returns>The data for the specified sensors.</returns>
+        [HttpGet("data")]
+        [SwaggerOperation(Summary = "Retrieves data for multiple sensors.")]
+        [SwaggerResponse(200, "The data for the specified sensors.", typeof(IEnumerable<SensorData>))]
+        [SwaggerResponse(404, "One or more sensors not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> GetMultipleSensorsData([FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
+        {
+            var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync();
+            if (sensors.Count != sensorIds.Count)
+            {
+                return NotFound(new { message = "One or more sensors not found!" });
+            }
+
+            foreach (var sensor in sensors)
+            {
+                if (!UserHasRequiredRole(sensor.Role))
+                {
+                    return Forbid();
+                }
+            }
+
+            var query = _context.SensorData
+                .Include(sd => sd.Sensor)
+                .Where(sd => sensorIds.Contains(sd.SensorId))
+                .AsQueryable();
+
+            // Use timeRange if provided, otherwise use startDate and endDate
+            if (!string.IsNullOrEmpty(timeRange))
+            {
+                var now = DateTime.UtcNow;
+                var timeSpan = ParseTimeRange(timeRange);
+                if (timeSpan.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
+                }
+            }
+            else
+            {
+                if (startDate.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
+                }
+
+                if (endDate.HasValue)
+                {
+                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
+                }
+            }
+
+            var sensorDataList = await query
+                .OrderBy(sd => sd.Timestamp)
+                .ToListAsync();
+
+            if (average)
+            {
+                var groupedData = sensorDataList
+                    .GroupBy(sd => new
+                    {
+                        sd.SensorId,
+                        Year = sd.Timestamp.Year,
+                        Month = groupBy == "month" || groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Month : 1,
+                        Day = groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Day : 1,
+                        Hour = groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Hour : 0,
+                        Minute = groupBy == "minute" ? sd.Timestamp.Minute : 0
+                    })
+                    .Select(g => new SensorData
+                    {
+                        Id = g.First().Id,
+                        SensorId = g.Key.SensorId,
+                        Sensor = sensors.First(s => s.Id == g.Key.SensorId),
+                        Timestamp = new DateTime(g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.Minute, 0),
+                        Value = g.Average(sd => double.Parse(sd.Value)).ToString()
+                    })
+                    .OrderBy(sd => sd.Timestamp)
+                    .ToList();
+
+                return Ok(groupedData);
+            }
+            else
+            {
+                return Ok(sensorDataList);
+            }
+        }
+
+        private static TimeSpan? ParseTimeRange(string timeRange)
+        {
+            if (string.IsNullOrEmpty(timeRange) || timeRange.Length < 2)
+            {
+                return null;
+            }
+
+            var value = timeRange.Substring(0, timeRange.Length - 1);
+            var unit = timeRange.Substring(timeRange.Length - 1).ToLower();
+
+            if (!int.TryParse(value, out var intValue))
+            {
+                return null;
+            }
+
+            return unit switch
+            {
+                "m" => TimeSpan.FromMinutes(intValue),
+                "h" => TimeSpan.FromHours(intValue),
+                "d" => TimeSpan.FromDays(intValue),
+                "w" => TimeSpan.FromDays(intValue * 7),
+                "y" => TimeSpan.FromDays(intValue * 365),
+                _ => null,
+            };
         }
 
         /// <summary>
@@ -312,6 +491,72 @@ namespace garge_api.Controllers
             }
 
             _context.Sensors.Remove(sensor);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Deletes specific sensor data by its ID.
+        /// </summary>
+        /// <param name="sensorId">The ID of the sensor.</param>
+        /// <param name="dataId">The ID of the sensor data to delete.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("{sensorId}/data/{dataId}")]
+        [SwaggerOperation(Summary = "Deletes specific sensor data by its ID.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "Sensor or sensor data not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> DeleteSensorData(int sensorId, int dataId)
+        {
+            var sensor = await _context.Sensors.FindAsync(sensorId);
+            if (sensor == null)
+            {
+                return NotFound(new { message = "Sensor not found!" });
+            }
+
+            if (!UserHasRequiredRole(sensor.Role))
+            {
+                return Forbid();
+            }
+
+            var sensorData = await _context.SensorData.FindAsync(dataId);
+            if (sensorData == null || sensorData.SensorId != sensorId)
+            {
+                return NotFound(new { message = "Sensor data not found!" });
+            }
+
+            _context.SensorData.Remove(sensorData);
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Deletes all sensor data for a specific sensor.
+        /// </summary>
+        /// <param name="sensorId">The ID of the sensor.</param>
+        /// <returns>No content.</returns>
+        [HttpDelete("{sensorId}/data")]
+        [SwaggerOperation(Summary = "Deletes all sensor data for a specific sensor.")]
+        [SwaggerResponse(204, "No content.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> DeleteAllSensorData(int sensorId)
+        {
+            var sensor = await _context.Sensors.FindAsync(sensorId);
+            if (sensor == null)
+            {
+                return NotFound(new { message = "Sensor not found!" });
+            }
+
+            if (!UserHasRequiredRole(sensor.Role))
+            {
+                return Forbid();
+            }
+
+            var sensorData = _context.SensorData.Where(sd => sd.SensorId == sensorId);
+            _context.SensorData.RemoveRange(sensorData);
             await _context.SaveChangesAsync();
 
             return NoContent();
