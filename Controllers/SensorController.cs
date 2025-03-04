@@ -44,7 +44,7 @@ namespace garge_api.Controllers
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
             // If the user has the "admin" or "sensor_admin" role, return all sensors
-            if (UserHasRequiredRole("admin") || UserHasRequiredRole("sensor_admin"))
+            if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) || userRoles.Contains("sensor_admin", StringComparer.OrdinalIgnoreCase))
             {
                 var allSensors = await _context.Sensors.ToListAsync();
                 return Ok(allSensors);
@@ -52,7 +52,7 @@ namespace garge_api.Controllers
 
             // Otherwise, return only the sensors the user has access to
             var accessibleSensors = await _context.Sensors
-                .Where(sensor => UserHasRequiredRole(sensor.Role))
+                .Where(sensor => userRoles.Contains(sensor.Role))
                 .ToListAsync();
 
             return Ok(accessibleSensors);

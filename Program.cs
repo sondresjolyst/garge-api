@@ -121,14 +121,14 @@ namespace garge_api
 
             var app = builder.Build();
 
-            if (app.Environment.IsDevelopment())
+            // if (app.Environment.IsDevelopment())
+            // {
+            app.UseSwagger();
+            app.UseSwaggerUI(c =>
             {
-                app.UseSwagger();
-                app.UseSwaggerUI(c =>
-                {
-                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
-                });
-            }
+                c.SwaggerEndpoint("/swagger/v1/swagger.json", "Garge API V1");
+            });
+            // }
 
             app.UseStaticFiles();
             app.UseRouting();
