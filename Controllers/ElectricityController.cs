@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 using System.Linq;
+using garge_api.Constants;
 
 namespace garge_api.Controllers
 {
@@ -28,7 +29,10 @@ namespace garge_api.Controllers
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
-            if (!userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) && !userRoles.Contains("Electricity", StringComparer.OrdinalIgnoreCase))
+            var hasAccess = userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
+                            userRoles.Any(role => RoleNames.RolePermissions.TryGetValue(role, out var permissions) && permissions.Contains("Electricity", StringComparer.OrdinalIgnoreCase));
+
+            if (!hasAccess)
             {
                 return Forbid();
             }
