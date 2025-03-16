@@ -68,6 +68,9 @@ namespace garge_api.Controllers
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
             {
+                // Assign the "Default" role to the user
+                await _userManager.AddToRoleAsync(user, "Default");
+
                 var userProfile = new UserProfile
                 {
                     Id = user.Id,

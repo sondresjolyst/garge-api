@@ -1,4 +1,5 @@
 using garge_api.Models;
+using garge_api.Constants;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -11,12 +12,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
 using Microsoft.Extensions.Logging.Console;
+using garge_api.Services;
 
 namespace garge_api
 {
     public class Program
     {
-        public static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
@@ -48,6 +50,7 @@ namespace garge_api
                 {
                     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
                 });
+            builder.Services.AddHttpClient<NordPoolService>();
 
             builder.Services.AddEndpointsApiExplorer();
 
@@ -121,6 +124,43 @@ namespace garge_api
 
             var app = builder.Build();
 
+            using (var scope = app.Services.CreateScope())
+            {
+                var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                foreach (var roleName in RoleNames.AllRoles)
+                {
+                    var roleExist = await roleManager.RoleExistsAsync(roleName);
+                    if (!roleExist)
+                    {
+                        await roleManager.CreateAsync(new IdentityRole(roleName));
+                    }
+                }
+
+                foreach (var rolePermission in RoleNames.RolePermissions)
+                {
+                    var roleName = rolePermission.Key;
+                    var permissions = rolePermission.Value;
+
+                    foreach (var permission in permissions)
+                    {
+                        var rolePermissionEntry = new RolePermission
+                        {
+                            RoleName = roleName,
+                            Permission = permission
+                        };
+
+                        if (!context.RolePermissions.Any(rp => rp.RoleName == roleName && rp.Permission == permission))
+                        {
+                            context.RolePermissions.Add(rolePermissionEntry);
+                        }
+                    }
+                }
+
+                await context.SaveChangesAsync();
+            }
+
             // if (app.Environment.IsDevelopment())
             // {
             app.UseSwagger();
@@ -167,5 +207,3 @@ namespace garge_api
         }
     }
 }
-
-

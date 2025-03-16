@@ -154,11 +154,11 @@ namespace garge_api.Controllers
         {
             var users = _userManager.Users.Select(user => new UserDto
             {
-                Id = user.Id,
-                UserName = user.UserName,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
-                Email = user.Email
+                Id = user.Id ?? string.Empty,
+                UserName = user.UserName ?? string.Empty,
+                FirstName = user.FirstName ?? string.Empty,
+                LastName = user.LastName ?? string.Empty,
+                Email = user.Email ?? string.Empty
             }).ToList();
 
             return Ok(users);
