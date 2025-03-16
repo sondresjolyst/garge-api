@@ -92,7 +92,7 @@ namespace garge_api.Controllers
         /// <param name="startDate">The start date for the data range.</param>
         /// <param name="endDate">The end date for the data range.</param>
         /// <param name="average">Whether to return averaged data.</param>
-        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day").</param>
+        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
         /// <returns>The data for the specified sensor.</returns>
         [HttpGet("{sensorId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific sensor.")]
@@ -147,24 +147,23 @@ namespace garge_api.Controllers
             if (average)
             {
                 var groupedData = sensorDataList
-                    .GroupBy(sd => new
-                    {
-                        Year = sd.Timestamp.Year,
-                        Month = groupBy == "month" || groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Month : 1,
-                        Day = groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Day : 1,
-                        Hour = groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Hour : 0,
-                        Minute = groupBy == "minute" ? sd.Timestamp.Minute : 0
-                    })
+                    .GroupBy(sd => GetGroupingKey(sd.Timestamp, groupBy))
                     .Select(g => new SensorData
                     {
                         Id = g.First().Id, // Use the Id of the first item in the group
                         SensorId = sensorId,
                         Sensor = sensor,
-                        Timestamp = new DateTime(g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.Minute, 0),
+                        Timestamp = g.Key,
                         Value = g.Average(sd => double.Parse(sd.Value)).ToString()
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
+
+                // Logging the grouped data
+                foreach (var data in groupedData)
+                {
+                    Console.WriteLine($"Timestamp: {data.Timestamp}, Value: {data.Value}");
+                }
 
                 return Ok(groupedData);
             }
@@ -182,7 +181,7 @@ namespace garge_api.Controllers
         /// <param name="startDate">The start date for the data range.</param>
         /// <param name="endDate">The end date for the data range.</param>
         /// <param name="average">Whether to return averaged data.</param>
-        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day").</param>
+        /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
         /// <returns>The data for the specified sensors.</returns>
         [HttpGet("data")]
         [SwaggerOperation(Summary = "Retrieves data for multiple sensors.")]
@@ -243,22 +242,24 @@ namespace garge_api.Controllers
                     .GroupBy(sd => new
                     {
                         sd.SensorId,
-                        Year = sd.Timestamp.Year,
-                        Month = groupBy == "month" || groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Month : 1,
-                        Day = groupBy == "day" || groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Day : 1,
-                        Hour = groupBy == "hour" || groupBy == "minute" ? sd.Timestamp.Hour : 0,
-                        Minute = groupBy == "minute" ? sd.Timestamp.Minute : 0
+                        Timestamp = GetGroupingKey(sd.Timestamp, groupBy)
                     })
                     .Select(g => new SensorData
                     {
                         Id = g.First().Id,
                         SensorId = g.Key.SensorId,
                         Sensor = sensors.First(s => s.Id == g.Key.SensorId),
-                        Timestamp = new DateTime(g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.Minute, 0),
+                        Timestamp = g.Key.Timestamp,
                         Value = g.Average(sd => double.Parse(sd.Value)).ToString()
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
+
+                // Logging the grouped data
+                foreach (var data in groupedData)
+                {
+                    Console.WriteLine($"SensorId: {data.SensorId}, Timestamp: {data.Timestamp}, Value: {data.Value}");
+                }
 
                 return Ok(groupedData);
             }
@@ -266,6 +267,23 @@ namespace garge_api.Controllers
             {
                 return Ok(sensorDataList);
             }
+        }
+
+        private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
+        {
+            if (string.IsNullOrEmpty(groupBy))
+            {
+                return timestamp;
+            }
+
+            var timeSpan = ParseTimeRange(groupBy);
+            if (timeSpan.HasValue)
+            {
+                var ticks = (timestamp.Ticks / timeSpan.Value.Ticks) * timeSpan.Value.Ticks;
+                return new DateTime(ticks, DateTimeKind.Utc);
+            }
+
+            return timestamp;
         }
 
         private static TimeSpan? ParseTimeRange(string timeRange)
@@ -293,6 +311,8 @@ namespace garge_api.Controllers
                 _ => null,
             };
         }
+
+
 
         /// <summary>
         /// Creates a new sensor.
