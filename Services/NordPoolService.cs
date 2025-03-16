@@ -16,7 +16,7 @@ namespace garge_api.Services
 
         public async Task<PriceResponse?> FetchPricesAsync(string dataType, DateTime? endDate = null, List<string>? areas = null, string currency = "NOK")
         {
-            areas ??= new List<string>(); // Ensure areas is not null
+            areas ??= new List<string>();
             var (apiUrl, parameters) = GetUrlParams(dataType, endDate, areas, currency);
             var response = await _httpClient.GetAsync($"{apiUrl}?{parameters}");
             response.EnsureSuccessStatusCode();

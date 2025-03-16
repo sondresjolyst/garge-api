@@ -95,7 +95,6 @@ namespace garge_api
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "Garge API", Version = "v1" });
                 c.IncludeXmlComments(xmlPath);
 
-                // Add JWT Authentication
                 c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
                 {
                     In = ParameterLocation.Header,

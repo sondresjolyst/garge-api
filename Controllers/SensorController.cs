@@ -43,14 +43,12 @@ namespace garge_api.Controllers
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
-            // If the user has the "admin" or "sensor_admin" role, return all sensors
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) || userRoles.Contains("sensor_admin", StringComparer.OrdinalIgnoreCase))
             {
                 var allSensors = await _context.Sensors.ToListAsync();
                 return Ok(allSensors);
             }
 
-            // Otherwise, return only the sensors the user has access to
             var accessibleSensors = await _context.Sensors
                 .Where(sensor => userRoles.Contains(sensor.Role))
                 .ToListAsync();
@@ -117,7 +115,6 @@ namespace garge_api.Controllers
                 .Where(sd => sd.SensorId == sensorId)
                 .AsQueryable();
 
-            // Use timeRange if provided, otherwise use startDate and endDate
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
@@ -150,7 +147,7 @@ namespace garge_api.Controllers
                     .GroupBy(sd => GetGroupingKey(sd.Timestamp, groupBy))
                     .Select(g => new SensorData
                     {
-                        Id = g.First().Id, // Use the Id of the first item in the group
+                        Id = g.First().Id,
                         SensorId = sensorId,
                         Sensor = sensor,
                         Timestamp = g.Key,
@@ -159,7 +156,6 @@ namespace garge_api.Controllers
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
 
-                // Logging the grouped data
                 foreach (var data in groupedData)
                 {
                     Console.WriteLine($"Timestamp: {data.Timestamp}, Value: {data.Value}");
@@ -209,7 +205,6 @@ namespace garge_api.Controllers
                 .Where(sd => sensorIds.Contains(sd.SensorId))
                 .AsQueryable();
 
-            // Use timeRange if provided, otherwise use startDate and endDate
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
@@ -255,7 +250,6 @@ namespace garge_api.Controllers
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
 
-                // Logging the grouped data
                 foreach (var data in groupedData)
                 {
                     Console.WriteLine($"SensorId: {data.SensorId}, Timestamp: {data.Timestamp}, Value: {data.Value}");
@@ -330,7 +324,6 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            // Ensure the Id is not set by the user
             var sensor = new Sensor
             {
                 Name = sensorDto.Name,
@@ -338,7 +331,6 @@ namespace garge_api.Controllers
                 Role = sensorDto.Name
             };
 
-            // Check if the role already exists
             if (!await _roleManager.RoleExistsAsync(sensor.Role))
             {
                 var roleResult = await _roleManager.CreateAsync(new IdentityRole(sensor.Role));
@@ -395,7 +387,6 @@ namespace garge_api.Controllers
             _context.SensorData.Add(sensorData);
             await _context.SaveChangesAsync();
 
-            // Retrieve and return the sorted sensor data
             var sortedSensorData = await _context.SensorData
                 .Where(sd => sd.SensorId == sensorId)
                 .OrderBy(sd => sd.Timestamp)
@@ -438,7 +429,6 @@ namespace garge_api.Controllers
             _context.SensorData.Add(sensorData);
             await _context.SaveChangesAsync();
 
-            // Retrieve and return the sorted sensor data
             var sortedSensorData = await _context.SensorData
                 .Where(sd => sd.SensorId == sensor.Id)
                 .OrderBy(sd => sd.Timestamp)
