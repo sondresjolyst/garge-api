@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
+using System.Globalization;
 using System.Security.Claims;
 
 namespace garge_api.Controllers
@@ -151,7 +152,7 @@ namespace garge_api.Controllers
                         SensorId = sensorId,
                         Sensor = sensor,
                         Timestamp = g.Key,
-                        Value = g.Average(sd => double.Parse(sd.Value)).ToString()
+                        Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
@@ -165,6 +166,11 @@ namespace garge_api.Controllers
             }
             else
             {
+                foreach (var data in sensorDataList)
+                {
+                    data.Value = Math.Round(double.Parse(data.Value), 3).ToString(CultureInfo.InvariantCulture);
+                }
+
                 return Ok(sensorDataList);
             }
         }
@@ -245,7 +251,7 @@ namespace garge_api.Controllers
                         SensorId = g.Key.SensorId,
                         Sensor = sensors.First(s => s.Id == g.Key.SensorId),
                         Timestamp = g.Key.Timestamp,
-                        Value = g.Average(sd => double.Parse(sd.Value)).ToString()
+                        Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
@@ -259,6 +265,11 @@ namespace garge_api.Controllers
             }
             else
             {
+                foreach (var data in sensorDataList)
+                {
+                    data.Value = Math.Round(double.Parse(data.Value), 3).ToString(CultureInfo.InvariantCulture);
+                }
+
                 return Ok(sensorDataList);
             }
         }
@@ -380,7 +391,7 @@ namespace garge_api.Controllers
             var sensorData = new SensorData
             {
                 SensorId = sensorId,
-                Value = sensorDataDto.Value,
+                Value = Math.Round(double.Parse(sensorDataDto.Value), 3).ToString(CultureInfo.InvariantCulture),
                 Timestamp = DateTime.UtcNow
             };
 
@@ -422,7 +433,7 @@ namespace garge_api.Controllers
             var sensorData = new SensorData
             {
                 SensorId = sensor.Id,
-                Value = sensorDataDto.Value,
+                Value = Math.Round(double.Parse(sensorDataDto.Value), 3).ToString(CultureInfo.InvariantCulture),
                 Timestamp = DateTime.UtcNow
             };
 
