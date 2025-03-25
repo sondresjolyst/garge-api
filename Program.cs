@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
 using Microsoft.Extensions.Logging.Console;
 using garge_api.Services;
+using AspNetCoreRateLimit;
 
 namespace garge_api
 {
@@ -51,6 +52,7 @@ namespace garge_api
                     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
                 });
             builder.Services.AddHttpClient<NordPoolService>();
+            builder.Services.AddScoped<EmailService>();
 
             builder.Services.AddEndpointsApiExplorer();
 
@@ -87,6 +89,11 @@ namespace garge_api
                                .AllowAnyHeader();
                     });
             });
+
+            builder.Services.AddMemoryCache();
+            builder.Services.Configure<IpRateLimitOptions>(builder.Configuration.GetSection("IpRateLimiting"));
+            builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
+            builder.Services.AddInMemoryRateLimiting();
 
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
@@ -174,6 +181,7 @@ namespace garge_api
             app.UseCors("AllowAllOrigins");
             app.UseAuthentication();
             app.UseAuthorization();
+            app.UseIpRateLimiting();
             app.MapControllers();
             app.Run();
         }

@@ -1,6 +1,7 @@
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
@@ -18,10 +19,12 @@ namespace garge_api.Controllers
     public class UserController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public UserController(ApplicationDbContext context)
+        public UserController(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
         {
             _context = context;
+            _userManager = userManager;
         }
 
         /// <summary>
@@ -43,6 +46,7 @@ namespace garge_api.Controllers
             }
 
             var userProfile = await _context.UserProfiles
+                .Include(up => up.User)
                 .SingleOrDefaultAsync(up => up.Id == id);
 
             if (userProfile == null)
@@ -50,7 +54,22 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User profile not found!" });
             }
 
-            return Ok(userProfile);
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null)
+            {
+                return NotFound(new { message = "User not found!" });
+            }
+
+            var profileResponse = new
+            {
+                userProfile.Id,
+                userProfile.FirstName,
+                userProfile.LastName,
+                userProfile.Email,
+                user.EmailConfirmed
+            };
+
+            return Ok(profileResponse);
         }
     }
 }
