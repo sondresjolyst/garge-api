@@ -10,6 +10,8 @@ namespace garge_api.Models
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<Sensor> Sensors { get; set; }
         public DbSet<SensorData> SensorData { get; set; }
+        public DbSet<Switch> Switches { get; set; }
+        public DbSet<SwitchData> SwitchData { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

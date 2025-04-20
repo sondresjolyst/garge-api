@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250420120848_AddSwitchTable")]
+    partial class AddSwitchTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -338,31 +341,6 @@ namespace garge_api.Migrations
                     b.ToTable("Switches");
                 });
 
-            modelBuilder.Entity("garge_api.Models.SwitchData", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("SwitchId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SwitchId");
-
-                    b.ToTable("SwitchData");
-                });
-
             modelBuilder.Entity("garge_api.Models.UserProfile", b =>
                 {
                     b.Property<string>("Id")
@@ -448,17 +426,6 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("Sensor");
-                });
-
-            modelBuilder.Entity("garge_api.Models.SwitchData", b =>
-                {
-                    b.HasOne("garge_api.Models.Switch", "Switch")
-                        .WithMany()
-                        .HasForeignKey("SwitchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Switch");
                 });
 
             modelBuilder.Entity("garge_api.Models.UserProfile", b =>
