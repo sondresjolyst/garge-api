@@ -52,8 +52,10 @@ namespace garge_api
                     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
                 });
             builder.Services.AddHttpClient<NordPoolService>();
+            builder.Services.AddHttpClient<WebhookNotificationService>();
+            builder.Services.AddHostedService<PostgresNotificationService>();
+            builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddScoped<EmailService>();
-
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAuthentication(options =>
@@ -134,6 +136,10 @@ namespace garge_api
             {
                 var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var postgresNotificationService = scope.ServiceProvider.GetRequiredService<PostgresNotificationService>();
+                Console.WriteLine("PostgresNotificationService started");
+
+                context.EnsureTriggers();
 
                 foreach (var roleName in RoleNames.AllRoles)
                 {

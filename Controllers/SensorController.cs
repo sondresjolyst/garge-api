@@ -317,8 +317,6 @@ namespace garge_api.Controllers
             };
         }
 
-
-
         /// <summary>
         /// Creates a new sensor.
         /// </summary>

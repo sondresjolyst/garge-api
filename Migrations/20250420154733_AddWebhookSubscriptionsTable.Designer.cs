@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250420154733_AddWebhookSubscriptionsTable")]
+    partial class AddWebhookSubscriptionsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -40,12 +43,6 @@ namespace garge_api.Migrations
 
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("boolean");
-
-                    b.Property<string>("EmailVerificationCode")
-                        .HasColumnType("text");
-
-                    b.Property<DateTime?>("EmailVerificationCodeExpiration")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("FirstName")
                         .IsRequired()
@@ -234,31 +231,6 @@ namespace garge_api.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
-            modelBuilder.Entity("UserProfile", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("FirstName")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("LastName")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("UserProfiles");
-                });
-
             modelBuilder.Entity("garge_api.Models.RolePermission", b =>
                 {
                     b.Property<int>("Id")
@@ -391,7 +363,32 @@ namespace garge_api.Migrations
 
                     b.HasIndex("SwitchId");
 
-                    b.ToTable("SwitchData", (string)null);
+                    b.ToTable("SwitchData");
+                });
+
+            modelBuilder.Entity("garge_api.Models.UserProfile", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("UserProfiles");
                 });
 
             modelBuilder.Entity("garge_api.Models.WebhookSubscription", b =>
@@ -466,17 +463,6 @@ namespace garge_api.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("UserProfile", b =>
-                {
-                    b.HasOne("ApplicationUser", "User")
-                        .WithOne()
-                        .HasForeignKey("UserProfile", "Id")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("garge_api.Models.SensorData", b =>
                 {
                     b.HasOne("garge_api.Models.Sensor", "Sensor")
@@ -497,6 +483,17 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("Switch");
+                });
+
+            modelBuilder.Entity("garge_api.Models.UserProfile", b =>
+                {
+                    b.HasOne("ApplicationUser", "User")
+                        .WithOne()
+                        .HasForeignKey("garge_api.Models.UserProfile", "Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 #pragma warning restore 612, 618
         }
