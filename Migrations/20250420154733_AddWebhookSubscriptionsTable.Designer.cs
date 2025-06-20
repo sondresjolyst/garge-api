@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250420154733_AddWebhookSubscriptionsTable")]
+    partial class AddWebhookSubscriptionsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -360,11 +363,7 @@ namespace garge_api.Migrations
 
                     b.HasIndex("SwitchId");
 
-                    b.ToTable("SwitchData", (string)null);
-
-                    b
-                        .HasAnnotation("Trigger", "\r\n                CREATE TRIGGER switchdata_change_trigger\r\n                AFTER INSERT OR UPDATE OR DELETE ON \"SwitchData\"\r\n                FOR EACH ROW EXECUTE FUNCTION notify_switchdata_change();\r\n            ")
-                        .HasAnnotation("TriggerFunction", "\r\n                CREATE OR REPLACE FUNCTION notify_switchdata_change()\r\n                RETURNS TRIGGER AS $$\r\n                BEGIN\r\n                    PERFORM pg_notify('switchdata_channel', row_to_json(NEW)::text);\r\n                    RETURN NEW;\r\n                END;\r\n                $$ LANGUAGE plpgsql;\r\n            ");
+                    b.ToTable("SwitchData");
                 });
 
             modelBuilder.Entity("garge_api.Models.UserProfile", b =>

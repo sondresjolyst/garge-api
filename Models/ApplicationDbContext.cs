@@ -12,6 +12,7 @@ namespace garge_api.Models
         public DbSet<SensorData> SensorData { get; set; }
         public DbSet<Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
+        public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -36,7 +37,37 @@ namespace garge_api.Models
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => sd.Timestamp);
 
+            modelBuilder.Entity<SwitchData>().ToTable("SwitchData");
+
             OnModelCreatingPartial(modelBuilder);
+        }
+        public void EnsureTriggers()
+        {
+            var triggerFunctionSql = @"
+        CREATE OR REPLACE FUNCTION notify_switchdata_change()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM pg_notify('switchdata_channel', row_to_json(NEW)::text);
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;";
+
+            var triggerSql = @"
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_trigger
+                WHERE tgname = 'switchdata_change_trigger'
+            ) THEN
+                CREATE TRIGGER switchdata_change_trigger
+                AFTER INSERT ON ""SwitchData""
+                FOR EACH ROW EXECUTE FUNCTION notify_switchdata_change();
+            END IF;
+        END $$;";
+
+            Database.ExecuteSqlRaw(triggerFunctionSql);
+            Database.ExecuteSqlRaw(triggerSql);
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
