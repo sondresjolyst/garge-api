@@ -2,6 +2,7 @@
 using Newtonsoft.Json;
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
+using garge_api.Models.Switch;
 
 public class PostgresNotificationService : BackgroundService
 {

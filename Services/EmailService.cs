@@ -1,7 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
-using SendGrid;
+﻿using SendGrid;
 using SendGrid.Helpers.Mail;
-using System.Threading.Tasks;
 
 public class EmailService
 {
@@ -15,7 +13,7 @@ public class EmailService
     public async Task SendEmailAsync(string email, string subject, string message)
     {
         var sendGridSettings = _configuration.GetSection("SendGridSettings").Get<SendGridSettings>();
-        var client = new SendGridClient(sendGridSettings.ApiKey);
+        var client = new SendGridClient(sendGridSettings!.ApiKey);
         var from = new EmailAddress(sendGridSettings.SenderEmail, sendGridSettings.SenderName);
         var to = new EmailAddress(email);
         var msg = MailHelper.CreateSingleEmail(from, to, subject, message, message);
@@ -29,7 +27,7 @@ public class EmailService
 
 public class SendGridSettings
 {
-    public string ApiKey { get; set; }
-    public string SenderEmail { get; set; }
-    public string SenderName { get; set; }
+    public required string ApiKey { get; set; }
+    public required string SenderEmail { get; set; }
+    public required string SenderName { get; set; }
 }

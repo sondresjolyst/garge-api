@@ -1,6 +1,6 @@
 ﻿using System.Globalization;
 using Newtonsoft.Json;
-using garge_api.Models;
+using garge_api.Models.Electricity;
 
 namespace garge_api.Services
 {

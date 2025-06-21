@@ -1,41 +1,40 @@
 ﻿using garge_api.Models;
+using garge_api.Dtos.Webhook;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
+using AutoMapper;
+using garge_api.Models.Webhook;
 
 namespace garge_api.Controllers
 {
     [ApiController]
     [Authorize]
-    [Route("api/[controller]")]
+    [Route("api/webhooks")]
     public class WebhookController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IMapper _mapper;
 
-        public WebhookController(ApplicationDbContext context)
+        public WebhookController(ApplicationDbContext context, IMapper mapper)
         {
             _context = context;
+            _mapper = mapper;
         }
 
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] WebhookSubscriptionDto webhookDto)
         {
             if (!ModelState.IsValid)
-            {
                 return BadRequest(ModelState);
-            }
 
-            var webhookSubscription = new WebhookSubscription
-            {
-                WebhookUrl = webhookDto.WebhookUrl,
-                CreatedAt = DateTime.UtcNow
-            };
+            var webhookSubscription = _mapper.Map<WebhookSubscription>(webhookDto);
+            webhookSubscription.CreatedAt = DateTime.UtcNow;
 
             _context.WebhookSubscriptions.Add(webhookSubscription);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, webhookSubscription);
+            var resultDto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
+            return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, resultDto);
         }
 
         [HttpGet("{id}")]
@@ -44,18 +43,10 @@ namespace garge_api.Controllers
             var webhookSubscription = await _context.WebhookSubscriptions.FindAsync(id);
 
             if (webhookSubscription == null)
-            {
                 return NotFound();
-            }
 
-            return Ok(webhookSubscription);
+            var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
+            return Ok(dto);
         }
-    }
-
-    public class WebhookSubscriptionDto
-    {
-        [Required]
-        [MaxLength(500)]
-        public string WebhookUrl { get; set; }
     }
 }

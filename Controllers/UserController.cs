@@ -1,3 +1,5 @@
+using AutoMapper;
+using garge_api.Dtos.User;
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
@@ -13,18 +15,20 @@ namespace garge_api.Controllers
     /// Handles user-related actions.
     /// </summary>
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/users")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
     public class UserController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly UserManager<ApplicationUser> _userManager;
+        private readonly UserManager<User> _userManager;
+        private readonly IMapper _mapper;
 
-        public UserController(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
+        public UserController(ApplicationDbContext context, UserManager<User> userManager, IMapper mapper)
         {
             _context = context;
             _userManager = userManager;
+            _mapper = mapper;
         }
 
         /// <summary>
@@ -32,7 +36,7 @@ namespace garge_api.Controllers
         /// </summary>
         /// <param name="id">The user ID.</param>
         /// <returns>An IActionResult.</returns>
-        [HttpGet("profile/{id}")]
+        [HttpGet("{id}/profile")]
         [SwaggerOperation(Summary = "Gets the user profile by ID.")]
         [SwaggerResponse(200, "User profile retrieved successfully.", typeof(UserProfile))]
         [SwaggerResponse(403, "User does not have the required role.")]
@@ -60,15 +64,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User not found!" });
             }
 
-            var profileResponse = new
-            {
-                userProfile.Id,
-                userProfile.FirstName,
-                userProfile.LastName,
-                userProfile.Email,
-                user.EmailConfirmed
-            };
-
+            var profileResponse = _mapper.Map<UserProfileDto>(userProfile);
             return Ok(profileResponse);
         }
     }

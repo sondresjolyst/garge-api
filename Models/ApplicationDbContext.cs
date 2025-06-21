@@ -1,16 +1,20 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using garge_api.Models.Admin;
+using garge_api.Models.Sensor;
+using garge_api.Models.Switch;
+using garge_api.Models.Webhook;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace garge_api.Models
 {
-    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : IdentityDbContext<ApplicationUser, IdentityRole, string>(options)
+    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : IdentityDbContext<User, IdentityRole, string>(options)
     {
         public DbSet<UserProfile> UserProfiles { get; set; }
         public DbSet<RolePermission> RolePermissions { get; set; }
-        public DbSet<Sensor> Sensors { get; set; }
+        public DbSet<Sensor.Sensor> Sensors { get; set; }
         public DbSet<SensorData> SensorData { get; set; }
-        public DbSet<Switch> Switches { get; set; }
+        public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
 
@@ -27,7 +31,7 @@ namespace garge_api.Models
                 .HasIndex(rp => new { rp.RoleName, rp.Permission })
                 .IsUnique();
 
-            modelBuilder.Entity<Sensor>()
+            modelBuilder.Entity<Sensor.Sensor>()
                 .HasIndex(s => s.Name)
                 .IsUnique();
 

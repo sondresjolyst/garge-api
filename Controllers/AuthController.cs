@@ -1,5 +1,7 @@
-﻿using garge_api.Models;
-using garge_api.Services;
+﻿using AutoMapper;
+using garge_api.Dtos.Auth;
+using garge_api.Models;
+using garge_api.Models.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
@@ -16,24 +18,32 @@ namespace garge_api.Controllers
     /// Handles authentication-related actions.
     /// </summary>
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/auth")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
     public class AuthController : ControllerBase
     {
-        private readonly UserManager<ApplicationUser> _userManager;
-        private readonly SignInManager<ApplicationUser> _signInManager;
+        private readonly UserManager<User> _userManager;
+        private readonly SignInManager<User> _signInManager;
         private readonly IConfiguration _configuration;
         private readonly ApplicationDbContext _context;
         private readonly EmailService _emailService;
+        private readonly IMapper _mapper;
 
-        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IConfiguration configuration, ApplicationDbContext context, EmailService emailService)
+        public AuthController(
+            UserManager<User> userManager,
+            SignInManager<User> signInManager,
+            IConfiguration configuration,
+            ApplicationDbContext context,
+            EmailService emailService,
+            IMapper mapper)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _configuration = configuration;
             _context = context;
             _emailService = emailService;
+            _mapper = mapper;
         }
 
         /// <summary>
@@ -60,13 +70,8 @@ namespace garge_api.Controllers
                 return Conflict(new { message = "Email is already registered!" });
             }
 
-            var user = new ApplicationUser
-            {
-                UserName = registerUserDto.UserName,
-                Email = registerUserDto.Email,
-                FirstName = registerUserDto.FirstName,
-                LastName = registerUserDto.LastName
-            };
+            // Use AutoMapper to map DTO to User
+            var user = _mapper.Map<User>(registerUserDto);
 
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
@@ -78,7 +83,7 @@ namespace garge_api.Controllers
                     Id = user.Id,
                     FirstName = user.FirstName,
                     LastName = user.LastName,
-                    Email = user.Email,
+                    Email = user.Email!,
                     User = user
                 };
                 _context.UserProfiles.Add(userProfile);
@@ -89,7 +94,7 @@ namespace garge_api.Controllers
                 user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
                 await _userManager.UpdateAsync(user);
 
-                await _emailService.SendEmailAsync(user.Email, "Confirm your email", $"Your verification code is: {verificationCode}");
+                await _emailService.SendEmailAsync(user.Email!, "Confirm your email", $"Your verification code is: {verificationCode}");
 
                 return Ok(new { message = "User registered successfully. Please check your email to confirm your account." });
             }
@@ -158,14 +163,14 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Resends the email confirmation.
+        /// Resends the email verification email.
         /// </summary>
-        /// <param name="email">The user's email.</param>
+        /// <param name="model">The user's email.</param>
         /// <returns>An IActionResult.</returns>
-        [HttpPost("resendconfirmation")]
+        [HttpPost("resend-email-verification")]
         [AllowAnonymous]
-        [SwaggerOperation(Summary = "Resends the email confirmation.")]
-        [SwaggerResponse(200, "Email confirmation sent successfully.")]
+        [SwaggerOperation(Summary = "Resends the email verification code.")]
+        [SwaggerResponse(200, "Email verification sent successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ResendEmailConfirmation([FromBody] ResendEmailConfirmationDto model)
@@ -178,7 +183,7 @@ namespace garge_api.Controllers
 
             if (user.EmailConfirmed)
             {
-                return BadRequest(new { message = "Email is already confirmed!" });
+                return BadRequest(new { message = "Email is already verified!" });
             }
 
             var verificationCode = GenerateVerificationCode();
@@ -186,23 +191,23 @@ namespace garge_api.Controllers
             user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
             await _userManager.UpdateAsync(user);
 
-            await _emailService.SendEmailAsync(user.Email, "Confirm your email", $"Your verification code is: {verificationCode}");
+            await _emailService.SendEmailAsync(user.Email!, "Verify your email", $"Your verification code is: {verificationCode}");
 
-            return Ok(new { message = "Email confirmation sent successfully. Please check your email to confirm your account." });
+            return Ok(new { message = "Email verification sent successfully. Please check your email to verify your account." });
         }
 
         /// <summary>
-        /// Confirms the email using the verification code.
+        /// Verify the email using the verification code.
         /// </summary>
         /// <param name="model">The verification data.</param>
         /// <returns>An IActionResult.</returns>
-        [HttpPost("confirmemail")]
+        [HttpPost("verify-email")]
         [AllowAnonymous]
-        [SwaggerOperation(Summary = "Confirms the email using the verification code.")]
-        [SwaggerResponse(200, "Email confirmed successfully.")]
+        [SwaggerOperation(Summary = "Verify the email using the verification code.")]
+        [SwaggerResponse(200, "Email verified successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
         [SwaggerResponse(404, "User not found.")]
-        public async Task<IActionResult> ConfirmEmail([FromBody] ConfirmEmailDto model)
+        public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto model)
         {
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
@@ -212,7 +217,7 @@ namespace garge_api.Controllers
 
             if (user.EmailConfirmed)
             {
-                return BadRequest(new { message = "Email is already confirmed!" });
+                return BadRequest(new { message = "Email is already verified!" });
             }
 
             if (user.EmailVerificationCode != model.Code || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
@@ -225,7 +230,7 @@ namespace garge_api.Controllers
             user.EmailVerificationCodeExpiration = null;
             await _userManager.UpdateAsync(user);
 
-            return Ok(new { message = "Email confirmed successfully!" });
+            return Ok(new { message = "Email verified successfully!" });
         }
 
         private string GenerateVerificationCode()
@@ -235,16 +240,5 @@ namespace garge_api.Controllers
             return new string(Enumerable.Repeat(chars, 6)
                 .Select(s => s[random.Next(s.Length)]).ToArray());
         }
-    }
-
-    public class ResendEmailConfirmationDto
-    {
-        public string Email { get; set; }
-    }
-
-    public class ConfirmEmailDto
-    {
-        public string Email { get; set; }
-        public string Code { get; set; }
     }
 }

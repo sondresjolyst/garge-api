@@ -1,4 +1,6 @@
+using garge_api.Dtos.Sensor;
 using garge_api.Models;
+using garge_api.Models.Sensor;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
@@ -7,22 +9,25 @@ using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 using System.Security.Claims;
+using AutoMapper;
 
 namespace garge_api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/sensors")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
     public class SensorController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
         private readonly RoleManager<IdentityRole> _roleManager;
+        private readonly IMapper _mapper;
 
-        public SensorController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager)
+        public SensorController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper)
         {
             _context = context;
             _roleManager = roleManager;
+            _mapper = mapper;
         }
 
         private bool UserHasRequiredRole(string sensorRole)
@@ -39,22 +44,25 @@ namespace garge_api.Controllers
         /// <returns>A list of sensors the user has access to.</returns>
         [HttpGet]
         [SwaggerOperation(Summary = "Retrieves all available sensors.")]
-        [SwaggerResponse(200, "A list of all sensors.", typeof(IEnumerable<Sensor>))]
+        [SwaggerResponse(200, "A list of all sensors.", typeof(IEnumerable<SensorDto>))]
         public async Task<IActionResult> GetAllSensors()
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
+            List<Sensor> sensors;
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) || userRoles.Contains("sensor_admin", StringComparer.OrdinalIgnoreCase))
             {
-                var allSensors = await _context.Sensors.ToListAsync();
-                return Ok(allSensors);
+                sensors = await _context.Sensors.ToListAsync();
+            }
+            else
+            {
+                sensors = await _context.Sensors
+                    .Where(sensor => userRoles.Contains(sensor.Role))
+                    .ToListAsync();
             }
 
-            var accessibleSensors = await _context.Sensors
-                .Where(sensor => userRoles.Contains(sensor.Role))
-                .ToListAsync();
-
-            return Ok(accessibleSensors);
+            var dtos = _mapper.Map<IEnumerable<SensorDto>>(sensors);
+            return Ok(dtos);
         }
 
         /// <summary>
@@ -64,23 +72,20 @@ namespace garge_api.Controllers
         /// <returns>The sensor with the specified ID.</returns>
         [HttpGet("{id}")]
         [SwaggerOperation(Summary = "Retrieves a sensor by its ID.")]
-        [SwaggerResponse(200, "The sensor with the specified ID.", typeof(Sensor))]
+        [SwaggerResponse(200, "The sensor with the specified ID.", typeof(SensorDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSensor(int id)
         {
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
-            return Ok(sensor);
+            var dto = _mapper.Map<SensorDto>(sensor);
+            return Ok(dto);
         }
 
         /// <summary>
@@ -95,24 +100,19 @@ namespace garge_api.Controllers
         /// <returns>The data for the specified sensor.</returns>
         [HttpGet("{sensorId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific sensor.")]
-        [SwaggerResponse(200, "The data for the specified sensor.", typeof(IEnumerable<SensorData>))]
+        [SwaggerResponse(200, "The data for the specified sensor.", typeof(IEnumerable<SensorDataDto>))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSensorData(int sensorId, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             var query = _context.SensorData
-                .Include(sd => sd.Sensor)
                 .Where(sd => sd.SensorId == sensorId)
                 .AsQueryable();
 
@@ -121,58 +121,39 @@ namespace garge_api.Controllers
                 var now = DateTime.UtcNow;
                 var timeSpan = ParseTimeRange(timeRange);
                 if (timeSpan.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
-                }
             }
             else
             {
                 if (startDate.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                }
-
                 if (endDate.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp <= endDate.Value);
-                }
             }
 
-            var sensorDataList = await query
-                .OrderBy(sd => sd.Timestamp)
-                .ToListAsync();
+            var sensorDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
 
+            IEnumerable<SensorDataDto> result;
             if (average)
             {
-                var groupedData = sensorDataList
+                result = sensorDataList
                     .GroupBy(sd => GetGroupingKey(sd.Timestamp, groupBy))
-                    .Select(g => new SensorData
+                    .Select(g => new SensorDataDto
                     {
                         Id = g.First().Id,
                         SensorId = sensorId,
-                        Sensor = sensor,
                         Timestamp = g.Key,
                         Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
-
-                foreach (var data in groupedData)
-                {
-                    Console.WriteLine($"Timestamp: {data.Timestamp}, Value: {data.Value}");
-                }
-
-                return Ok(groupedData);
             }
             else
             {
-                foreach (var data in sensorDataList)
-                {
-                    data.Value = Math.Round(double.Parse(data.Value), 3).ToString(CultureInfo.InvariantCulture);
-                }
-
-                return Ok(sensorDataList);
+                result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
+
+            return Ok(result);
         }
 
         /// <summary>
@@ -187,27 +168,22 @@ namespace garge_api.Controllers
         /// <returns>The data for the specified sensors.</returns>
         [HttpGet("data")]
         [SwaggerOperation(Summary = "Retrieves data for multiple sensors.")]
-        [SwaggerResponse(200, "The data for the specified sensors.", typeof(IEnumerable<SensorData>))]
+        [SwaggerResponse(200, "The data for the specified sensors.", typeof(IEnumerable<SensorDataDto>))]
         [SwaggerResponse(404, "One or more sensors not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetMultipleSensorsData([FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
         {
             var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync();
-            if (sensors.Count != sensorIds.Count)
-            {
+            if (sensors.Count() != sensorIds.Count())
                 return NotFound(new { message = "One or more sensors not found!" });
-            }
 
             foreach (var sensor in sensors)
             {
                 if (!UserHasRequiredRole(sensor.Role))
-                {
                     return Forbid();
-                }
             }
 
             var query = _context.SensorData
-                .Include(sd => sd.Sensor)
                 .Where(sd => sensorIds.Contains(sd.SensorId))
                 .AsQueryable();
 
@@ -216,70 +192,45 @@ namespace garge_api.Controllers
                 var now = DateTime.UtcNow;
                 var timeSpan = ParseTimeRange(timeRange);
                 if (timeSpan.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
-                }
             }
             else
             {
                 if (startDate.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                }
-
                 if (endDate.HasValue)
-                {
                     query = query.Where(sd => sd.Timestamp <= endDate.Value);
-                }
             }
 
-            var sensorDataList = await query
-                .OrderBy(sd => sd.Timestamp)
-                .ToListAsync();
+            var sensorDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
 
+            IEnumerable<SensorDataDto> result;
             if (average)
             {
-                var groupedData = sensorDataList
-                    .GroupBy(sd => new
-                    {
-                        sd.SensorId,
-                        Timestamp = GetGroupingKey(sd.Timestamp, groupBy)
-                    })
-                    .Select(g => new SensorData
+                result = sensorDataList
+                    .GroupBy(sd => new { sd.SensorId, Timestamp = GetGroupingKey(sd.Timestamp, groupBy) })
+                    .Select(g => new SensorDataDto
                     {
                         Id = g.First().Id,
                         SensorId = g.Key.SensorId,
-                        Sensor = sensors.First(s => s.Id == g.Key.SensorId),
                         Timestamp = g.Key.Timestamp,
                         Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
-
-                foreach (var data in groupedData)
-                {
-                    Console.WriteLine($"SensorId: {data.SensorId}, Timestamp: {data.Timestamp}, Value: {data.Value}");
-                }
-
-                return Ok(groupedData);
             }
             else
             {
-                foreach (var data in sensorDataList)
-                {
-                    data.Value = Math.Round(double.Parse(data.Value), 3).ToString(CultureInfo.InvariantCulture);
-                }
-
-                return Ok(sensorDataList);
+                result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
+
+            return Ok(result);
         }
 
         private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
         {
             if (string.IsNullOrEmpty(groupBy))
-            {
                 return timestamp;
-            }
 
             var timeSpan = ParseTimeRange(groupBy);
             if (timeSpan.HasValue)
@@ -294,17 +245,13 @@ namespace garge_api.Controllers
         private static TimeSpan? ParseTimeRange(string timeRange)
         {
             if (string.IsNullOrEmpty(timeRange) || timeRange.Length < 2)
-            {
                 return null;
-            }
 
             var value = timeRange.Substring(0, timeRange.Length - 1);
             var unit = timeRange.Substring(timeRange.Length - 1).ToLower();
 
             if (!int.TryParse(value, out var intValue))
-            {
                 return null;
-            }
 
             return unit switch
             {
@@ -324,14 +271,12 @@ namespace garge_api.Controllers
         /// <returns>The created sensor.</returns>
         [HttpPost]
         [SwaggerOperation(Summary = "Creates a new sensor.")]
-        [SwaggerResponse(201, "The created sensor.", typeof(Sensor))]
+        [SwaggerResponse(201, "The created sensor.", typeof(SensorDto))]
         [SwaggerResponse(409, "Sensor name already exists.")]
         public async Task<IActionResult> CreateSensor([FromBody] CreateSensorDto sensorDto)
         {
             if (!UserHasRequiredRole("sensor_admin"))
-            {
                 return Forbid();
-            }
 
             var sensor = new Sensor
             {
@@ -344,9 +289,7 @@ namespace garge_api.Controllers
             {
                 var roleResult = await _roleManager.CreateAsync(new IdentityRole(sensor.Role));
                 if (!roleResult.Succeeded)
-                {
                     return StatusCode(500, new { message = "Failed to create role!" });
-                }
             }
 
             _context.Sensors.Add(sensor);
@@ -359,7 +302,8 @@ namespace garge_api.Controllers
                 return Conflict(new { message = "Sensor name already exists!" });
             }
 
-            return CreatedAtAction(nameof(GetSensor), new { id = sensor.Id }, sensor);
+            var dto = _mapper.Map<SensorDto>(sensor);
+            return CreatedAtAction(nameof(GetSensor), new { id = sensor.Id }, dto);
         }
 
         /// <summary>
@@ -370,21 +314,17 @@ namespace garge_api.Controllers
         /// <returns>The created sensor data.</returns>
         [HttpPost("{sensorId}/data")]
         [SwaggerOperation(Summary = "Creates new data for a specific sensor using sensorId.")]
-        [SwaggerResponse(201, "The created sensor data.", typeof(SensorData))]
+        [SwaggerResponse(201, "The created sensor data.", typeof(SensorDataDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataById(int sensorId, [FromBody] CreateSensorDataDto sensorDataDto)
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             var sensorData = new SensorData
             {
@@ -396,12 +336,8 @@ namespace garge_api.Controllers
             _context.SensorData.Add(sensorData);
             await _context.SaveChangesAsync();
 
-            var sortedSensorData = await _context.SensorData
-                .Where(sd => sd.SensorId == sensorId)
-                .OrderBy(sd => sd.Timestamp)
-                .ToListAsync();
-
-            return CreatedAtAction(nameof(GetSensorData), new { sensorId = sensorId }, sortedSensorData);
+            var dto = _mapper.Map<SensorDataDto>(sensorData);
+            return CreatedAtAction(nameof(GetSensorData), new { sensorId }, dto);
         }
 
         /// <summary>
@@ -412,21 +348,17 @@ namespace garge_api.Controllers
         /// <returns>The created sensor data.</returns>
         [HttpPost("name/{sensorName}/data")]
         [SwaggerOperation(Summary = "Creates new data for a specific sensor using sensorName.")]
-        [SwaggerResponse(201, "The created sensor data.", typeof(SensorData))]
+        [SwaggerResponse(201, "The created sensor data.", typeof(SensorDataDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataByName(string sensorName, [FromBody] CreateSensorDataDto sensorDataDto)
         {
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             var sensorData = new SensorData
             {
@@ -438,19 +370,15 @@ namespace garge_api.Controllers
             _context.SensorData.Add(sensorData);
             await _context.SaveChangesAsync();
 
-            var sortedSensorData = await _context.SensorData
-                .Where(sd => sd.SensorId == sensor.Id)
-                .OrderBy(sd => sd.Timestamp)
-                .ToListAsync();
-
-            return CreatedAtAction(nameof(GetSensorData), new { sensorId = sensor.Id }, sortedSensorData);
+            var dto = _mapper.Map<SensorDataDto>(sensorData);
+            return CreatedAtAction(nameof(GetSensorData), new { sensorId = sensor.Id }, dto);
         }
 
         /// <summary>
         /// Updates an existing sensor.
         /// </summary>
         /// <param name="id">The ID of the sensor to update.</param>
-        /// <param name="sensor">The updated sensor data.</param>
+        /// <param name="sensorDto">The updated sensor data.</param>
         /// <returns>No content.</returns>
         [HttpPut("{id}")]
         [SwaggerOperation(Summary = "Updates an existing sensor.")]
@@ -458,27 +386,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(400, "Bad request.")]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> UpdateSensor(int id, [FromBody] Sensor sensor)
+        public async Task<IActionResult> UpdateSensor(int id, [FromBody] UpdateSensorDto sensorDto)
         {
-            if (id != sensor.Id)
-            {
-                return BadRequest();
-            }
-
             var existingSensor = await _context.Sensors.FindAsync(id);
             if (existingSensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(existingSensor.Role))
-            {
                 return Forbid();
-            }
 
-            existingSensor.Name = sensor.Name;
-            existingSensor.Type = sensor.Type;
-            existingSensor.Role = sensor.Role;
+            existingSensor.Name = sensorDto.Name;
+            existingSensor.Type = sensorDto.Type;
+            existingSensor.Role = sensorDto.Role;
 
             _context.Entry(existingSensor).State = EntityState.Modified;
             await _context.SaveChangesAsync();
@@ -500,14 +419,10 @@ namespace garge_api.Controllers
         {
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             _context.Sensors.Remove(sensor);
             await _context.SaveChangesAsync();
@@ -530,20 +445,14 @@ namespace garge_api.Controllers
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             var sensorData = await _context.SensorData.FindAsync(dataId);
             if (sensorData == null || sensorData.SensorId != sensorId)
-            {
                 return NotFound(new { message = "Sensor data not found!" });
-            }
 
             _context.SensorData.Remove(sensorData);
             await _context.SaveChangesAsync();
@@ -565,14 +474,10 @@ namespace garge_api.Controllers
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
-            {
                 return NotFound(new { message = "Sensor not found!" });
-            }
 
             if (!UserHasRequiredRole(sensor.Role))
-            {
                 return Forbid();
-            }
 
             var sensorData = _context.SensorData.Where(sd => sd.SensorId == sensorId);
             _context.SensorData.RemoveRange(sensorData);
