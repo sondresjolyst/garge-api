@@ -195,6 +195,32 @@ namespace garge_api.Controllers
             return Ok(dtos);
         }
 
+        [HttpGet("{switchId}/state")]
+        [SwaggerOperation(Summary = "Retrieves state for a specific switch.")]
+        [SwaggerResponse(200, "The state for the specified switch.", typeof(IEnumerable<SwitchDataDto>))]
+        [SwaggerResponse(404, "Switch not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> GetSwitchState(int switchId)
+        {
+            var switchEntity = await _context.Switches.FindAsync(switchId);
+            if (switchEntity == null)
+                return NotFound(new { message = "Switch not found!" });
+
+            if (!UserHasRequiredRole(switchEntity.Role))
+                return Forbid();
+
+            var query = await _context.SwitchData
+                .Where(sd => sd.SwitchId == switchId)
+                .OrderByDescending(sd => sd.Timestamp)
+                .FirstOrDefaultAsync();
+
+            if (query == null)
+                return NotFound(new { message = "No data found for this switch!" });
+
+            var dto = _mapper.Map<SwitchDataDto>(query);
+            return Ok(dto);
+        }
+
         [HttpPost("{switchId}/data")]
         [SwaggerOperation(Summary = "Creates new data for a specific switch.")]
         [SwaggerResponse(201, "The created switch data.", typeof(SwitchDataDto))]
