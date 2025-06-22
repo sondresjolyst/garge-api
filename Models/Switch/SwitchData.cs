@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace garge_api.Models
+namespace garge_api.Models.Switch
 {
     public class SwitchData
     {

@@ -14,5 +14,5 @@ public class UserProfile
     [Required]
     [MaxLength(50)]
     public required string Email { get; set; }
-    public required ApplicationUser User { get; set; }
+    public required User User { get; set; }
 }

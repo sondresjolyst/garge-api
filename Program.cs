@@ -8,12 +8,11 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
-using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
-using Microsoft.Extensions.Logging.Console;
 using garge_api.Services;
 using AspNetCoreRateLimit;
+using garge_api.Models.Admin;
 
 namespace garge_api
 {
@@ -35,6 +34,7 @@ namespace garge_api
             builder.Logging.AddFilter((category, level) =>
                 category == DbLoggerCategory.Database.Command.Name && level == LogLevel.None);
 
+            builder.Services.AddAutoMapper(typeof(MappingProfile));
             builder.Services.AddScoped<CustomDbCommandInterceptor>();
 
             builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
@@ -42,7 +42,7 @@ namespace garge_api
                        .EnableSensitiveDataLogging()
                        .AddInterceptors(serviceProvider.GetRequiredService<CustomDbCommandInterceptor>()));
 
-            builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+            builder.Services.AddIdentity<User, IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationDbContext>()
                 .AddDefaultTokenProviders();
 
@@ -173,14 +173,11 @@ namespace garge_api
                 await context.SaveChangesAsync();
             }
 
-            // if (app.Environment.IsDevelopment())
-            // {
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Garge API V1");
             });
-            // }
 
             app.UseStaticFiles();
             app.UseRouting();

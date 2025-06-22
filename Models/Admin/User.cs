@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
 
-public class ApplicationUser : IdentityUser
+public class User : IdentityUser
 {
     [Required]
     [MaxLength(50)]

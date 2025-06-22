@@ -1,4 +1,4 @@
-﻿using garge_api.Models;
+﻿using garge_api.Models.Switch;
 using Newtonsoft.Json;
 using System.Text;
 

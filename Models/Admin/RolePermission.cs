@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace garge_api.Models
+namespace garge_api.Models.Admin
 {
     public class RolePermission
     {
