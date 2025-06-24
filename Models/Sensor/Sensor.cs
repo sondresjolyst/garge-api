@@ -22,5 +22,8 @@ namespace garge_api.Models.Sensor
         [Required]
         [MaxLength(50)]
         public required string Role { get; set; }
+
+        [Required]
+        public required string RegistrationCode { get; set; }
     }
 }

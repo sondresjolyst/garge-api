@@ -264,6 +264,81 @@ namespace garge_api.Controllers
             };
         }
 
+        private async Task<string> GenerateSensorRegistrationCodeAsync(int length = 10)
+        {
+            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+            var random = new Random();
+            string code;
+            bool exists;
+
+            do
+            {
+                code = new string(Enumerable.Repeat(chars, length)
+                    .Select(s => s[random.Next(s.Length)]).ToArray());
+                exists = await _context.Sensors.AnyAsync(s => s.RegistrationCode == code);
+            } while (exists);
+
+            return code;
+        }
+
+        [HttpPost("generate-missing-codes")]
+        public async Task<IActionResult> GenerateMissingRegistrationCodes()
+        {
+            if (!UserHasRequiredRole("sensor_admin"))
+                return Forbid();
+
+            var sensorsWithoutCode = await _context.Sensors
+                .Where(s => string.IsNullOrEmpty(s.RegistrationCode))
+                .ToListAsync();
+
+            foreach (var sensor in sensorsWithoutCode)
+            {
+                string code;
+                do
+                {
+                    code = await GenerateSensorRegistrationCodeAsync();
+                }
+                while (await _context.Sensors.AnyAsync(s => s.RegistrationCode == code));
+
+                sensor.RegistrationCode = code;
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { updated = sensorsWithoutCode.Count });
+        }
+
+        /// <summary>
+        /// Claims a sensor for the current user using a registration code.
+        /// </summary>
+        /// <param name="dto">The registration code DTO.</param>
+        /// <returns>Success or error message.</returns>
+        [HttpPost("claim")]
+        [Authorize]
+        public async Task<IActionResult> ClaimSensor([FromBody] ClaimSensorDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(dto.RegistrationCode))
+                return BadRequest(new { message = "Registration code is required." });
+
+            var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.RegistrationCode == dto.RegistrationCode);
+            if (sensor == null)
+                return NotFound(new { message = "Invalid registration code." });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                return Unauthorized();
+
+            var userManager = HttpContext.RequestServices.GetRequiredService<UserManager<User>>();
+            if (!await userManager.IsInRoleAsync(user, sensor.Role))
+            {
+                var result = await userManager.AddToRoleAsync(user, sensor.Role);
+                if (!result.Succeeded)
+                    return StatusCode(500, new { message = "Failed to assign sensor role to user." });
+            }
+
+            return Ok(new { message = "Sensor successfully claimed and assigned to your account." });
+        }
+
         /// <summary>
         /// Creates a new sensor.
         /// </summary>
@@ -282,7 +357,8 @@ namespace garge_api.Controllers
             {
                 Name = sensorDto.Name,
                 Type = sensorDto.Type,
-                Role = sensorDto.Name
+                Role = sensorDto.Name,
+                RegistrationCode = await GenerateSensorRegistrationCodeAsync()
             };
 
             if (!await _roleManager.RoleExistsAsync(sensor.Role))
