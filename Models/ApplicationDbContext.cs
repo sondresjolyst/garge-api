@@ -1,4 +1,5 @@
 ﻿using garge_api.Models.Admin;
+using garge_api.Models.Auth;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
@@ -17,6 +18,7 @@ namespace garge_api.Models
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
+        public DbSet<RefreshToken> RefreshTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
