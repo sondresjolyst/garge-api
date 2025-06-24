@@ -11,6 +11,7 @@ using Swashbuckle.AspNetCore.Annotations;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace garge_api.Controllers
 {
@@ -159,7 +160,31 @@ namespace garge_api.Controllers
             var token = tokenHandler.CreateToken(tokenDescriptor);
             var tokenString = tokenHandler.WriteToken(token);
 
-            return Ok(new { token = tokenString });
+            var rawToken = GenerateRefreshToken();
+            var hashedToken = HashToken(rawToken);
+
+            // Limit to 5 active tokens per user
+            var userTokens = _context.RefreshTokens
+                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
+                .OrderBy(t => t.Created)
+                .ToList();
+            if (userTokens.Count >= 5)
+            {
+                var oldest = userTokens.First();
+                oldest.Revoked = DateTime.UtcNow;
+            }
+
+            var refreshToken = new RefreshToken
+            {
+                Token = hashedToken,
+                UserId = user.Id,
+                Expires = DateTime.UtcNow.AddMonths(6),
+                Created = DateTime.UtcNow
+            };
+            _context.RefreshTokens.Add(refreshToken);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { token = tokenString, refreshToken = rawToken });
         }
 
         /// <summary>
@@ -233,12 +258,148 @@ namespace garge_api.Controllers
             return Ok(new { message = "Email verified successfully!" });
         }
 
+        [HttpPost("refresh-token")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Refresh JWT using a valid refresh token.")]
+        [SwaggerResponse(200, "Token refreshed successfully.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        [SwaggerResponse(401, "Invalid or expired refresh token.")]
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto request)
+        {
+            var principal = GetPrincipalFromExpiredToken(request.Token);
+            if (principal == null)
+            {
+                Console.WriteLine("invalid token1");
+                return BadRequest(new { message = "Invalid token" });
+            }
+
+            var userId = principal.Claims.FirstOrDefault(x =>
+                x.Type == JwtRegisteredClaimNames.Sub ||
+                x.Type == ClaimTypes.NameIdentifier
+            )?.Value;
+            if (userId == null)
+            {
+                Console.WriteLine(userId);
+                Console.WriteLine("invalid token2");
+                return BadRequest(new { message = "Invalid token" });
+            }
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+                return Unauthorized(new { message = "User not found" });
+
+            var hashedInput = HashToken(request.RefreshToken);
+            var storedToken = _context.RefreshTokens
+                .FirstOrDefault(t => t.Token == hashedInput && t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow);
+
+            if (storedToken == null)
+                return Unauthorized(new { message = "Invalid or expired refresh token" });
+
+            // Generate new JWT and refresh token
+            var userRoles = await _userManager.GetRolesAsync(user);
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
+            var claims = new List<Claim>
+            {
+
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString() ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
+            };
+            claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
+
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.UtcNow.AddDays(7),
+                NotBefore = DateTime.UtcNow.AddSeconds(-5),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
+                Issuer = _configuration["Jwt:Issuer"],
+                Audience = _configuration["Jwt:Issuer"]
+            };
+
+            var newToken = tokenHandler.CreateToken(tokenDescriptor);
+            var newTokenString = tokenHandler.WriteToken(newToken);
+
+            // Revoke old refresh token and issue a new one
+            storedToken.Revoked = DateTime.UtcNow;
+            var newRawToken = GenerateRefreshToken();
+            var newHashedToken = HashToken(newRawToken);
+
+            // Limit to 5 active tokens per user
+            var userTokens = _context.RefreshTokens
+                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
+                .OrderBy(t => t.Created)
+                .ToList();
+            if (userTokens.Count >= 5)
+            {
+                var oldest = userTokens.First();
+                oldest.Revoked = DateTime.UtcNow;
+            }
+
+            var newRefreshToken = new RefreshToken
+            {
+                Token = newHashedToken,
+                UserId = user.Id,
+                Expires = DateTime.UtcNow.AddMonths(6),
+                Created = DateTime.UtcNow
+            };
+            _context.RefreshTokens.Add(newRefreshToken);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { token = newTokenString, refreshToken = newRawToken });
+        }
+
         private string GenerateVerificationCode()
         {
             var random = new Random();
             const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             return new string(Enumerable.Repeat(chars, 6)
                 .Select(s => s[random.Next(s.Length)]).ToArray());
+        }
+
+        private string HashToken(string token)
+        {
+            using var sha256 = SHA256.Create();
+            var bytes = Encoding.UTF8.GetBytes(token);
+            var hash = sha256.ComputeHash(bytes);
+            return Convert.ToBase64String(hash);
+        }
+
+        private string GenerateRefreshToken()
+        {
+            var randomNumber = new byte[32];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(randomNumber);
+            return Convert.ToBase64String(randomNumber);
+        }
+
+        private ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
+        {
+            var tokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateAudience = false,
+                ValidateIssuer = false,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty)),
+                ValidateLifetime = false
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            try
+            {
+                var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
+                if (securityToken is JwtSecurityToken jwtSecurityToken &&
+                    jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    return principal;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+            return null;
         }
     }
 }
