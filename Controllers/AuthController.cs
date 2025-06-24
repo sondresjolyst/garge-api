@@ -46,12 +46,12 @@ namespace garge_api.Controllers
             _mapper = mapper;
         }
 
-    /// <summary>
-    /// Registers a new user.
-    /// </summary>
-    /// <param name="registerUserDto">The registration data.</param>
-    /// <returns>An IActionResult.</returns>
-    [HttpPost("register")]
+        /// <summary>
+        /// Registers a new user.
+        /// </summary>
+        /// <param name="registerUserDto">The registration data.</param>
+        /// <returns>An IActionResult.</returns>
+        [HttpPost("register")]
         [AllowAnonymous]
         [SwaggerOperation(Summary = "Registers a new user.")]
         [SwaggerResponse(200, "User registered successfully.")]
