@@ -161,7 +161,7 @@ namespace garge_api.Controllers
             var tokenString = tokenHandler.WriteToken(token);
 
             var rawToken = GenerateRefreshToken();
-            var hashedToken = HashToken(rawToken);
+            var hashedToken = HashText(rawToken);
 
             // Limit to 5 active tokens per user
             var userTokens = _context.RefreshTokens
@@ -288,7 +288,7 @@ namespace garge_api.Controllers
             if (user == null)
                 return Unauthorized(new { message = "User not found" });
 
-            var hashedInput = HashToken(request.RefreshToken);
+            var hashedInput = HashText(request.RefreshToken);
             var storedToken = _context.RefreshTokens
                 .FirstOrDefault(t => t.Token == hashedInput && t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow);
 
@@ -324,7 +324,7 @@ namespace garge_api.Controllers
             // Revoke old refresh token and issue a new one
             storedToken.Revoked = DateTime.UtcNow;
             var newRawToken = GenerateRefreshToken();
-            var newHashedToken = HashToken(newRawToken);
+            var newHashedToken = HashText(newRawToken);
 
             // Limit to 5 active tokens per user
             var userTokens = _context.RefreshTokens
@@ -350,6 +350,61 @@ namespace garge_api.Controllers
             return Ok(new { token = newTokenString, refreshToken = newRawToken });
         }
 
+        /// <summary>
+        /// Request a password reset code via email.
+        /// </summary>
+        [HttpPost("request-password-reset")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Request a password reset code via email.")]
+        [SwaggerResponse(200, "Reset code sent.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetDto model)
+        {
+            var user = await _userManager.FindByEmailAsync(model.Email);
+            if (user == null)
+                return NotFound(new { message = "User not found!" });
+
+            var code = GenerateVerificationCode();
+            user.PasswordResetCodeHash = HashText(code);
+            user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
+            await _userManager.UpdateAsync(user);
+
+            await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", $"Your password reset code is: {code}");
+
+            return Ok(new { message = "Password reset code sent. Please check your email." });
+        }
+
+        /// <summary>
+        /// Reset password using the code sent via email.
+        /// </summary>
+        [HttpPost("reset-password")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Reset password using the code sent via email.")]
+        [SwaggerResponse(200, "Password reset successfully.")]
+        [SwaggerResponse(400, "Invalid or expired code.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto model)
+        {
+            var user = await _userManager.FindByEmailAsync(model.Email);
+            if (user == null)
+                return NotFound(new { message = "User not found!" });
+
+            if (user.PasswordResetCodeHash != HashText(model.Code) || user.PasswordResetCodeExpiration < DateTime.UtcNow)
+                return BadRequest(new { message = "Invalid or expired reset code!" });
+
+            var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
+            var result = await _userManager.ResetPasswordAsync(user, resetToken, model.NewPassword);
+
+            if (!result.Succeeded)
+                return BadRequest(result.Errors);
+
+            user.PasswordResetCodeHash = null;
+            user.PasswordResetCodeExpiration = null;
+            await _userManager.UpdateAsync(user);
+
+            return Ok(new { message = "Password reset successfully." });
+        }
+
         private string GenerateVerificationCode()
         {
             var random = new Random();
@@ -358,10 +413,10 @@ namespace garge_api.Controllers
                 .Select(s => s[random.Next(s.Length)]).ToArray());
         }
 
-        private string HashToken(string token)
+        private string HashText(string text)
         {
             using var sha256 = SHA256.Create();
-            var bytes = Encoding.UTF8.GetBytes(token);
+            var bytes = Encoding.UTF8.GetBytes(text);
             var hash = sha256.ComputeHash(bytes);
             return Convert.ToBase64String(hash);
         }

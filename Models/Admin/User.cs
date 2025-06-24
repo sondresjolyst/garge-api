@@ -11,4 +11,6 @@ public class User : IdentityUser
     public required string LastName { get; set; }
     public string? EmailVerificationCode { get; set; }
     public DateTime? EmailVerificationCodeExpiration { get; set; }
+    public string? PasswordResetCodeHash { get; set; }
+    public DateTime? PasswordResetCodeExpiration { get; set; }
 }
