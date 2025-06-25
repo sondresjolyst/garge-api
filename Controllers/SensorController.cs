@@ -10,6 +10,7 @@ using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 using System.Security.Claims;
 using AutoMapper;
+using System.Security.AccessControl;
 
 namespace garge_api.Controllers
 {
@@ -339,6 +340,40 @@ namespace garge_api.Controllers
             return Ok(new { message = "Sensor successfully claimed and assigned to your account." });
         }
 
+        private static string GenerateDefaultCustomName(string originalName)
+        {
+            var parts = originalName.Split('_');
+            if (parts.Length < 2)
+                return originalName;
+
+            var code = parts.Length >= 2 ? parts[^2] : null;
+            var type = parts.Length >= 1 ? parts[^1] : null;
+
+            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(type))
+                return originalName;
+
+            return $"Garge {code} {type}";
+        }
+
+        [HttpPost("generate-missing-default-names")]
+        public async Task<IActionResult> GenerateMissingDefaultNames()
+        {
+            if (!UserHasRequiredRole("sensor_admin"))
+                return Forbid();
+
+            var sensorsWithoutDefaultName = await _context.Sensors
+                .Where(s => string.IsNullOrEmpty(s.DefaultName))
+                .ToListAsync();
+
+            foreach (var sensor in sensorsWithoutDefaultName)
+            {
+                sensor.DefaultName = GenerateDefaultCustomName(sensor.Name);
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { updated = sensorsWithoutDefaultName.Count });
+        }
+
         /// <summary>
         /// Creates a new sensor.
         /// </summary>
@@ -353,12 +388,16 @@ namespace garge_api.Controllers
             if (!UserHasRequiredRole("sensor_admin"))
                 return Forbid();
 
+            var customName = string.IsNullOrWhiteSpace(sensorDto.CustomName) ? GenerateDefaultCustomName(sensorDto.Name) : sensorDto.CustomName;
+
             var sensor = new Sensor
             {
                 Name = sensorDto.Name,
                 Type = sensorDto.Type,
                 Role = sensorDto.Name,
-                RegistrationCode = await GenerateSensorRegistrationCodeAsync()
+                RegistrationCode = await GenerateSensorRegistrationCodeAsync(),
+                CustomName = customName,
+                DefaultName = GenerateDefaultCustomName(sensorDto.Name)
             };
 
             if (!await _roleManager.RoleExistsAsync(sensor.Role))
@@ -560,6 +599,37 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        /// <summary>
+        /// Updates the custom name of a sensor.
+        /// </summary>
+        /// <param name="id">The ID of the sensor to update.</param>
+        /// <param name="dto">The new custom name.</param>
+        /// <returns>No content if successful, or an error response.</returns>
+        [HttpPatch("{id}/custom-name")]
+        [SwaggerOperation(Summary = "Updates the custom name of a sensor.")]
+        [SwaggerResponse(204, "Custom name updated.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> UpdateCustomName(int id, [FromBody] UpdateCustomNameDto dto)
+        {
+            var sensor = await _context.Sensors.FindAsync(id);
+            if (sensor == null)
+                return NotFound(new { message = "Sensor not found!" });
+
+            if (!UserHasRequiredRole(sensor.Role))
+                return Forbid();
+
+            if (string.IsNullOrWhiteSpace(dto.CustomName) || dto.CustomName.Length > 50)
+                return BadRequest(new { message = "CustomName is required and must be at most 50 characters." });
+
+            sensor.CustomName = dto.CustomName;
+            _context.Entry(sensor).Property(s => s.CustomName).IsModified = true;
+            await _context.SaveChangesAsync();
+
+            var updatedDto = _mapper.Map<SensorDto>(sensor);
+            return Ok(updatedDto);
         }
     }
 }
