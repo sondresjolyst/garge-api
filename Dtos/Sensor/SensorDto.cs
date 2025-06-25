@@ -7,5 +7,7 @@ namespace garge_api.Dtos.Sensor
         public required string Type { get; set; }
         public required string Role { get; set; }
         public required string RegistrationCode { get; set; }
+        public string? CustomName { get; set; }
+        public required string DefaultName { get; set; }
     }
 }
