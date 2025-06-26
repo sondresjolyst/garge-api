@@ -128,7 +128,10 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The data for the specified sensor.", typeof(IEnumerable<SensorDataDto>))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSensorData(int sensorId, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
+        public async Task<IActionResult> GetSensorData(
+            int sensorId, string? timeRange, DateTime? startDate,
+            DateTime? endDate, bool average = false, string? groupBy = "minute", 
+            int pageNumber = 1, int pageSize = 100)
         {
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -156,12 +159,13 @@ namespace garge_api.Controllers
                     query = query.Where(sd => sd.Timestamp <= endDate.Value);
             }
 
-            var sensorDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
-
             IEnumerable<SensorDataDto> result;
+            int totalCount;
+
             if (average)
             {
-                result = sensorDataList
+                var grouped = query
+                    .AsEnumerable()
                     .GroupBy(sd => GetGroupingKey(sd.Timestamp, groupBy))
                     .Select(g => new SensorDataDto
                     {
@@ -172,13 +176,32 @@ namespace garge_api.Controllers
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
+
+                totalCount = grouped.Count;
+                result = grouped
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
             }
             else
             {
+                totalCount = await query.CountAsync();
+                var sensorDataList = await query
+                    .OrderBy(sd => sd.Timestamp)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync();
+
                 result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
 
-            return Ok(result);
+            return Ok(new
+            {
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                Data = result
+            });
         }
 
         /// <summary>
@@ -196,7 +219,10 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The data for the specified sensors.", typeof(IEnumerable<SensorDataDto>))]
         [SwaggerResponse(404, "One or more sensors not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetMultipleSensorsData([FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate, bool average = false, string? groupBy = "minute")
+        public async Task<IActionResult> GetMultipleSensorsData(
+            [FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate,
+            bool average = false, string? groupBy = "minute",
+            int pageNumber = 1, int pageSize = 100)
         {
             var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync();
             if (sensors.Count() != sensorIds.Count())
@@ -227,12 +253,13 @@ namespace garge_api.Controllers
                     query = query.Where(sd => sd.Timestamp <= endDate.Value);
             }
 
-            var sensorDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
-
             IEnumerable<SensorDataDto> result;
+            int totalCount;
+
             if (average)
             {
-                result = sensorDataList
+                var grouped = query
+                    .AsEnumerable()
                     .GroupBy(sd => new { sd.SensorId, Timestamp = GetGroupingKey(sd.Timestamp, groupBy) })
                     .Select(g => new SensorDataDto
                     {
@@ -243,13 +270,32 @@ namespace garge_api.Controllers
                     })
                     .OrderBy(sd => sd.Timestamp)
                     .ToList();
+
+                totalCount = grouped.Count();
+                result = grouped
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
             }
             else
             {
+                totalCount = await query.CountAsync();
+                var sensorDataList = await query
+                    .OrderBy(sd => sd.Timestamp)
+                    .Skip((pageNumber - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToListAsync();
+
                 result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
 
-            return Ok(result);
+            return Ok(new
+            {
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                Data = result
+            });
         }
 
         private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
