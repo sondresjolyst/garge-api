@@ -26,9 +26,6 @@ namespace garge_api.Models.Sensor
         [Required]
         public required string RegistrationCode { get; set; }
         
-        [MaxLength(50)]
-        public string? CustomName { get; set; }
-
         [Required]
         [MaxLength(50)]
         public required string DefaultName { get; set; }

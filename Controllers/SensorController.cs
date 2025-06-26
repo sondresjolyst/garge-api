@@ -23,6 +23,7 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
+        private static readonly List<string> AdminRoles = new() { "sensor_admin", "admin" };
 
         public SensorController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper)
         {
@@ -35,8 +36,7 @@ namespace garge_api.Controllers
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
             return userRoles.Any(role => role.Equals(sensorRole, StringComparison.OrdinalIgnoreCase)) ||
-                   userRoles.Any(role => role.Equals("sensor_admin", StringComparison.OrdinalIgnoreCase)) ||
-                   userRoles.Any(role => role.Equals("admin", StringComparison.OrdinalIgnoreCase));
+                   userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -49,9 +49,10 @@ namespace garge_api.Controllers
         public async Task<IActionResult> GetAllSensors()
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             List<Sensor> sensors;
-            if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) || userRoles.Contains("sensor_admin", StringComparer.OrdinalIgnoreCase))
+            if (userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase)))
             {
                 sensors = await _context.Sensors.ToListAsync();
             }
@@ -62,7 +63,20 @@ namespace garge_api.Controllers
                     .ToListAsync();
             }
 
-            var dtos = _mapper.Map<IEnumerable<SensorDto>>(sensors);
+            // Fetch all custom names for the current user
+            var customNames = await _context.UserSensorCustomNames
+                .Where(x => x.UserId == currentUserId)
+                .ToDictionaryAsync(x => x.SensorId, x => x.CustomName);
+
+            // Map sensors and inject the user-specific custom name
+            var dtos = sensors.Select(sensor =>
+            {
+                var dto = _mapper.Map<SensorDto>(sensor);
+                if (customNames.TryGetValue(sensor.Id, out var customName))
+                    dto.CustomName = customName;
+                return dto;
+            }).ToList();
+
             return Ok(dtos);
         }
 
@@ -86,6 +100,16 @@ namespace garge_api.Controllers
                 return Forbid();
 
             var dto = _mapper.Map<SensorDto>(sensor);
+
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var customName = await _context.UserSensorCustomNames
+                .Where(x => x.UserId == currentUserId && x.SensorId == id)
+                .Select(x => x.CustomName)
+                .FirstOrDefaultAsync();
+
+            if (!string.IsNullOrEmpty(customName))
+                dto.CustomName = customName;
+
             return Ok(dto);
         }
 
@@ -340,7 +364,7 @@ namespace garge_api.Controllers
             return Ok(new { message = "Sensor successfully claimed and assigned to your account." });
         }
 
-        private static string GenerateDefaultCustomName(string originalName)
+        private static string GenerateDefaultName(string originalName)
         {
             var parts = originalName.Split('_');
             if (parts.Length < 2)
@@ -367,7 +391,7 @@ namespace garge_api.Controllers
 
             foreach (var sensor in sensorsWithoutDefaultName)
             {
-                sensor.DefaultName = GenerateDefaultCustomName(sensor.Name);
+                sensor.DefaultName = GenerateDefaultName(sensor.Name);
             }
 
             await _context.SaveChangesAsync();
@@ -388,16 +412,13 @@ namespace garge_api.Controllers
             if (!UserHasRequiredRole("sensor_admin"))
                 return Forbid();
 
-            var customName = string.IsNullOrWhiteSpace(sensorDto.CustomName) ? GenerateDefaultCustomName(sensorDto.Name) : sensorDto.CustomName;
-
             var sensor = new Sensor
             {
                 Name = sensorDto.Name,
                 Type = sensorDto.Type,
                 Role = sensorDto.Name,
                 RegistrationCode = await GenerateSensorRegistrationCodeAsync(),
-                CustomName = customName,
-                DefaultName = GenerateDefaultCustomName(sensorDto.Name)
+                DefaultName = GenerateDefaultName(sensorDto.Name)
             };
 
             if (!await _roleManager.RoleExistsAsync(sensor.Role))
@@ -604,32 +625,73 @@ namespace garge_api.Controllers
         /// <summary>
         /// Updates the custom name of a sensor.
         /// </summary>
-        /// <param name="id">The ID of the sensor to update.</param>
+        /// <param name="sensorId">The ID of the sensor to update.</param>
         /// <param name="dto">The new custom name.</param>
-        /// <returns>No content if successful, or an error response.</returns>
-        [HttpPatch("{id}/custom-name")]
-        [SwaggerOperation(Summary = "Updates the custom name of a sensor.")]
-        [SwaggerResponse(204, "Custom name updated.")]
+        /// <returns>The custom name data.</returns>
+        [HttpPatch("{sensorId}/custom-name")]
+        [SwaggerOperation(Summary = "Updates the custom name of a sensor for a user.")]
+        [SwaggerResponse(200, "Custom name updated.", typeof(UserSensorCustomNameDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> UpdateCustomName(int id, [FromBody] UpdateCustomNameDto dto)
+        public async Task<IActionResult> UpdateCustomName(
+            int sensorId,
+            [FromBody] UpdateCustomNameDto dto,
+            [FromQuery] string? userId = null)
         {
-            var sensor = await _context.Sensors.FindAsync(id);
+            var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
                 return NotFound(new { message = "Sensor not found!" });
 
             if (!UserHasRequiredRole(sensor.Role))
                 return Forbid();
 
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var isSensorAdmin = User.Claims
+                .Where(c => c.Type == ClaimTypes.Role)
+                .Select(c => c.Value)
+                .Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
+            var targetUserId = userId ?? currentUserId;
+
+            if (!isSensorAdmin && targetUserId != currentUserId)
+                return Forbid();
+
+            if (string.IsNullOrEmpty(targetUserId))
+                return Unauthorized();
+
             if (string.IsNullOrWhiteSpace(dto.CustomName) || dto.CustomName.Length > 50)
                 return BadRequest(new { message = "CustomName is required and must be at most 50 characters." });
 
-            sensor.CustomName = dto.CustomName;
-            _context.Entry(sensor).Property(s => s.CustomName).IsModified = true;
+            var entry = await _context.UserSensorCustomNames
+                .FirstOrDefaultAsync(x => x.UserId == targetUserId && x.SensorId == sensorId);
+
+            if (entry == null)
+            {
+                entry = new UserSensorCustomName
+                {
+                    UserId = targetUserId,
+                    SensorId = sensorId,
+                    CustomName = dto.CustomName,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.UserSensorCustomNames.Add(entry);
+            }
+            else
+            {
+                entry.CustomName = dto.CustomName;
+                _context.Entry(entry).Property(x => x.CustomName).IsModified = true;
+            }
+
             await _context.SaveChangesAsync();
 
-            var updatedDto = _mapper.Map<SensorDto>(sensor);
-            return Ok(updatedDto);
+            var resultDto = new UserSensorCustomNameDto
+            {
+                UserId = entry.UserId,
+                SensorId = entry.SensorId,
+                CustomName = entry.CustomName,
+                CreatedAt = entry.CreatedAt
+            };
+
+            return Ok(resultDto);
         }
     }
 }
