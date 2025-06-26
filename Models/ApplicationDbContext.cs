@@ -19,6 +19,8 @@ namespace garge_api.Models
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
+        public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
+
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -43,7 +45,21 @@ namespace garge_api.Models
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => sd.Timestamp);
 
-            modelBuilder.Entity<SwitchData>().ToTable("SwitchData");
+            modelBuilder.Entity<SwitchData>()
+                .ToTable("SwitchData");
+
+            modelBuilder.Entity<UserSensorCustomName>()
+                .HasKey(x => new { x.UserId, x.SensorId });
+
+            modelBuilder.Entity<UserSensorCustomName>()
+                .HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId);
+
+            modelBuilder.Entity<UserSensorCustomName>()
+                .HasOne(x => x.Sensor)
+                .WithMany()
+                .HasForeignKey(x => x.SensorId);
 
             OnModelCreatingPartial(modelBuilder);
         }
