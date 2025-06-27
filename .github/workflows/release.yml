@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write # Required to update changelog file
   pull-requests: write # Required to create release PRs
+  issues: write
 
 jobs:
   release-please:
