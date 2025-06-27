@@ -1,0 +1,38 @@
+﻿name: 🔨 Build and Push Docker Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - development
+      - main
+    tags:
+      - '*'
+
+permissions:
+  contents: read
+
+jobs:
+  dev:
+    if: github.ref == 'refs/heads/development'
+    uses: equinor/ops-actions/.github/workflows/docker.yml@7250ebf9722b3e8ed96a427b36f8eb2df7512e81
+    secrets:
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    with:
+      environment: dev
+      registry: registry.hub.docker.com
+      username: sondresjo
+      repository: sondresjo/garge-api
+      tag: dev
+
+  prod:
+    if: startsWith(github.ref, 'refs/tags/') && github.base_ref == 'refs/heads/main'
+    uses: equinor/ops-actions/.github/workflows/docker.yml@7250ebf9722b3e8ed96a427b36f8eb2df7512e81
+    secrets:
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    with:
+      environment: prod
+      registry: registry.hub.docker.com
+      username: sondresjo
+      repository: sondresjo/garge-api
+      tag: ${{ github.ref_name }}
