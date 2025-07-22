@@ -20,7 +20,8 @@ namespace garge_api.Models
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
-
+        public DbSet<Product> Products { get; set; }
+        public DbSet<Subscription> Subscriptions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

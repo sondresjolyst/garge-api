@@ -2,10 +2,13 @@
 using garge_api.Dtos.Admin;
 using garge_api.Dtos.Auth;
 using garge_api.Dtos.Electricity;
+using garge_api.Dtos.Product;
 using garge_api.Dtos.Sensor;
+using garge_api.Dtos.Subscription;
 using garge_api.Dtos.Switch;
 using garge_api.Dtos.User;
 using garge_api.Dtos.Webhook;
+using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Electricity;
 using garge_api.Models.Sensor;
@@ -49,5 +52,14 @@ public class MappingProfile : Profile
         // Webhook mappings
         CreateMap<WebhookSubscription, WebhookSubscriptionDto>().ReverseMap();
 
+        // Product mappings
+        CreateMap<Product, ProductDto>().ReverseMap();
+        CreateMap<CreateProductDto, Product>();
+        CreateMap<UpdateProductDto, Product>();
+
+        // Subscription mappings
+        CreateMap<Subscription, SubscriptionDto>().ReverseMap();
+        CreateMap<CreateSubscriptionDto, Subscription>();
+        CreateMap<UpdateSubscriptionDto, Subscription>();
     }
 }
