@@ -9,6 +9,7 @@ using Npgsql;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -58,7 +59,10 @@ namespace garge_api.Controllers
         [HttpPost("user")]
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
-            _logger.LogInformation("CreateUser called by {User} for Username={Username}, IsSuperuser={IsSuperuser}", User.Identity?.Name, dto.Username, dto.IsSuperuser);
+            _logger.LogInformation("CreateUser called by {User} for Username={Username}, IsSuperuser={IsSuperuser}",
+                User.Identity?.Name,
+                LogSanitizer.Sanitize(dto.Username),
+                dto.IsSuperuser);
 
             if (!UserHasRequiredRole())
             {
@@ -68,7 +72,7 @@ namespace garge_api.Controllers
 
             if (await _context.EMQXMqttUsers.AnyAsync(u => u.Username == dto.Username))
             {
-                _logger.LogWarning("CreateUser conflict: Username {Username} already exists", dto.Username);
+                _logger.LogWarning("CreateUser conflict: Username {Username} already exists", LogSanitizer.Sanitize(dto.Username));
                 return Conflict(new { message = "Username already exists." });
             }
 
@@ -86,7 +90,7 @@ namespace garge_api.Controllers
             _context.EMQXMqttUsers.Add(user);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("EMQX MQTT user created: Id={Id}, Username={Username}", user.Id, user.Username);
+            _logger.LogInformation("EMQX MQTT user created: Id={Id}, Username={Username}", user.Id, LogSanitizer.Sanitize(user.Username));
             return Ok(new { user.Id, user.Username });
         }
 
@@ -102,7 +106,13 @@ namespace garge_api.Controllers
         public async Task<IActionResult> CreateAcl([FromBody] CreateEMQXMqttAclDto dto)
         {
             _logger.LogInformation("CreateAcl called by {User} for Username={Username}, Permission={Permission}, Action={Action}, Topic={Topic}, Qos={Qos}, Retain={Retain}",
-                User.Identity?.Name, dto.Username, dto.Permission, dto.Action, dto.Topic, dto.Qos, dto.Retain);
+                User.Identity?.Name,
+                LogSanitizer.Sanitize(dto.Username),
+                LogSanitizer.Sanitize(dto.Permission),
+                LogSanitizer.Sanitize(dto.Action),
+                LogSanitizer.Sanitize(dto.Topic),
+                dto.Qos,
+                dto.Retain);
 
             if (!UserHasRequiredRole())
             {
@@ -112,7 +122,7 @@ namespace garge_api.Controllers
 
             if (!await _context.EMQXMqttUsers.AnyAsync(u => u.Username == dto.Username))
             {
-                _logger.LogWarning("CreateAcl user not found: {Username}", dto.Username);
+                _logger.LogWarning("CreateAcl user not found: {Username}", LogSanitizer.Sanitize(dto.Username));
                 return NotFound(new { message = "User not found." });
             }
 
@@ -131,12 +141,17 @@ namespace garge_api.Controllers
             try
             {
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("ACL created: Id={Id}, Username={Username}, Topic={Topic}", acl.Id, acl.Username, acl.Topic);
+                _logger.LogInformation("ACL created: Id={Id}, Username={Username}, Topic={Topic}",
+                    acl.Id,
+                    LogSanitizer.Sanitize(acl.Username),
+                    LogSanitizer.Sanitize(acl.Topic));
                 return Ok(new { acl.Id });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
             {
-                _logger.LogWarning("CreateAcl conflict: Duplicate ACL for Username={Username}, Topic={Topic}", dto.Username, dto.Topic);
+                _logger.LogWarning("CreateAcl conflict: Duplicate ACL for Username={Username}, Topic={Topic}",
+                    LogSanitizer.Sanitize(dto.Username),
+                    LogSanitizer.Sanitize(dto.Topic));
                 return Conflict(new
                 {
                     message = "ACL already exists for this user/topic/action/permission/qos/retain."
@@ -144,7 +159,8 @@ namespace garge_api.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error while creating ACL for Username={Username}", dto.Username);
+                _logger.LogError(ex, "Unexpected error while creating ACL for Username={Username}",
+                    LogSanitizer.Sanitize(dto.Username));
                 return StatusCode(500, new { message = "An unexpected error occurred while creating the ACL." });
             }
         }
@@ -158,7 +174,11 @@ namespace garge_api.Controllers
         public async Task<IActionResult> PostDiscoveredDevice([FromBody] CreateDiscoveredDeviceDto dto)
         {
             _logger.LogInformation("PostDiscoveredDevice called by {User} for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}, Timestamp={Timestamp}",
-                User.Identity?.Name, dto.DiscoveredBy, dto.Target, dto.Type, dto.Timestamp);
+                User.Identity?.Name,
+                LogSanitizer.Sanitize(dto.DiscoveredBy),
+                LogSanitizer.Sanitize(dto.Target),
+                LogSanitizer.Sanitize(dto.Type),
+                dto.Timestamp);
 
             if (!UserHasRequiredRole())
             {
@@ -178,17 +198,27 @@ namespace garge_api.Controllers
             {
                 _context.DiscoveredDevices.Add(device);
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Discovered device created: Id={Id}, DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}", device.Id, device.DiscoveredBy, device.Target, device.Type);
+                _logger.LogInformation("Discovered device created: Id={Id}, DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}",
+                    device.Id,
+                    LogSanitizer.Sanitize(device.DiscoveredBy),
+                    LogSanitizer.Sanitize(device.Target),
+                    LogSanitizer.Sanitize(device.Type));
                 return Ok(new { device.Id });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
             {
-                _logger.LogWarning("PostDiscoveredDevice conflict: Device already exists for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}", dto.DiscoveredBy, dto.Target, dto.Type);
+                _logger.LogWarning("PostDiscoveredDevice conflict: Device already exists for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}",
+                    LogSanitizer.Sanitize(dto.DiscoveredBy),
+                    LogSanitizer.Sanitize(dto.Target),
+                    LogSanitizer.Sanitize(dto.Type));
                 return Conflict(new { message = "Discovered device already exists for this combination." });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error while creating the discovered device for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}", dto.DiscoveredBy, dto.Target, dto.Type);
+                _logger.LogError(ex, "Unexpected error while creating the discovered device for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}",
+                    LogSanitizer.Sanitize(dto.DiscoveredBy),
+                    LogSanitizer.Sanitize(dto.Target),
+                    LogSanitizer.Sanitize(dto.Type));
                 return StatusCode(500, new { message = "An unexpected error occurred while creating the discovered device." });
             }
         }

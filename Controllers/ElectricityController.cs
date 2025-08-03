@@ -38,7 +38,11 @@ namespace garge_api.Controllers
         public async Task<IActionResult> GetPrices([FromQuery] string type, [FromQuery] string area, [FromQuery] DateTime? date, [FromQuery] string currency = "NOK")
         {
             _logger.LogInformation("GetPrices called by {User} with type={Type}, area={Area}, date={Date}, currency={Currency}",
-                User.Identity?.Name, type, area, date, currency);
+                User.Identity?.Name,
+                LogSanitizer.Sanitize(type),
+                LogSanitizer.Sanitize(area),
+                date,
+                LogSanitizer.Sanitize(currency));
 
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
@@ -47,30 +51,42 @@ namespace garge_api.Controllers
 
             if (!hasAccess)
             {
-                _logger.LogWarning("Access denied for user {User}. Roles: {Roles}", User.Identity?.Name, string.Join(",", userRoles));
+                _logger.LogWarning("Access denied for user {User}. Roles: {Roles}", User.Identity?.Name, LogSanitizer.Sanitize(string.Join(",", userRoles)));
                 return Forbid();
             }
 
             if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(area))
             {
-                _logger.LogWarning("Bad request: Missing type or area. type={Type}, area={Area}", type, area);
+                _logger.LogWarning("Bad request: Missing type or area. type={Type}, area={Area}", LogSanitizer.Sanitize(type), LogSanitizer.Sanitize(area));
                 return BadRequest("Type and area parameters are required.");
             }
 
             var areas = new List<string> { area };
-            _logger.LogInformation("Fetching prices from NordPoolService for type={Type}, area={Area}, date={Date}, currency={Currency}", type, area, date, currency);
+            _logger.LogInformation("Fetching prices from NordPoolService for type={Type}, area={Area}, date={Date}, currency={Currency}",
+                LogSanitizer.Sanitize(type),
+                LogSanitizer.Sanitize(area),
+                date,
+                LogSanitizer.Sanitize(currency));
 
             var data = await _nordPoolService.FetchPricesAsync(type.ToUpper(), date, areas, currency);
 
             if (data == null)
             {
-                _logger.LogWarning("No price data found for type={Type}, area={Area}, date={Date}, currency={Currency}", type, area, date, currency);
+                _logger.LogWarning("No price data found for type={Type}, area={Area}, date={Date}, currency={Currency}",
+                    LogSanitizer.Sanitize(type),
+                    LogSanitizer.Sanitize(area),
+                    date,
+                    LogSanitizer.Sanitize(currency));
                 return NotFound(new { message = "No price data found." });
             }
 
             var dto = _mapper.Map<PriceResponseDto>(data);
 
-            _logger.LogInformation("Returning price data for type={Type}, area={Area}, date={Date}, currency={Currency}", type, area, date, currency);
+            _logger.LogInformation("Returning price data for type={Type}, area={Area}, date={Date}, currency={Currency}",
+                LogSanitizer.Sanitize(type),
+                LogSanitizer.Sanitize(area),
+                date,
+                LogSanitizer.Sanitize(currency));
             return Ok(dto);
         }
     }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using AutoMapper;
 using garge_api.Models.Webhook;
+using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -31,11 +32,11 @@ namespace garge_api.Controllers
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] WebhookSubscriptionDto webhookDto)
         {
-            _logger.LogInformation("AddWebhook called by {User} with WebhookUrl={WebhookUrl}", User.Identity?.Name, webhookDto.WebhookUrl);
+            _logger.LogInformation("AddWebhook called by {User}", User.Identity?.Name);
 
             if (!ModelState.IsValid)
             {
-                _logger.LogWarning("AddWebhook failed: Invalid model state for WebhookUrl={WebhookUrl}", webhookDto.WebhookUrl);
+                _logger.LogWarning("AddWebhook failed: Invalid model state for WebhookUrl domain={Domain}", LogSanitizer.MaskUrlDomain(webhookDto.WebhookUrl));
                 return BadRequest(ModelState);
             }
 
@@ -47,7 +48,7 @@ namespace garge_api.Controllers
 
             var resultDto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription created: Id={Id}, WebhookUrl={WebhookUrl}", webhookSubscription.Id, webhookSubscription.WebhookUrl);
+            _logger.LogInformation("Webhook subscription created: Id={Id}, Domain={Domain}", webhookSubscription.Id, LogSanitizer.MaskUrlDomain(webhookSubscription.WebhookUrl));
             return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, resultDto);
         }
 
@@ -71,7 +72,7 @@ namespace garge_api.Controllers
 
             var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription returned: Id={Id}, WebhookUrl={WebhookUrl}", webhookSubscription.Id, webhookSubscription.WebhookUrl);
+            _logger.LogInformation("Webhook subscription returned: Id={Id}, Domain={Domain}", webhookSubscription.Id, LogSanitizer.MaskUrlDomain(webhookSubscription.WebhookUrl));
             return Ok(dto);
         }
     }
