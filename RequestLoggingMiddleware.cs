@@ -13,11 +13,11 @@
 
         public async Task InvokeAsync(HttpContext context)
         {
-            _logger.LogInformation("Incoming Request: {Method} {Path}", context.Request.Method, context.Request.Path);
+            _logger.LogInformation("Incoming Request {@LogData}", new { Method = context.Request.Method, Path = context.Request.Path });
 
             foreach (var header in context.Request.Headers)
             {
-                _logger.LogDebug("Header: {Key}: {Value}", header.Key, header.Value.ToString());
+                _logger.LogDebug("Header {@LogData}", new { Key = header.Key, Value = header.Value.ToString() });
             }
 
             await _next(context);
