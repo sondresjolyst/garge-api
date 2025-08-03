@@ -13,6 +13,7 @@ using System.Data.Common;
 using garge_api.Services;
 using AspNetCoreRateLimit;
 using garge_api.Models.Admin;
+using Serilog;
 
 namespace garge_api
 {
@@ -21,19 +22,28 @@ namespace garge_api
         public static async Task Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            Log.Logger = new LoggerConfiguration()
+                .WriteTo.Console()
+                .Enrich.FromLogContext()
+                .ReadFrom.Configuration(builder.Configuration)
+                .CreateLogger();
+
+            builder.Host.UseSerilog();
+
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
             var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
             builder.Configuration.AddEnvironmentVariables();
 
-            builder.Logging.ClearProviders();
-            builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
-            builder.Logging.AddSimpleConsole(options =>
-            {
-                options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
-                options.IncludeScopes = false; // disables the extra scope/tracing info
-                options.SingleLine = true;
-            });
-            builder.Logging.AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.None);
+            //builder.Logging.ClearProviders();
+            //builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
+            //builder.Logging.AddSimpleConsole(options =>
+            //{
+            //    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+            //    options.IncludeScopes = false; // disables the extra scope/tracing info
+            //    options.SingleLine = true;
+            //});
+            //builder.Logging.AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.None);
 
             builder.Services.AddAutoMapper(typeof(MappingProfile));
             builder.Services.AddScoped<CustomDbCommandInterceptor>();
