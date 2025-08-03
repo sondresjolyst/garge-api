@@ -9,6 +9,7 @@ using Npgsql;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Swashbuckle.AspNetCore.Annotations;
 
 namespace garge_api.Controllers
 {
@@ -50,7 +51,16 @@ namespace garge_api.Controllers
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
+        /// <summary>
+        /// Creates a new EMQX MQTT user.
+        /// </summary>
+        /// <param name="dto">The user creation data.</param>
+        /// <returns>The created user ID and username.</returns>
         [HttpPost("user")]
+        [SwaggerOperation(Summary = "Creates a new EMQX MQTT user.")]
+        [SwaggerResponse(200, "User created successfully.")]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(409, "Username already exists.")]
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
             _logger.LogInformation("CreateUser called by {@LogData}", new { User = User.Identity?.Name, dto.Username, dto.IsSuperuser });
@@ -85,7 +95,17 @@ namespace garge_api.Controllers
             return Ok(new { user.Id, user.Username });
         }
 
+        /// <summary>
+        /// Creates a new EMQX MQTT ACL entry.
+        /// </summary>
+        /// <param name="dto">The ACL creation data.</param>
+        /// <returns>The created ACL ID.</returns>
         [HttpPost("acl")]
+        [SwaggerOperation(Summary = "Creates a new EMQX MQTT ACL entry.")]
+        [SwaggerResponse(200, "ACL created successfully.")]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        [SwaggerResponse(409, "ACL already exists for this combination.")]
         public async Task<IActionResult> CreateAcl([FromBody] CreateEMQXMqttAclDto dto)
         {
             _logger.LogInformation("CreateAcl called by {@LogData}", new
@@ -126,12 +146,12 @@ namespace garge_api.Controllers
             try
             {
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("ACL created: {@LogData}", new { Id = acl.Id, Username = acl.Username, Topic = acl.Topic });
+                _logger.LogInformation("ACL created: {@LogData}", new { acl.Id, acl.Username, acl.Topic });
                 return Ok(new { acl.Id });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
             {
-                _logger.LogWarning("CreateAcl conflict: Duplicate ACL for {@LogData}", new { Username = dto.Username, Topic = dto.Topic });
+                _logger.LogWarning("CreateAcl conflict: Duplicate ACL for {@LogData}", new { dto.Username, dto.Topic });
                 return Conflict(new
                 {
                     message = "ACL already exists for this user/topic/action/permission/qos/retain."
@@ -139,12 +159,21 @@ namespace garge_api.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error while creating ACL for {@LogData}", new { Username = dto.Username });
+                _logger.LogError(ex, "Unexpected error while creating ACL for {@LogData}", new { dto.Username });
                 return StatusCode(500, new { message = "An unexpected error occurred while creating the ACL." });
             }
         }
 
+        /// <summary>
+        /// Registers a discovered device.
+        /// </summary>
+        /// <param name="dto">The discovered device data.</param>
+        /// <returns>The created device ID.</returns>
         [HttpPost("discovered-device")]
+        [SwaggerOperation(Summary = "Registers a discovered device.")]
+        [SwaggerResponse(200, "Device registered successfully.")]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(409, "Device already exists for this combination.")]
         public async Task<IActionResult> PostDiscoveredDevice([FromBody] CreateDiscoveredDeviceDto dto)
         {
             _logger.LogInformation("PostDiscoveredDevice called by {@LogData}", new

@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 using AutoMapper;
 using garge_api.Models.Admin;
-using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -46,22 +45,22 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Role already exists.")]
         public async Task<IActionResult> CreateRole([FromBody] RoleDto dto)
         {
-            _logger.LogInformation("CreateRole called with Name={RoleName} by {User}", LogSanitizer.Sanitize(dto.Name), User.Identity?.Name);
+            _logger.LogInformation("CreateRole called with {@LogData}", new { dto.Name, User = User.Identity?.Name });
 
             if (await _roleManager.RoleExistsAsync(dto.Name))
             {
-                _logger.LogWarning("Role creation failed: Role {RoleName} already exists", LogSanitizer.Sanitize(dto.Name));
+                _logger.LogWarning("Role creation failed: {@LogData} already exists", new { dto.Name });
                 return Conflict(new { message = "Role already exists!" });
             }
 
             var result = await _roleManager.CreateAsync(new IdentityRole(dto.Name));
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role {RoleName} created successfully by {User}", LogSanitizer.Sanitize(dto.Name), User.Identity?.Name);
+                _logger.LogInformation("Role created: {@LogData}", new { dto.Name, User = User.Identity?.Name });
                 return CreatedAtAction(nameof(GetRole), new { roleName = dto.Name }, dto);
             }
 
-            _logger.LogError("Role creation failed for {RoleName}: {Errors}", LogSanitizer.Sanitize(dto.Name), result.Errors);
+            _logger.LogError("Role creation failed for {@LogData}: {@Errors}", new { dto.Name }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -74,7 +73,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Roles retrieved successfully.", typeof(IEnumerable<RoleDto>))]
         public IActionResult GetRoles()
         {
-            _logger.LogInformation("GetRoles called by {User}", User.Identity?.Name);
+            _logger.LogInformation("GetRoles called by {@LogData}", new { User = User.Identity?.Name });
 
             var roles = _roleManager.Roles.ToList();
             var dtos = _mapper.Map<IEnumerable<RoleDto>>(roles);
@@ -92,12 +91,12 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> GetRole(string roleName)
         {
-            _logger.LogInformation("GetRole called for {RoleName} by {User}", LogSanitizer.Sanitize(roleName), User.Identity?.Name);
+            _logger.LogInformation("GetRole called for {@LogData}", new { roleName, User = User.Identity?.Name });
 
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
             {
-                _logger.LogWarning("Role {RoleName} not found", LogSanitizer.Sanitize(roleName));
+                _logger.LogWarning("Role not found: {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
             }
 
@@ -116,23 +115,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> DeleteRole(string roleName)
         {
-            _logger.LogInformation("DeleteRole called for {RoleName} by {User}", LogSanitizer.Sanitize(roleName), User.Identity?.Name);
+            _logger.LogInformation("DeleteRole called for {@LogData}", new { roleName, User = User.Identity?.Name });
 
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
             {
-                _logger.LogWarning("DeleteRole failed: Role {RoleName} not found", LogSanitizer.Sanitize(roleName));
+                _logger.LogWarning("DeleteRole failed: Role not found {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
             }
 
             var result = await _roleManager.DeleteAsync(role);
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role {RoleName} deleted by {User}", LogSanitizer.Sanitize(roleName), User.Identity?.Name);
+                _logger.LogInformation("Role deleted: {@LogData}", new { roleName, User = User.Identity?.Name });
                 return NoContent();
             }
 
-            _logger.LogError("DeleteRole failed for {RoleName}: {Errors}", LogSanitizer.Sanitize(roleName), result.Errors);
+            _logger.LogError("DeleteRole failed for {@LogData}: {@Errors}", new { roleName }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -148,23 +147,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> AssignRole([FromRoute] string roleName, [FromQuery] string userEmail)
         {
-            _logger.LogInformation("AssignRole called: Role={RoleName}, UserEmail={UserEmail} by {User}", LogSanitizer.Sanitize(roleName), LogSanitizer.Sanitize(userEmail), User.Identity?.Name);
+            _logger.LogInformation("AssignRole called: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
 
             var user = await _userManager.FindByEmailAsync(userEmail);
             if (user == null)
             {
-                _logger.LogWarning("AssignRole failed: User {UserEmail} not found", LogSanitizer.Sanitize(userEmail));
+                _logger.LogWarning("AssignRole failed: User not found {@LogData}", new { userEmail });
                 return NotFound(new { message = "User not found!" });
             }
 
             var result = await _userManager.AddToRoleAsync(user, roleName);
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role {RoleName} assigned to {UserEmail} by {User}", LogSanitizer.Sanitize(roleName), LogSanitizer.Sanitize(userEmail), User.Identity?.Name);
+                _logger.LogInformation("Role assigned: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
                 return Ok(new { message = "Role assigned successfully!" });
             }
 
-            _logger.LogError("AssignRole failed for {UserEmail}: {Errors}", LogSanitizer.Sanitize(userEmail), result.Errors);
+            _logger.LogError("AssignRole failed for {@LogData}: {@Errors}", new { userEmail }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -180,23 +179,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> RemoveRole([FromRoute] string roleName, [FromQuery] string userEmail)
         {
-            _logger.LogInformation("RemoveRole called: Role={RoleName}, UserEmail={UserEmail} by {User}", LogSanitizer.Sanitize(roleName), LogSanitizer.Sanitize(userEmail), User.Identity?.Name);
+            _logger.LogInformation("RemoveRole called: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
 
             var user = await _userManager.FindByEmailAsync(userEmail);
             if (user == null)
             {
-                _logger.LogWarning("RemoveRole failed: User {UserEmail} not found", LogSanitizer.Sanitize(userEmail));
+                _logger.LogWarning("RemoveRole failed: User not found {@LogData}", new { userEmail });
                 return NotFound(new { message = "User not found!" });
             }
 
             var result = await _userManager.RemoveFromRoleAsync(user, roleName);
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role {RoleName} removed from {UserEmail} by {User}", LogSanitizer.Sanitize(roleName), LogSanitizer.Sanitize(userEmail), User.Identity?.Name);
+                _logger.LogInformation("Role removed: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
                 return NoContent();
             }
 
-            _logger.LogError("RemoveRole failed for {UserEmail}: {Errors}", LogSanitizer.Sanitize(userEmail), result.Errors);
+            _logger.LogError("RemoveRole failed for {@LogData}: {@Errors}", new { userEmail }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -209,7 +208,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Users retrieved successfully.", typeof(IEnumerable<UserDto>))]
         public IActionResult GetUsers()
         {
-            _logger.LogInformation("GetUsers called by {User}", User.Identity?.Name);
+            _logger.LogInformation("GetUsers called by {@LogData}", new { User = User.Identity?.Name });
 
             var users = _userManager.Users.ToList();
             var dtos = _mapper.Map<IEnumerable<UserDto>>(users);
@@ -227,23 +226,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> DeleteUser(string id)
         {
-            _logger.LogInformation("DeleteUser called for Id={UserId} by {User}", LogSanitizer.Sanitize(id), User.Identity?.Name);
+            _logger.LogInformation("DeleteUser called for {@LogData}", new { id, User = User.Identity?.Name });
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null)
             {
-                _logger.LogWarning("DeleteUser failed: User {UserId} not found", LogSanitizer.Sanitize(id));
+                _logger.LogWarning("DeleteUser failed: User not found {@LogData}", new { id });
                 return NotFound(new { message = "User not found!" });
             }
 
             var result = await _userManager.DeleteAsync(user);
             if (result.Succeeded)
             {
-                _logger.LogInformation("User {UserId} deleted by {User}", LogSanitizer.Sanitize(id), User.Identity?.Name);
+                _logger.LogInformation("User deleted: {@LogData}", new { id, User = User.Identity?.Name });
                 return NoContent();
             }
 
-            _logger.LogError("DeleteUser failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
+            _logger.LogError("DeleteUser failed for {@LogData}: {@Errors}", new { id }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -259,11 +258,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> AssignPermission([FromRoute] string roleName, [FromQuery] string permission)
         {
-            _logger.LogInformation("AssignPermission called: Role={RoleName}, Permission={Permission} by {User}", LogSanitizer.Sanitize(roleName), LogSanitizer.Sanitize(permission), User.Identity?.Name);
+            _logger.LogInformation("AssignPermission called: {@LogData}", new { roleName, permission, User = User.Identity?.Name });
 
             if (!await _roleManager.RoleExistsAsync(roleName))
             {
-                _logger.LogWarning("AssignPermission failed: Role {RoleName} not found", LogSanitizer.Sanitize(roleName));
+                _logger.LogWarning("AssignPermission failed: Role not found {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
             }
 
@@ -276,7 +275,7 @@ namespace garge_api.Controllers
             _context.RolePermissions.Add(rolePermission);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Permission {Permission} assigned to Role {RoleName} by {User}", LogSanitizer.Sanitize(permission), LogSanitizer.Sanitize(roleName), User.Identity?.Name);
+            _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, User = User.Identity?.Name });
             return Ok(new { message = "Permission assigned successfully!" });
         }
     }

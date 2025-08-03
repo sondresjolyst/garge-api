@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using AutoMapper;
 using garge_api.Models.Webhook;
-using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -32,11 +31,11 @@ namespace garge_api.Controllers
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] WebhookSubscriptionDto webhookDto)
         {
-            _logger.LogInformation("AddWebhook called by {User}", User.Identity?.Name);
+            _logger.LogInformation("AddWebhook called by {@LogData}", new { User = User.Identity?.Name });
 
             if (!ModelState.IsValid)
             {
-                _logger.LogWarning("AddWebhook failed: Invalid model state for WebhookUrl domain={Domain}", LogSanitizer.MaskUrlDomain(webhookDto.WebhookUrl));
+                _logger.LogWarning("AddWebhook failed: Invalid model state for {@LogData}", new { webhookDto.WebhookUrl });
                 return BadRequest(ModelState);
             }
 
@@ -48,7 +47,7 @@ namespace garge_api.Controllers
 
             var resultDto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription created: Id={Id}, Domain={Domain}", webhookSubscription.Id, LogSanitizer.MaskUrlDomain(webhookSubscription.WebhookUrl));
+            _logger.LogInformation("Webhook subscription created: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
             return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, resultDto);
         }
 
@@ -60,19 +59,19 @@ namespace garge_api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetWebhook(int id)
         {
-            _logger.LogInformation("GetWebhook called by {User} for Id={Id}", User.Identity?.Name, id);
+            _logger.LogInformation("GetWebhook called by {@LogData}", new { User = User.Identity?.Name, id });
 
             var webhookSubscription = await _context.WebhookSubscriptions.FindAsync(id);
 
             if (webhookSubscription == null)
             {
-                _logger.LogWarning("GetWebhook not found: Id={Id}", id);
+                _logger.LogWarning("GetWebhook not found: {@LogData}", new { id });
                 return NotFound();
             }
 
             var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription returned: Id={Id}, Domain={Domain}", webhookSubscription.Id, LogSanitizer.MaskUrlDomain(webhookSubscription.WebhookUrl));
+            _logger.LogInformation("Webhook subscription returned: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
             return Ok(dto);
         }
     }

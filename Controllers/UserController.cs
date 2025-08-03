@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
-using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -46,15 +45,12 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
-            _logger.LogInformation("GetUserProfile called by {User} for Id={Id}", User.Identity?.Name, LogSanitizer.Sanitize(id));
+            _logger.LogInformation("GetUserProfile called by {@LogData}", new { User = User.Identity?.Name, id });
 
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || userIdClaim.Value != id.ToString())
             {
-                _logger.LogWarning("GetUserProfile forbidden for {User}. Requested Id={Id}, Claim Id={ClaimId}",
-                    User.Identity?.Name,
-                    LogSanitizer.Sanitize(id),
-                    LogSanitizer.Sanitize(userIdClaim?.Value));
+                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { User = User.Identity?.Name, id, ClaimId = userIdClaim?.Value });
                 return Forbid();
             }
 
@@ -64,20 +60,20 @@ namespace garge_api.Controllers
 
             if (userProfile == null)
             {
-                _logger.LogWarning("GetUserProfile not found: UserProfile for Id={Id}", LogSanitizer.Sanitize(id));
+                _logger.LogWarning("GetUserProfile not found: UserProfile for {@LogData}", new { id });
                 return NotFound(new { message = "User profile not found!" });
             }
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null)
             {
-                _logger.LogWarning("GetUserProfile not found: User for Id={Id}", LogSanitizer.Sanitize(id));
+                _logger.LogWarning("GetUserProfile not found: User for {@LogData}", new { id });
                 return NotFound(new { message = "User not found!" });
             }
 
             var profileResponse = _mapper.Map<UserProfileDto>(userProfile);
 
-            _logger.LogInformation("User profile returned for Id={Id}", LogSanitizer.Sanitize(id));
+            _logger.LogInformation("User profile returned for {@LogData}", new { id });
             return Ok(profileResponse);
         }
     }
