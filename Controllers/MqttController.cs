@@ -60,13 +60,13 @@ namespace garge_api.Controllers
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
             _logger.LogInformation("CreateUser called by {User} for Username={Username}, IsSuperuser={IsSuperuser}",
-                User.Identity?.Name,
+                LogSanitizer.Sanitize(User.Identity?.Name),
                 LogSanitizer.Sanitize(dto.Username),
                 dto.IsSuperuser);
 
             if (!UserHasRequiredRole())
             {
-                _logger.LogWarning("CreateUser forbidden for {User}", User.Identity?.Name);
+                _logger.LogWarning("CreateUser forbidden for {User}", LogSanitizer.Sanitize(User.Identity?.Name));
                 return Forbid();
             }
 
@@ -90,7 +90,7 @@ namespace garge_api.Controllers
             _context.EMQXMqttUsers.Add(user);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("EMQX MQTT user created: Id={Id}, Username={Username}", user.Id, LogSanitizer.Sanitize(user.Username));
+            _logger.LogInformation("EMQX MQTT user created: Id={Id}, Username={Username}", LogSanitizer.Sanitize(user.Id.ToString()), LogSanitizer.Sanitize(user.Username));
             return Ok(new { user.Id, user.Username });
         }
 
@@ -106,7 +106,7 @@ namespace garge_api.Controllers
         public async Task<IActionResult> CreateAcl([FromBody] CreateEMQXMqttAclDto dto)
         {
             _logger.LogInformation("CreateAcl called by {User} for Username={Username}, Permission={Permission}, Action={Action}, Topic={Topic}, Qos={Qos}, Retain={Retain}",
-                User.Identity?.Name,
+                LogSanitizer.Sanitize(User.Identity?.Name),
                 LogSanitizer.Sanitize(dto.Username),
                 LogSanitizer.Sanitize(dto.Permission),
                 LogSanitizer.Sanitize(dto.Action),
@@ -116,7 +116,7 @@ namespace garge_api.Controllers
 
             if (!UserHasRequiredRole())
             {
-                _logger.LogWarning("CreateAcl forbidden for {User}", User.Identity?.Name);
+                _logger.LogWarning("CreateAcl forbidden for {User}", LogSanitizer.Sanitize(User.Identity?.Name));
                 return Forbid();
             }
 
@@ -142,7 +142,7 @@ namespace garge_api.Controllers
             {
                 await _context.SaveChangesAsync();
                 _logger.LogInformation("ACL created: Id={Id}, Username={Username}, Topic={Topic}",
-                    acl.Id,
+                    LogSanitizer.Sanitize(acl.Id.ToString()),
                     LogSanitizer.Sanitize(acl.Username),
                     LogSanitizer.Sanitize(acl.Topic));
                 return Ok(new { acl.Id });
@@ -174,7 +174,7 @@ namespace garge_api.Controllers
         public async Task<IActionResult> PostDiscoveredDevice([FromBody] CreateDiscoveredDeviceDto dto)
         {
             _logger.LogInformation("PostDiscoveredDevice called by {User} for DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}, Timestamp={Timestamp}",
-                User.Identity?.Name,
+                LogSanitizer.Sanitize(User.Identity?.Name),
                 LogSanitizer.Sanitize(dto.DiscoveredBy),
                 LogSanitizer.Sanitize(dto.Target),
                 LogSanitizer.Sanitize(dto.Type),
@@ -182,7 +182,7 @@ namespace garge_api.Controllers
 
             if (!UserHasRequiredRole())
             {
-                _logger.LogWarning("PostDiscoveredDevice forbidden for {User}", User.Identity?.Name);
+                _logger.LogWarning("PostDiscoveredDevice forbidden for {User}", LogSanitizer.Sanitize(User.Identity?.Name));
                 return Forbid();
             }
 
@@ -198,11 +198,12 @@ namespace garge_api.Controllers
             {
                 _context.DiscoveredDevices.Add(device);
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Discovered device created: Id={Id}, DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}",
+                _logger.LogInformation(
+                    "Discovered device created: Id={Id}, DiscoveredBy={DiscoveredBy}, Target={Target}, Type={Type}",
                     device.Id,
-                    LogSanitizer.Sanitize(device.DiscoveredBy),
-                    LogSanitizer.Sanitize(device.Target),
-                    LogSanitizer.Sanitize(device.Type));
+                    device.DiscoveredBy,
+                    device.Target,
+                    device.Type);
                 return Ok(new { device.Id });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
