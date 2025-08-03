@@ -26,13 +26,14 @@ namespace garge_api
             builder.Configuration.AddEnvironmentVariables();
 
             builder.Logging.ClearProviders();
+            builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
             builder.Logging.AddSimpleConsole(options =>
             {
-                options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
-                options.IncludeScopes = true;
+                options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
+                options.IncludeScopes = false; // disables the extra scope/tracing info
+                options.SingleLine = true;
             });
-            builder.Logging.AddFilter((category, level) =>
-                category == DbLoggerCategory.Database.Command.Name && level == LogLevel.None);
+            builder.Logging.AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.None);
 
             builder.Services.AddAutoMapper(typeof(MappingProfile));
             builder.Services.AddScoped<CustomDbCommandInterceptor>();
@@ -134,10 +135,12 @@ namespace garge_api
 
             using (var scope = app.Services.CreateScope())
             {
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                logger.LogInformation("Starting API.");
                 var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var postgresNotificationService = scope.ServiceProvider.GetRequiredService<PostgresNotificationService>();
-                Console.WriteLine("PostgresNotificationService started");
+                logger.LogInformation("PostgresNotificationService started");
 
                 context.EnsureTriggers();
 

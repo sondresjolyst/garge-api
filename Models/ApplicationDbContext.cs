@@ -1,5 +1,6 @@
 ﻿using garge_api.Models.Admin;
 using garge_api.Models.Auth;
+using garge_api.Models.Mqtt;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
@@ -20,7 +21,9 @@ namespace garge_api.Models
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
-
+        public DbSet<EMQXMqttUser> EMQXMqttUsers { get; set; }
+        public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
+        public DbSet<DiscoveredDevice> DiscoveredDevices { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

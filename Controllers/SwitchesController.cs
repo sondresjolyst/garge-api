@@ -21,45 +21,73 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
+        private readonly ILogger<SwitchesController> _logger;
 
-        public SwitchesController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper)
+        public SwitchesController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper, ILogger<SwitchesController> logger)
         {
             _context = context;
             _roleManager = roleManager;
             _mapper = mapper;
+            _logger = logger;
         }
 
-        private bool UserHasRequiredRole(string switchRole)
+        private async Task<bool> UserHasRequiredRoleAsync(Switch switchEntity)
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            return userRoles.Any(role => role.Equals(switchRole, StringComparison.OrdinalIgnoreCase)) ||
-                   userRoles.Any(role => role.Equals("switch_admin", StringComparison.OrdinalIgnoreCase)) ||
-                   userRoles.Any(role => role.Equals("admin", StringComparison.OrdinalIgnoreCase));
+
+            // Admins always have access
+            if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
+                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase) ||
+                userRoles.Contains(switchEntity.Role, StringComparer.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Use ParentName for device access
+            var accessibleParentNames = await _context.Sensors
+                .Where(sensor => userRoles.Contains(sensor.Role))
+                .Select(sensor => sensor.ParentName)
+                .ToListAsync();
+
+            // Check if any device the user can access has discovered this switch
+            var discovered = await _context.DiscoveredDevices
+                .AnyAsync(dd =>
+                    accessibleParentNames.Contains(dd.DiscoveredBy) &&
+                    dd.Target == switchEntity.Name);
+
+            return discovered;
         }
 
+        /// <summary>
+        /// Retrieves all available switches.
+        /// </summary>
         [HttpGet]
         [SwaggerOperation(Summary = "Retrieves all available switches.")]
         [SwaggerResponse(200, "A list of all switches.", typeof(IEnumerable<SwitchDto>))]
         public async Task<IActionResult> GetAllSwitches()
         {
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+            _logger.LogInformation("GetAllSwitches called by {User}", User.Identity?.Name);
 
-            List<Switch> switches;
-            if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) || userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase))
+            var allSwitches = await _context.Switches.ToListAsync();
+            var accessibleSwitches = new List<Switch>();
+
+            foreach (var sw in allSwitches)
             {
-                switches = await _context.Switches.ToListAsync();
-            }
-            else
-            {
-                switches = await _context.Switches
-                    .Where(switchEntity => userRoles.Contains(switchEntity.Role))
-                    .ToListAsync();
+                if (await UserHasRequiredRoleAsync(sw))
+                {
+                    accessibleSwitches.Add(sw);
+                }
             }
 
-            var dtos = _mapper.Map<IEnumerable<SwitchDto>>(switches);
+            var dtos = _mapper.Map<IEnumerable<SwitchDto>>(accessibleSwitches);
+
+            _logger.LogInformation("Returning {Count} accessible switches for {User}", accessibleSwitches.Count, User.Identity?.Name);
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Retrieves a switch by its ID.
+        /// </summary>
         [HttpGet("{id}")]
         [SwaggerOperation(Summary = "Retrieves a switch by its ID.")]
         [SwaggerResponse(200, "The switch with the specified ID.", typeof(SwitchDto))]
@@ -67,25 +95,45 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitch(int id)
         {
+            _logger.LogInformation("GetSwitch called by {User} for Id={Id}", User.Identity?.Name, id);
+
             var switchEntity = await _context.Switches.FindAsync(id);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("GetSwitch not found: Id={Id}", id);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("GetSwitch forbidden for {User} on Id={Id}", User.Identity?.Name, id);
                 return Forbid();
+            }
 
             var dto = _mapper.Map<SwitchDto>(switchEntity);
+
+            _logger.LogInformation("Returning switch Id={Id} to {User}", id, User.Identity?.Name);
             return Ok(dto);
         }
 
+        /// <summary>
+        /// Creates a new switch.
+        /// </summary>
         [HttpPost]
         [SwaggerOperation(Summary = "Creates a new switch.")]
         [SwaggerResponse(201, "The created switch.", typeof(SwitchDto))]
         [SwaggerResponse(409, "Switch name already exists.")]
         public async Task<IActionResult> CreateSwitch([FromBody] CreateSwitchDto switchDto)
         {
-            if (!UserHasRequiredRole("switch_admin"))
+            _logger.LogInformation("CreateSwitch called by {User} with Name={Name}, Type={Type}", User.Identity?.Name, switchDto.Name, switchDto.Type);
+
+            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+            if (!userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase) &&
+                !userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("CreateSwitch forbidden for {User}", User.Identity?.Name);
                 return Forbid();
+            }
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
@@ -94,7 +142,10 @@ namespace garge_api.Controllers
             {
                 var roleResult = await _roleManager.CreateAsync(new IdentityRole(switchEntity.Role));
                 if (!roleResult.Succeeded)
+                {
+                    _logger.LogError("CreateSwitch failed to create role for {Role}", switchEntity.Role);
                     return StatusCode(500, new { message = "Failed to create role!" });
+                }
             }
 
             _context.Switches.Add(switchEntity);
@@ -104,13 +155,19 @@ namespace garge_api.Controllers
             }
             catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("duplicate key") == true)
             {
+                _logger.LogWarning("CreateSwitch conflict: Switch name {Name} already exists", switchDto.Name);
                 return Conflict(new { message = "Switch name already exists!" });
             }
 
             var dto = _mapper.Map<SwitchDto>(switchEntity);
+
+            _logger.LogInformation("Switch created: Id={Id}, Name={Name}", switchEntity.Id, switchEntity.Name);
             return CreatedAtAction(nameof(GetSwitch), new { id = switchEntity.Id }, dto);
         }
 
+        /// <summary>
+        /// Updates an existing switch.
+        /// </summary>
         [HttpPut("{id}")]
         [SwaggerOperation(Summary = "Updates an existing switch.")]
         [SwaggerResponse(204, "No content.")]
@@ -119,24 +176,39 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> UpdateSwitch(int id, [FromBody] UpdateSwitchDto switchDto)
         {
+            _logger.LogInformation("UpdateSwitch called by {User} for Id={Id}", User.Identity?.Name, id);
+
             if (id != switchDto.Id)
+            {
+                _logger.LogWarning("UpdateSwitch bad request: Id mismatch {Id} != {DtoId}", id, switchDto.Id);
                 return BadRequest();
+            }
 
             var existingSwitch = await _context.Switches.FindAsync(id);
             if (existingSwitch == null)
+            {
+                _logger.LogWarning("UpdateSwitch not found: Id={Id}", id);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(existingSwitch.Role))
+            if (!await UserHasRequiredRoleAsync(existingSwitch))
+            {
+                _logger.LogWarning("UpdateSwitch forbidden for {User} on Id={Id}", User.Identity?.Name, id);
                 return Forbid();
+            }
 
             _mapper.Map(switchDto, existingSwitch);
 
             _context.Entry(existingSwitch).State = EntityState.Modified;
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Switch updated: Id={Id}", id);
             return NoContent();
         }
 
+        /// <summary>
+        /// Deletes a switch by its ID.
+        /// </summary>
         [HttpDelete("{id}")]
         [SwaggerOperation(Summary = "Deletes a switch by its ID.")]
         [SwaggerResponse(204, "No content.")]
@@ -144,19 +216,31 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSwitch(int id)
         {
+            _logger.LogInformation("DeleteSwitch called by {User} for Id={Id}", User.Identity?.Name, id);
+
             var switchEntity = await _context.Switches.FindAsync(id);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("DeleteSwitch not found: Id={Id}", id);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("DeleteSwitch forbidden for {User} on Id={Id}", User.Identity?.Name, id);
                 return Forbid();
+            }
 
             _context.Switches.Remove(switchEntity);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Switch deleted: Id={Id}", id);
             return NoContent();
         }
 
+        /// <summary>
+        /// Retrieves data for a specific switch.
+        /// </summary>
         [HttpGet("{switchId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific switch.")]
         [SwaggerResponse(200, "The data for the specified switch.", typeof(IEnumerable<SwitchDataDto>))]
@@ -164,12 +248,20 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitchData(int switchId, string? timeRange, DateTime? startDate, DateTime? endDate)
         {
+            _logger.LogInformation("GetSwitchData called by {User} for SwitchId={SwitchId}", User.Identity?.Name, switchId);
+
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("GetSwitchData not found: SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("GetSwitchData forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchId);
                 return Forbid();
+            }
 
             var query = _context.SwitchData
                 .Where(sd => sd.SwitchId == switchId)
@@ -192,9 +284,14 @@ namespace garge_api.Controllers
 
             var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
             var dtos = _mapper.Map<IEnumerable<SwitchDataDto>>(switchDataList);
+
+            _logger.LogInformation("Returning {Count} switch data entries for SwitchId={SwitchId}", switchDataList.Count, switchId);
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Retrieves state for a specific switch.
+        /// </summary>
         [HttpGet("{switchId}/state")]
         [SwaggerOperation(Summary = "Retrieves state for a specific switch.")]
         [SwaggerResponse(200, "The state for the specified switch.", typeof(IEnumerable<SwitchDataDto>))]
@@ -202,12 +299,20 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitchState(int switchId)
         {
+            _logger.LogInformation("GetSwitchState called by {User} for SwitchId={SwitchId}", User.Identity?.Name, switchId);
+
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("GetSwitchState not found: SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("GetSwitchState forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchId);
                 return Forbid();
+            }
 
             var query = await _context.SwitchData
                 .Where(sd => sd.SwitchId == switchId)
@@ -215,12 +320,20 @@ namespace garge_api.Controllers
                 .FirstOrDefaultAsync();
 
             if (query == null)
+            {
+                _logger.LogWarning("GetSwitchState no data found for SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "No data found for this switch!" });
+            }
 
             var dto = _mapper.Map<SwitchDataDto>(query);
+
+            _logger.LogInformation("Returning switch state for SwitchId={SwitchId}", switchId);
             return Ok(dto);
         }
 
+        /// <summary>
+        /// Creates new data for a specific switch.
+        /// </summary>
         [HttpPost("{switchId}/data")]
         [SwaggerOperation(Summary = "Creates new data for a specific switch.")]
         [SwaggerResponse(201, "The created switch data.", typeof(SwitchDataDto))]
@@ -229,16 +342,27 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchData(int switchId, [FromBody] CreateSwitchDataDto switchDataDto)
         {
+            _logger.LogInformation("CreateSwitchData called by {User} for SwitchId={SwitchId} with Value={Value}", User.Identity?.Name, switchId, switchDataDto.Value);
+
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("CreateSwitchData not found: SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("CreateSwitchData forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchId);
                 return Forbid();
+            }
 
             var validStates = new[] { "ON", "OFF" };
             if (!validStates.Contains(switchDataDto.Value, StringComparer.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("CreateSwitchData bad request: Invalid value {Value} for SwitchId={SwitchId}", switchDataDto.Value, switchId);
                 return BadRequest(new { message = "The value must be either 'ON' or 'OFF'." });
+            }
 
             var switchData = _mapper.Map<SwitchData>(switchDataDto);
             switchData.SwitchId = switchId;
@@ -249,9 +373,14 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var dto = _mapper.Map<SwitchDataDto>(switchData);
+
+            _logger.LogInformation("Switch data created: Id={Id}, SwitchId={SwitchId}, Value={Value}", switchData.Id, switchId, switchData.Value);
             return CreatedAtAction(nameof(GetSwitchData), new { switchId = switchId }, dto);
         }
 
+        /// <summary>
+        /// Retrieves data for multiple switches.
+        /// </summary>
         [HttpGet("data")]
         [SwaggerOperation(Summary = "Retrieves data for multiple switches.")]
         [SwaggerResponse(200, "The data for the specified switches.", typeof(IEnumerable<SwitchDataDto>))]
@@ -259,14 +388,22 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetMultipleSwitchesData([FromQuery] List<int> switchIds, string? timeRange, DateTime? startDate, DateTime? endDate)
         {
+            _logger.LogInformation("GetMultipleSwitchesData called by {User} for SwitchIds={SwitchIds}", User.Identity?.Name, string.Join(",", switchIds));
+
             var switches = await _context.Switches.Where(s => switchIds.Contains(s.Id)).ToListAsync();
             if (switches.Count != switchIds.Count)
+            {
+                _logger.LogWarning("GetMultipleSwitchesData not found: One or more switches not found for SwitchIds={SwitchIds}", string.Join(",", switchIds));
                 return NotFound(new { message = "One or more switches not found!" });
+            }
 
             foreach (var switchEntity in switches)
             {
-                if (!UserHasRequiredRole(switchEntity.Role))
+                if (!await UserHasRequiredRoleAsync(switchEntity))
+                {
+                    _logger.LogWarning("GetMultipleSwitchesData forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchEntity.Id);
                     return Forbid();
+                }
             }
 
             var query = _context.SwitchData
@@ -290,9 +427,14 @@ namespace garge_api.Controllers
 
             var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
             var dtos = _mapper.Map<IEnumerable<SwitchDataDto>>(switchDataList);
+
+            _logger.LogInformation("Returning {Count} switch data entries for SwitchIds={SwitchIds}", switchDataList.Count, string.Join(",", switchIds));
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Deletes specific switch data by its ID.
+        /// </summary>
         [HttpDelete("{switchId}/data/{dataId}")]
         [SwaggerOperation(Summary = "Deletes specific switch data by its ID.")]
         [SwaggerResponse(204, "No content.")]
@@ -300,23 +442,38 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSwitchData(int switchId, int dataId)
         {
+            _logger.LogInformation("DeleteSwitchData called by {User} for SwitchId={SwitchId}, DataId={DataId}", User.Identity?.Name, switchId, dataId);
+
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("DeleteSwitchData not found: SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("DeleteSwitchData forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchId);
                 return Forbid();
+            }
 
             var switchData = await _context.SwitchData.FindAsync(dataId);
             if (switchData == null || switchData.SwitchId != switchId)
+            {
+                _logger.LogWarning("DeleteSwitchData not found: DataId={DataId} for SwitchId={SwitchId}", dataId, switchId);
                 return NotFound(new { message = "Switch data not found!" });
+            }
 
             _context.SwitchData.Remove(switchData);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Switch data deleted: DataId={DataId}, SwitchId={SwitchId}", dataId, switchId);
             return NoContent();
         }
 
+        /// <summary>
+        /// Creates new data for a specific switch using switchName.
+        /// </summary>
         [HttpPost("name/{switchName}/data")]
         [SwaggerOperation(Summary = "Creates new data for a specific switch using switchName.")]
         [SwaggerResponse(201, "The created switch data.", typeof(SwitchDataDto))]
@@ -325,16 +482,27 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchDataByName(string switchName, [FromBody] CreateSwitchDataDto switchDataDto)
         {
+            _logger.LogInformation("CreateSwitchDataByName called by {User} for SwitchName={SwitchName} with Value={Value}", User.Identity?.Name, switchName, switchDataDto.Value);
+
             var switchEntity = await _context.Switches.FirstOrDefaultAsync(s => s.Name == switchName);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("CreateSwitchDataByName not found: SwitchName={SwitchName}", switchName);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("CreateSwitchDataByName forbidden for {User} on SwitchName={SwitchName}", User.Identity?.Name, switchName);
                 return Forbid();
+            }
 
             var validStates = new[] { "ON", "OFF" };
             if (!validStates.Contains(switchDataDto.Value, StringComparer.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("CreateSwitchDataByName bad request: Invalid value {Value} for SwitchName={SwitchName}", switchDataDto.Value, switchName);
                 return BadRequest(new { message = "The value must be either 'ON' or 'OFF'." });
+            }
 
             var switchData = _mapper.Map<SwitchData>(switchDataDto);
             switchData.SwitchId = switchEntity.Id;
@@ -345,9 +513,14 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var dto = _mapper.Map<SwitchDataDto>(switchData);
+
+            _logger.LogInformation("Switch data created: Id={Id}, SwitchName={SwitchName}, Value={Value}", switchData.Id, switchName, switchData.Value);
             return CreatedAtAction(nameof(GetSwitchData), new { switchId = switchEntity.Id }, dto);
         }
 
+        /// <summary>
+        /// Deletes all data for a specific switch.
+        /// </summary>
         [HttpDelete("{switchId}/data")]
         [SwaggerOperation(Summary = "Deletes all data for a specific switch.")]
         [SwaggerResponse(204, "No content.")]
@@ -355,17 +528,26 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteAllSwitchData(int switchId)
         {
+            _logger.LogInformation("DeleteAllSwitchData called by {User} for SwitchId={SwitchId}", User.Identity?.Name, switchId);
+
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
+            {
+                _logger.LogWarning("DeleteAllSwitchData not found: SwitchId={SwitchId}", switchId);
                 return NotFound(new { message = "Switch not found!" });
+            }
 
-            if (!UserHasRequiredRole(switchEntity.Role))
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("DeleteAllSwitchData forbidden for {User} on SwitchId={SwitchId}", User.Identity?.Name, switchId);
                 return Forbid();
+            }
 
             var switchData = _context.SwitchData.Where(sd => sd.SwitchId == switchId);
             _context.SwitchData.RemoveRange(switchData);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("All switch data deleted for SwitchId={SwitchId}", switchId);
             return NoContent();
         }
 

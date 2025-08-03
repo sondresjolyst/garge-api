@@ -23,12 +23,14 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
+        private readonly ILogger<UserController> _logger;
 
-        public UserController(ApplicationDbContext context, UserManager<User> userManager, IMapper mapper)
+        public UserController(ApplicationDbContext context, UserManager<User> userManager, IMapper mapper, ILogger<UserController> logger)
         {
             _context = context;
             _userManager = userManager;
             _mapper = mapper;
+            _logger = logger;
         }
 
         /// <summary>
@@ -43,9 +45,12 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
+            _logger.LogInformation("GetUserProfile called by {User} for Id={Id}", User.Identity?.Name, id);
+
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || userIdClaim.Value != id.ToString())
             {
+                _logger.LogWarning("GetUserProfile forbidden for {User}. Requested Id={Id}, Claim Id={ClaimId}", User.Identity?.Name, id, userIdClaim?.Value);
                 return Forbid();
             }
 
@@ -55,16 +60,20 @@ namespace garge_api.Controllers
 
             if (userProfile == null)
             {
+                _logger.LogWarning("GetUserProfile not found: UserProfile for Id={Id}", id);
                 return NotFound(new { message = "User profile not found!" });
             }
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null)
             {
+                _logger.LogWarning("GetUserProfile not found: User for Id={Id}", id);
                 return NotFound(new { message = "User not found!" });
             }
 
             var profileResponse = _mapper.Map<UserProfileDto>(userProfile);
+
+            _logger.LogInformation("User profile returned for Id={Id}", id);
             return Ok(profileResponse);
         }
     }
