@@ -8,10 +8,12 @@ namespace garge_api.Services
     {
         private const string ApiUrl = "https://dataportal-api.nordpoolgroup.com/api";
         private readonly HttpClient _httpClient;
+        private readonly ILogger<NordPoolService> _logger;
 
-        public NordPoolService(HttpClient httpClient)
+        public NordPoolService(HttpClient httpClient, ILogger<NordPoolService> logger)
         {
             _httpClient = httpClient;
+            _logger = logger;
         }
 
         public async Task<PriceResponse?> FetchPricesAsync(string dataType, DateTime? endDate = null, List<string>? areas = null, string currency = "NOK")
@@ -25,7 +27,7 @@ namespace garge_api.Services
             var json = JsonConvert.DeserializeObject<dynamic>(content);
             if (json == null)
             {
-                Console.WriteLine("Failed to deserialize JSON response.");
+                _logger.LogError("Failed to deserialize JSON response from Nord Pool API.");
                 return null;
             }
 
@@ -55,7 +57,7 @@ namespace garge_api.Services
 
             if (json[aggregateKey] == null)
             {
-                Console.WriteLine($"Aggregate key '{aggregateKey}' not found in JSON response.");
+                _logger.LogWarning($"Aggregate key '{aggregateKey}' not found in JSON response.");
                 return;
             }
 
@@ -80,7 +82,7 @@ namespace garge_api.Services
 
                 if (entry[areaKey] == null)
                 {
-                    Console.WriteLine($"{areaKey} not found in entry.");
+                    _logger.LogWarning($"{areaKey} not found in entry.");
                     continue;
                 }
 
@@ -109,7 +111,7 @@ namespace garge_api.Services
             }
             else
             {
-                Console.WriteLine("updatedAt not found in JSON response.");
+                _logger.LogWarning("updatedAt not found in JSON response.");
             }
         }
 
