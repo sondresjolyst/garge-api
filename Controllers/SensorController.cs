@@ -947,5 +947,47 @@ namespace garge_api.Controllers
             _logger.LogInformation("Custom name updated for {@LogData}", new { sensorId, User = User.Identity?.Name });
             return Ok(resultDto);
         }
+
+        /// <summary>
+        /// Retrieves the latest data point for a specific sensor.
+        /// </summary>
+        /// <param name="sensorId">The ID of the sensor.</param>
+        /// <returns>The latest sensor data.</returns>
+        [HttpGet("{sensorId}/latest-data")]
+        [SwaggerOperation(Summary = "Retrieves the latest data point for a specific sensor.")]
+        [SwaggerResponse(200, "The latest sensor data.", typeof(SensorDataDto))]
+        [SwaggerResponse(404, "Sensor or sensor data not found.")]
+        [SwaggerResponse(403, "User does not have the required role.")]
+        public async Task<IActionResult> GetLatestSensorData(int sensorId)
+        {
+            _logger.LogInformation("GetLatestSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+
+            var sensor = await _context.Sensors.FindAsync(sensorId);
+            if (sensor == null)
+            {
+                _logger.LogWarning("GetLatestSensorData not found: {@LogData}", new { sensorId });
+                return NotFound(new { message = "Sensor not found!" });
+            }
+
+            if (!UserHasRequiredRole(sensor.Role))
+            {
+                _logger.LogWarning("GetLatestSensorData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
+                return Forbid();
+            }
+
+            var latestData = await _context.SensorData
+                .Where(sd => sd.SensorId == sensorId)
+                .OrderByDescending(sd => sd.Timestamp)
+                .FirstOrDefaultAsync();
+
+            if (latestData == null)
+            {
+                _logger.LogWarning("GetLatestSensorData not found: No data for sensor {@LogData}", new { sensorId });
+                return NotFound(new { message = "No data found for this sensor." });
+            }
+
+            var dto = _mapper.Map<SensorDataDto>(latestData);
+            return Ok(dto);
+        }
     }
 }

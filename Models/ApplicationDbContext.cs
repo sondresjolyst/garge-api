@@ -1,5 +1,6 @@
 ﻿using garge_api.Models.Admin;
 using garge_api.Models.Auth;
+using garge_api.Models.Automation;
 using garge_api.Models.Mqtt;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
@@ -24,6 +25,7 @@ namespace garge_api.Models
         public DbSet<EMQXMqttUser> EMQXMqttUsers { get; set; }
         public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
         public DbSet<DiscoveredDevice> DiscoveredDevices { get; set; }
+        public DbSet<AutomationRule> AutomationRules { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -65,6 +67,19 @@ namespace garge_api.Models
                 .HasForeignKey(x => x.SensorId);
 
             OnModelCreatingPartial(modelBuilder);
+
+            modelBuilder.Entity<AutomationRule>()
+                .HasIndex(ar => new
+                {
+                    ar.TargetType,
+                    ar.TargetId,
+                    ar.SensorType,
+                    ar.SensorId,
+                    ar.Condition,
+                    ar.Threshold,
+                    ar.Action
+                })
+                .IsUnique();
         }
         public void EnsureTriggers()
         {
