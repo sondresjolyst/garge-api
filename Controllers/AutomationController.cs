@@ -17,17 +17,18 @@ namespace garge_api.Controllers
     public class AutomationController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly ILogger<AutomationController> _logger;
 
-        public AutomationController(ApplicationDbContext context)
+        public AutomationController(ApplicationDbContext context, ILogger <AutomationController> logger)
         {
             _context = context;
+            _logger = logger;
         }
 
         private async Task<bool> UserHasAccessToAutomationAsync(AutomationRule rule)
         {
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
-            // Admins always have access
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
                 userRoles.Contains("automation_admin", StringComparer.OrdinalIgnoreCase))
             {
@@ -40,14 +41,15 @@ namespace garge_api.Controllers
                 .Select(sensor => sensor.ParentName)
                 .ToListAsync();
 
-            // Check if any discovered device links the user to the sensor or target
-            var sensorDiscovered = await _context.DiscoveredDevices
-                .AnyAsync(dd => accessibleParentNames.Contains(dd.DiscoveredBy) && dd.Target == rule.SensorId.ToString());
+            // Fetch the target name (switch)
+            var targetSwitch = await _context.Switches.FindAsync(rule.TargetId);
+            var targetName = targetSwitch?.Name;
 
-            var targetDiscovered = await _context.DiscoveredDevices
-                .AnyAsync(dd => accessibleParentNames.Contains(dd.DiscoveredBy) && dd.Target == rule.TargetId.ToString());
+            // Check if any device the user can access has discovered this target
+            var discovered = targetName != null && await _context.DiscoveredDevices
+                .AnyAsync(dd => accessibleParentNames.Contains(dd.DiscoveredBy) && dd.Target == targetName);
 
-            return sensorDiscovered && targetDiscovered;
+            return discovered;
         }
 
         /// <summary>
