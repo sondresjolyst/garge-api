@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/sondresjolyst/garge-api/compare/v1.0.0...v1.1.0) (2025-08-10)
+
+
+### Features
+
+* automation ([#26](https://github.com/sondresjolyst/garge-api/issues/26)) ([2bdf8d2](https://github.com/sondresjolyst/garge-api/commit/2bdf8d2a84db5065ae63a63b68b840d72d7dc995))
+* emqx, new mqtt structure and logging. ([#25](https://github.com/sondresjolyst/garge-api/issues/25)) ([afcb4f2](https://github.com/sondresjolyst/garge-api/commit/afcb4f2282338f9a3ee4fa3840747ff38f9d3e32))
+
 ## 1.0.0 (2025-06-27)
 
 
