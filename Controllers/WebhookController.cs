@@ -14,18 +14,30 @@ namespace garge_api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
+        private readonly ILogger<WebhookController> _logger;
 
-        public WebhookController(ApplicationDbContext context, IMapper mapper)
+        public WebhookController(ApplicationDbContext context, IMapper mapper, ILogger<WebhookController> logger)
         {
             _context = context;
             _mapper = mapper;
+            _logger = logger;
         }
 
+        /// <summary>
+        /// Adds a new webhook subscription.
+        /// </summary>
+        /// <param name="webhookDto">The webhook subscription data.</param>
+        /// <returns>The created webhook subscription.</returns>
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] WebhookSubscriptionDto webhookDto)
         {
+            _logger.LogInformation("AddWebhook called by {@LogData}", new { User = User.Identity?.Name });
+
             if (!ModelState.IsValid)
+            {
+                _logger.LogWarning("AddWebhook failed: Invalid model state for {@LogData}", new { webhookDto.WebhookUrl });
                 return BadRequest(ModelState);
+            }
 
             var webhookSubscription = _mapper.Map<WebhookSubscription>(webhookDto);
             webhookSubscription.CreatedAt = DateTime.UtcNow;
@@ -34,18 +46,32 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var resultDto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
+
+            _logger.LogInformation("Webhook subscription created: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
             return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, resultDto);
         }
 
+        /// <summary>
+        /// Gets a webhook subscription by its ID.
+        /// </summary>
+        /// <param name="id">The webhook subscription ID.</param>
+        /// <returns>The webhook subscription data.</returns>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetWebhook(int id)
         {
+            _logger.LogInformation("GetWebhook called by {@LogData}", new { User = User.Identity?.Name, id });
+
             var webhookSubscription = await _context.WebhookSubscriptions.FindAsync(id);
 
             if (webhookSubscription == null)
+            {
+                _logger.LogWarning("GetWebhook not found: {@LogData}", new { id });
                 return NotFound();
+            }
 
             var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
+
+            _logger.LogInformation("Webhook subscription returned: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
             return Ok(dto);
         }
     }

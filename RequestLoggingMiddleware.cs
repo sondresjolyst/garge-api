@@ -1,15 +1,23 @@
 ﻿namespace garge_api
 {
-    public class RequestLoggingMiddleware(RequestDelegate next)
+    public class RequestLoggingMiddleware
     {
-        private readonly RequestDelegate _next = next;
+        private readonly RequestDelegate _next;
+        private readonly ILogger<RequestLoggingMiddleware> _logger;
+
+        public RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger)
+        {
+            _next = next;
+            _logger = logger;
+        }
 
         public async Task InvokeAsync(HttpContext context)
         {
-            Console.WriteLine("Incoming Request:");
+            _logger.LogInformation("Incoming Request {@LogData}", new { context.Request.Method, context.Request.Path });
+
             foreach (var header in context.Request.Headers)
             {
-                Console.WriteLine($"{header.Key}: {header.Value}");
+                _logger.LogDebug("Header {@LogData}", new { header.Key, Value = header.Value.ToString() });
             }
 
             await _next(context);

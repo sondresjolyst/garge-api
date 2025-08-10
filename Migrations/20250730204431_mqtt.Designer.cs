@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250730204431_mqtt")]
+    partial class mqtt
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -321,78 +324,6 @@ namespace garge_api.Migrations
                     b.ToTable("RefreshTokens");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Automation.AutomationRule", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Condition")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("SensorId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SensorType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("TargetId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("TargetType")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<double>("Threshold")
-                        .HasColumnType("double precision");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TargetType", "TargetId", "SensorType", "SensorId", "Condition", "Threshold", "Action")
-                        .IsUnique();
-
-                    b.ToTable("AutomationRules");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Mqtt.DiscoveredDevice", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("DiscoveredBy")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Target")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("Timestamp")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DiscoveredBy", "Target", "Type")
-                        .IsUnique();
-
-                    b.ToTable("DiscoveredDevices");
-                });
-
             modelBuilder.Entity("garge_api.Models.Mqtt.EMQXMqttAcl", b =>
                 {
                     b.Property<int>("Id")
@@ -425,9 +356,6 @@ namespace garge_api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Username", "Permission", "Action", "Topic", "Qos", "Retain")
-                        .IsUnique();
-
                     b.ToTable("EMQXMqttAcls");
                 });
 
@@ -456,9 +384,6 @@ namespace garge_api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
-                        .IsUnique();
-
                     b.ToTable("EMQXMqttUsers");
                 });
 
@@ -479,10 +404,6 @@ namespace garge_api.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
-
-                    b.Property<string>("ParentName")
-                        .IsRequired()
-                        .HasColumnType("text");
 
                     b.Property<string>("RegistrationCode")
                         .IsRequired()

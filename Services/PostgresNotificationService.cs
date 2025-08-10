@@ -16,7 +16,7 @@ public class PostgresNotificationService : BackgroundService
         _logger = logger;
         _connectionString = configuration.GetConnectionString("DefaultConnection")
                             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        Console.WriteLine("PostgresNotificationService initialized");
+        _logger.LogWarning("PostgresNotificationService initialized");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -28,12 +28,12 @@ public class PostgresNotificationService : BackgroundService
         {
             try
             {
-                Console.WriteLine($"Notification received: {args.Payload}");
+                _logger.LogWarning($"Notification received: {args.Payload}");
 
                 var switchData = JsonConvert.DeserializeObject<SwitchData>(args.Payload);
                 if (switchData == null)
                 {
-                    Console.WriteLine("Deserialized SwitchData is null.");
+                    _logger.LogWarning("Deserialized SwitchData is null.");
                     return;
                 }
 
@@ -44,18 +44,18 @@ public class PostgresNotificationService : BackgroundService
 
                 if (switchData.Switch == null)
                 {
-                    Console.WriteLine($"Switch with ID {switchData.SwitchId} not found.");
+                    _logger.LogWarning($"Switch with ID {switchData.SwitchId} not found.");
                 }
 
                 await NotifySubscribersAsync(switchData);
             }
             catch (JsonException ex)
             {
-                Console.WriteLine($"Failed to deserialize notification payload: {args.Payload}. Error: {ex.Message}");
+                _logger.LogWarning($"Failed to deserialize notification payload: {args.Payload}. Error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error processing notification: {ex.Message}");
+                _logger.LogWarning($"Error processing notification: {ex.Message}");
             }
         };
 

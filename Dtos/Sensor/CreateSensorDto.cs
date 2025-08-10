@@ -11,5 +11,8 @@ namespace garge_api.Dtos.Sensor
         [Required]
         [MaxLength(50)]
         public required string Type { get; set; }
+
+        [Required]
+        public required string ParentName { get; set; }
     }
 }

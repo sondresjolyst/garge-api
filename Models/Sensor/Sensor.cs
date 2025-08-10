@@ -29,5 +29,8 @@ namespace garge_api.Models.Sensor
         [Required]
         [MaxLength(50)]
         public required string DefaultName { get; set; }
+
+        [Required]
+        public required string ParentName { get; set; }
     }
 }

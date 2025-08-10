@@ -5,18 +5,21 @@ using System.Text;
 public class WebhookNotificationService
 {
     private readonly HttpClient _httpClient;
+    private readonly ILogger<WebhookNotificationService> _logger;
 
-    public WebhookNotificationService(HttpClient httpClient)
+    public WebhookNotificationService(HttpClient httpClient, ILogger<WebhookNotificationService> logger)
     {
-        Console.WriteLine("WebhookNotificationService initialized");
         _httpClient = httpClient;
+        _logger = logger;
+
+        _logger.LogInformation("WebhookNotificationService initialized");
     }
 
     public async Task NotifyClientAsync(string webhookUrl, SwitchData switchData)
     {
         if (!Uri.IsWellFormedUriString(webhookUrl, UriKind.Absolute))
         {
-            Console.WriteLine($"Invalid webhook URL: {webhookUrl}");
+            _logger.LogWarning($"Invalid webhook URL: {webhookUrl}");
             return;
         }
 
@@ -25,18 +28,18 @@ public class WebhookNotificationService
 
         try
         {
-            Console.WriteLine($"Sending payload to webhook: {payload}");
+            _logger.LogWarning($"Sending payload to webhook: {payload}");
             var response = await _httpClient.PostAsync(webhookUrl, content);
             response.EnsureSuccessStatusCode();
-            Console.WriteLine($"Successfully notified webhook: {webhookUrl}");
+            _logger.LogWarning($"Successfully notified webhook: {webhookUrl}");
         }
         catch (HttpRequestException ex)
         {
-            Console.WriteLine($"HTTP request failed for webhook: {webhookUrl}. Error: {ex.Message}");
+            _logger.LogWarning($"HTTP request failed for webhook: {webhookUrl}. Error: {ex.Message}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to notify webhook: {webhookUrl}. Error: {ex.Message}");
+            _logger.LogWarning($"Failed to notify webhook: {webhookUrl}. Error: {ex.Message}");
         }
     }
 }

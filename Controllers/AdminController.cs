@@ -45,13 +45,22 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Role already exists.")]
         public async Task<IActionResult> CreateRole([FromBody] RoleDto dto)
         {
+            _logger.LogInformation("CreateRole called with {@LogData}", new { dto.Name, User = User.Identity?.Name });
+
             if (await _roleManager.RoleExistsAsync(dto.Name))
+            {
+                _logger.LogWarning("Role creation failed: {@LogData} already exists", new { dto.Name });
                 return Conflict(new { message = "Role already exists!" });
+            }
 
             var result = await _roleManager.CreateAsync(new IdentityRole(dto.Name));
             if (result.Succeeded)
+            {
+                _logger.LogInformation("Role created: {@LogData}", new { dto.Name, User = User.Identity?.Name });
                 return CreatedAtAction(nameof(GetRole), new { roleName = dto.Name }, dto);
+            }
 
+            _logger.LogError("Role creation failed for {@LogData}: {@Errors}", new { dto.Name }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -64,6 +73,8 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Roles retrieved successfully.", typeof(IEnumerable<RoleDto>))]
         public IActionResult GetRoles()
         {
+            _logger.LogInformation("GetRoles called by {@LogData}", new { User = User.Identity?.Name });
+
             var roles = _roleManager.Roles.ToList();
             var dtos = _mapper.Map<IEnumerable<RoleDto>>(roles);
             return Ok(dtos);
@@ -80,9 +91,14 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> GetRole(string roleName)
         {
+            _logger.LogInformation("GetRole called for {@LogData}", new { roleName, User = User.Identity?.Name });
+
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
+            {
+                _logger.LogWarning("Role not found: {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
+            }
 
             var dto = _mapper.Map<RoleDto>(role);
             return Ok(dto);
@@ -99,14 +115,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> DeleteRole(string roleName)
         {
+            _logger.LogInformation("DeleteRole called for {@LogData}", new { roleName, User = User.Identity?.Name });
+
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
+            {
+                _logger.LogWarning("DeleteRole failed: Role not found {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
+            }
 
             var result = await _roleManager.DeleteAsync(role);
             if (result.Succeeded)
+            {
+                _logger.LogInformation("Role deleted: {@LogData}", new { roleName, User = User.Identity?.Name });
                 return NoContent();
+            }
 
+            _logger.LogError("DeleteRole failed for {@LogData}: {@Errors}", new { roleName }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -122,14 +147,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> AssignRole([FromRoute] string roleName, [FromQuery] string userEmail)
         {
+            _logger.LogInformation("AssignRole called: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
+
             var user = await _userManager.FindByEmailAsync(userEmail);
             if (user == null)
+            {
+                _logger.LogWarning("AssignRole failed: User not found {@LogData}", new { userEmail });
                 return NotFound(new { message = "User not found!" });
+            }
 
             var result = await _userManager.AddToRoleAsync(user, roleName);
             if (result.Succeeded)
+            {
+                _logger.LogInformation("Role assigned: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
                 return Ok(new { message = "Role assigned successfully!" });
+            }
 
+            _logger.LogError("AssignRole failed for {@LogData}: {@Errors}", new { userEmail }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -145,14 +179,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> RemoveRole([FromRoute] string roleName, [FromQuery] string userEmail)
         {
+            _logger.LogInformation("RemoveRole called: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
+
             var user = await _userManager.FindByEmailAsync(userEmail);
             if (user == null)
+            {
+                _logger.LogWarning("RemoveRole failed: User not found {@LogData}", new { userEmail });
                 return NotFound(new { message = "User not found!" });
+            }
 
             var result = await _userManager.RemoveFromRoleAsync(user, roleName);
             if (result.Succeeded)
+            {
+                _logger.LogInformation("Role removed: {@LogData}", new { roleName, userEmail, User = User.Identity?.Name });
                 return NoContent();
+            }
 
+            _logger.LogError("RemoveRole failed for {@LogData}: {@Errors}", new { userEmail }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -165,6 +208,8 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Users retrieved successfully.", typeof(IEnumerable<UserDto>))]
         public IActionResult GetUsers()
         {
+            _logger.LogInformation("GetUsers called by {@LogData}", new { User = User.Identity?.Name });
+
             var users = _userManager.Users.ToList();
             var dtos = _mapper.Map<IEnumerable<UserDto>>(users);
             return Ok(dtos);
@@ -181,14 +226,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> DeleteUser(string id)
         {
+            _logger.LogInformation("DeleteUser called for {@LogData}", new { id, User = User.Identity?.Name });
+
             var user = await _userManager.FindByIdAsync(id);
             if (user == null)
+            {
+                _logger.LogWarning("DeleteUser failed: User not found {@LogData}", new { id });
                 return NotFound(new { message = "User not found!" });
+            }
 
             var result = await _userManager.DeleteAsync(user);
             if (result.Succeeded)
+            {
+                _logger.LogInformation("User deleted: {@LogData}", new { id, User = User.Identity?.Name });
                 return NoContent();
+            }
 
+            _logger.LogError("DeleteUser failed for {@LogData}: {@Errors}", new { id }, result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -204,8 +258,13 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> AssignPermission([FromRoute] string roleName, [FromQuery] string permission)
         {
+            _logger.LogInformation("AssignPermission called: {@LogData}", new { roleName, permission, User = User.Identity?.Name });
+
             if (!await _roleManager.RoleExistsAsync(roleName))
+            {
+                _logger.LogWarning("AssignPermission failed: Role not found {@LogData}", new { roleName });
                 return NotFound(new { message = "Role not found!" });
+            }
 
             var rolePermission = new RolePermission
             {
@@ -216,6 +275,7 @@ namespace garge_api.Controllers
             _context.RolePermissions.Add(rolePermission);
             await _context.SaveChangesAsync();
 
+            _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, User = User.Identity?.Name });
             return Ok(new { message = "Permission assigned successfully!" });
         }
     }
