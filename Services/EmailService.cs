@@ -23,7 +23,7 @@ public class EmailService
         }
 
         var brevoSettings = _configuration.GetSection("BrevoSettings").Get<BrevoSettings>();
-        brevo_csharp.Client.Configuration.Default.ApiKey.Add("api-key", brevoSettings!.ApiKey);
+        brevo_csharp.Client.Configuration.Default.ApiKey["api-key"] = brevoSettings!.ApiKey;
 
         var apiInstance = new TransactionalEmailsApi();
         var sendSmtpEmail = new SendSmtpEmail
@@ -44,11 +44,10 @@ public class EmailService
         try
         {
             var result = await apiInstance.SendTransacEmailAsync(sendSmtpEmail);
-            _logger.LogInformation("Email sent to {Email} with Brevo message ID {MessageId}", email, result.MessageId);
         }
         catch (ApiException ex)
         {
-            _logger.LogError("Failed to send email to {Email}. Error: {Error}", email, ex.Message);
+            _logger.LogError("Failed to send email. Error: {Error}", ex.Message);
         }
     }
 }
