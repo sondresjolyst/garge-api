@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/sondresjolyst/garge-api/compare/v1.1.0...v1.2.0) (2025-08-12)
+
+
+### Features
+
+* switch from sendgrid to brevo ([#30](https://github.com/sondresjolyst/garge-api/issues/30)) ([7ca2e17](https://github.com/sondresjolyst/garge-api/commit/7ca2e171dd1a7d8fa6023333a7d04be013d22351))
+
 ## [1.1.0](https://github.com/sondresjolyst/garge-api/compare/v1.0.0...v1.1.0) (2025-08-10)
 
 
