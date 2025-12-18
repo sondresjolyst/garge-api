@@ -10,17 +10,11 @@ namespace garge_api.Dtos.Automation
         [Required]
         public int TargetId { get; set; }
 
+        // Multiple conditions (required)
         [Required]
-        public required string SensorType { get; set; }
-
-        [Required]
-        public int SensorId { get; set; }
-
-        [Required]
-        public required string Condition { get; set; }
-
-        [Required]
-        public double Threshold { get; set; }
+        public required List<AutomationConditionDto> Conditions { get; set; }
+        
+        public string? LogicalOperator { get; set; } // "AND" or "OR", defaults to "AND"
 
         [Required]
         public required string Action { get; set; }

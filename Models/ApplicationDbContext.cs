@@ -26,6 +26,7 @@ namespace garge_api.Models
         public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
         public DbSet<DiscoveredDevice> DiscoveredDevices { get; set; }
         public DbSet<AutomationRule> AutomationRules { get; set; }
+        public DbSet<AutomationCondition> AutomationConditions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -68,46 +69,63 @@ namespace garge_api.Models
 
             OnModelCreatingPartial(modelBuilder);
 
-            modelBuilder.Entity<AutomationRule>()
-                .HasIndex(ar => new
-                {
-                    ar.TargetType,
-                    ar.TargetId,
-                    ar.SensorType,
-                    ar.SensorId,
-                    ar.Condition,
-                    ar.Threshold,
-                    ar.Action
-                })
-                .IsUnique();
+            // Remove the old unique constraint as it's no longer applicable with multiple conditions
+            // modelBuilder.Entity<AutomationRule>()
+            //     .HasIndex(ar => new
+            //     {
+            //         ar.TargetType,
+            //         ar.TargetId,
+            //         ar.SensorType,
+            //         ar.SensorId,
+            //         ar.Condition,
+            //         ar.Threshold,
+            //         ar.Action
+            //     })
+            //     .IsUnique();
+
+            // Configure AutomationCondition relationships
+            modelBuilder.Entity<AutomationCondition>()
+                .HasOne(ac => ac.AutomationRule)
+                .WithMany(ar => ar.Conditions)
+                .HasForeignKey(ac => ac.AutomationRuleId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
         public void EnsureTriggers()
         {
-            var triggerFunctionSql = @"
-        CREATE OR REPLACE FUNCTION notify_switchdata_change()
-        RETURNS TRIGGER AS $$
-        BEGIN
-            PERFORM pg_notify('switchdata_channel', row_to_json(NEW)::text);
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;";
+            try
+            {
+                // Switch data trigger for webhook notifications
+                var switchTriggerFunctionSql = @"
+            CREATE OR REPLACE FUNCTION notify_switchdata_change()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM pg_notify('switchdata_channel', row_to_json(NEW)::text);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;";
 
-            var triggerSql = @"
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1
-                FROM pg_trigger
-                WHERE tgname = 'switchdata_change_trigger'
-            ) THEN
-                CREATE TRIGGER switchdata_change_trigger
-                AFTER INSERT ON ""SwitchData""
-                FOR EACH ROW EXECUTE FUNCTION notify_switchdata_change();
-            END IF;
-        END $$;";
+                var switchTriggerSql = @"
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgname = 'switchdata_change_trigger'
+                ) THEN
+                    CREATE TRIGGER switchdata_change_trigger
+                    AFTER INSERT ON ""SwitchData""
+                    FOR EACH ROW EXECUTE FUNCTION notify_switchdata_change();
+                END IF;
+            END $$;";
 
-            Database.ExecuteSqlRaw(triggerFunctionSql);
-            Database.ExecuteSqlRaw(triggerSql);
+                Database.ExecuteSqlRaw(switchTriggerFunctionSql);
+                Database.ExecuteSqlRaw(switchTriggerSql);
+            }
+            catch (Exception ex)
+            {
+                // Log the error but don't fail the application startup
+                Console.WriteLine($"Warning: Could not create database triggers. Error: {ex.Message}");
+            }
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

@@ -16,7 +16,7 @@ public class PostgresNotificationService : BackgroundService
         _logger = logger;
         _connectionString = configuration.GetConnectionString("DefaultConnection")
                             ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        _logger.LogWarning("PostgresNotificationService initialized");
+        _logger.LogInformation("PostgresNotificationService initialized");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

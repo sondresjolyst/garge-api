@@ -45,6 +45,60 @@ namespace garge_api.Services
             return priceResponse;
         }
 
+        /// <summary>
+        /// Gets the current electricity price for a specific area.
+        /// </summary>
+        /// <param name="area">The area code (e.g., "NO2")</param>
+        /// <param name="currency">The currency (default: NOK)</param>
+        /// <returns>The current electricity price in the specified currency</returns>
+        public async Task<decimal?> GetCurrentPriceAsync(string area = "NO2", string currency = "NOK")
+        {
+            try
+            {
+                // Get today's hourly prices
+                var priceData = await FetchPricesAsync("HOURLY", DateTime.UtcNow, new List<string> { area }, currency);
+                
+                if (priceData?.Areas?.ContainsKey(area) != true)
+                {
+                    _logger.LogWarning("No price data found for area {Area}", area);
+                    return null;
+                }
+
+                var now = DateTime.UtcNow;
+                var currentHour = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, DateTimeKind.Utc);
+
+                // Find the price entry for the current hour
+                var currentPriceEntry = priceData.Areas[area].Values
+                    .FirstOrDefault(p => p.Start <= currentHour && p.End > currentHour);
+
+                if (currentPriceEntry != null)
+                {
+                    _logger.LogInformation("Current electricity price for {Area}: {Price} {Currency}", area, currentPriceEntry.Value, currency);
+                    return currentPriceEntry.Value;
+                }
+
+                // If no exact match, get the most recent price
+                var latestPrice = priceData.Areas[area].Values
+                    .Where(p => p.Start <= now)
+                    .OrderByDescending(p => p.Start)
+                    .FirstOrDefault();
+
+                if (latestPrice != null)
+                {
+                    _logger.LogInformation("Latest electricity price for {Area}: {Price} {Currency}", area, latestPrice.Value, currency);
+                    return latestPrice.Value;
+                }
+
+                _logger.LogWarning("No current or recent price data found for area {Area}", area);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting current electricity price for area {Area}", area);
+                return null;
+            }
+        }
+
         private void ParsePriceEntries(dynamic json, string dataType, PriceResponse priceResponse)
         {
             string aggregateKey = dataType switch

@@ -67,6 +67,7 @@ namespace garge_api
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddScoped<EmailService>();
+            builder.Services.AddScoped<IAutomationValidationService, AutomationValidationService>();
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAuthentication(options =>
