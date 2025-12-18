@@ -5,10 +5,11 @@
         public int Id { get; set; }
         public required string TargetType { get; set; }
         public int TargetId { get; set; }
-        public required string SensorType { get; set; }
-        public int SensorId { get; set; }
-        public required string Condition { get; set; }
-        public double Threshold { get; set; }
+        
+        // Multiple conditions
+        public required List<AutomationConditionDto> Conditions { get; set; }
+        public string? LogicalOperator { get; set; } // "AND" or "OR"
+        
         public required string Action { get; set; }
     }
 }

@@ -72,5 +72,49 @@ namespace garge_api.Controllers
             _logger.LogInformation("Returning price data {@LogData}", new { type, area, date, currency });
             return Ok(dto);
         }
+
+        /// <summary>
+        /// Retrieves the current electricity price for a specific area.
+        /// </summary>
+        /// <param name="area">The area code (default: NO2).</param>
+        /// <param name="currency">The currency (default: NOK).</param>
+        /// <returns>The current electricity price.</returns>
+        [HttpGet("current-price")]
+        public async Task<IActionResult> GetCurrentPrice([FromQuery] string area = "NO2", [FromQuery] string currency = "NOK")
+        {
+            _logger.LogInformation("GetCurrentPrice called by {@LogData}", new { User = User.Identity?.Name, area, currency });
+
+            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+
+            var hasAccess = userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
+                            userRoles.Any(role => RoleNames.RolePermissions.TryGetValue(role, out var permissions) && permissions.Contains("Electricity", StringComparer.OrdinalIgnoreCase));
+
+            if (!hasAccess)
+            {
+                _logger.LogWarning("Access denied for user {@LogData}", new { User = User.Identity?.Name, Roles = string.Join(",", userRoles) });
+                return Forbid();
+            }
+
+            _logger.LogInformation("Fetching current price from NordPoolService {@LogData}", new { area, currency });
+
+            var currentPrice = await _nordPoolService.GetCurrentPriceAsync(area, currency);
+
+            if (currentPrice == null)
+            {
+                _logger.LogWarning("No current price data found {@LogData}", new { area, currency });
+                return NotFound(new { message = "No current price data found." });
+            }
+
+            var result = new
+            {
+                area,
+                currency,
+                price = currentPrice.Value,
+                timestamp = DateTime.UtcNow
+            };
+
+            _logger.LogInformation("Returning current price data {@LogData}", new { area, currency, price = currentPrice.Value });
+            return Ok(result);
+        }
     }
 }

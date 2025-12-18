@@ -11,6 +11,8 @@ using System.Globalization;
 using System.Security.Claims;
 using AutoMapper;
 using garge_api.Services;
+using garge_api.Constants;
+using System.Text.Json;
 
 namespace garge_api.Controllers
 {
@@ -962,6 +964,12 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetLatestSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
 
+            // Handle special electricity price sensor (ID -1)
+            if (sensorId == -1)
+            {
+                return await GetElectricityPriceSensorData();
+            }
+
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
             {
@@ -988,6 +996,75 @@ namespace garge_api.Controllers
 
             var dto = _mapper.Map<SensorDataDto>(latestData);
             return Ok(dto);
+        }
+
+        /// <summary>
+        /// Gets electricity price sensor data (special virtual sensor for automation).
+        /// </summary>
+        /// <returns>Electricity price sensor data</returns>
+        private async Task<IActionResult> GetElectricityPriceSensorData()
+        {
+            try
+            {
+                // Check if user has electricity access
+                var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+                var hasAccess = userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
+                               userRoles.Any(role => RoleNames.RolePermissions.TryGetValue(role, out var permissions) && permissions.Contains("Electricity", StringComparer.OrdinalIgnoreCase));
+
+                if (!hasAccess)
+                {
+                    _logger.LogWarning("Electricity price access denied for user {@LogData}", new { User = User.Identity?.Name, Roles = string.Join(",", userRoles) });
+                    return Forbid();
+                }
+
+                // Get current electricity price via HTTP client to avoid circular dependency
+                using var httpClient = new HttpClient();
+                var request = HttpContext.Request;
+                var baseUrl = $"{request.Scheme}://{request.Host}";
+                
+                // Add authorization header
+                var authHeader = Request.Headers["Authorization"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(authHeader))
+                {
+                    httpClient.DefaultRequestHeaders.Add("Authorization", authHeader);
+                }
+
+                var response = await httpClient.GetAsync($"{baseUrl}/api/electricity/current-price?area=NO2&currency=NOK");
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to get current electricity price. Status: {StatusCode}", response.StatusCode);
+                    return NotFound(new { message = "Failed to get current electricity price." });
+                }
+
+                var priceJson = await response.Content.ReadAsStringAsync();
+                var priceData = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(priceJson);
+                
+                if (!priceData.TryGetProperty("price", out var priceElement))
+                {
+                    _logger.LogWarning("Price property not found in electricity price response");
+                    return NotFound(new { message = "Invalid electricity price response." });
+                }
+
+                var price = priceElement.GetDecimal();
+                
+                // Create a SensorDataDto for the electricity price
+                var sensorDataDto = new SensorDataDto
+                {
+                    Id = -1, // Special ID for electricity price
+                    SensorId = -1,
+                    Value = price.ToString(CultureInfo.InvariantCulture),
+                    Timestamp = DateTime.UtcNow
+                };
+
+                _logger.LogInformation("Electricity price sensor data: {Price} NOK/kWh", price);
+                return Ok(sensorDataDto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting electricity price sensor data");
+                return StatusCode(500, new { message = "Error getting electricity price data." });
+            }
         }
     }
 }

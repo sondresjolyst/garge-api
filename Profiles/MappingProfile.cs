@@ -1,12 +1,14 @@
 ﻿using AutoMapper;
 using garge_api.Dtos.Admin;
 using garge_api.Dtos.Auth;
+using garge_api.Dtos.Automation;
 using garge_api.Dtos.Electricity;
 using garge_api.Dtos.Sensor;
 using garge_api.Dtos.Switch;
 using garge_api.Dtos.User;
 using garge_api.Dtos.Webhook;
 using garge_api.Models.Admin;
+using garge_api.Models.Automation;
 using garge_api.Models.Electricity;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
@@ -48,6 +50,12 @@ public class MappingProfile : Profile
 
         // Webhook mappings
         CreateMap<WebhookSubscription, WebhookSubscriptionDto>().ReverseMap();
+
+        // Automation mappings
+        CreateMap<AutomationCondition, AutomationConditionDto>().ReverseMap();
+        CreateMap<AutomationRule, AutomationRuleDto>().ReverseMap();
+        CreateMap<CreateAutomationRuleDto, AutomationRule>();
+        CreateMap<UpdateAutomationRuleDto, AutomationRule>();
 
     }
 }
