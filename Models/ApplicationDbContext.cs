@@ -17,6 +17,7 @@ namespace garge_api.Models
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<Sensor.Sensor> Sensors { get; set; }
         public DbSet<SensorData> SensorData { get; set; }
+        public DbSet<BatteryHealth> BatteryHealthData { get; set; }
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
@@ -49,6 +50,12 @@ namespace garge_api.Models
 
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => sd.Timestamp);
+
+            modelBuilder.Entity<BatteryHealth>()
+                .HasIndex(bh => bh.SensorId);
+
+            modelBuilder.Entity<BatteryHealth>()
+                .HasIndex(bh => bh.Timestamp);
 
             modelBuilder.Entity<SwitchData>()
                 .ToTable("SwitchData");
