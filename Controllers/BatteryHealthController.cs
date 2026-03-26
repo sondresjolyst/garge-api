@@ -45,20 +45,23 @@ namespace garge_api.Controllers
         [SwaggerResponse(201, "The created battery health record.", typeof(BatteryHealthDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
+        private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
+                                                              .Replace("\n", "", StringComparison.Ordinal);
+
         public async Task<IActionResult> CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto dto)
         {
-            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, sensorName });
+            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("CreateBatteryHealth sensor not found: {SensorName}", sensorName);
+                _logger.LogWarning("CreateBatteryHealth sensor not found: {SensorName}", Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
             if (!UserHasRequiredRole(sensor.Role))
             {
-                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, sensorName });
+                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
                 return Forbid();
             }
 
@@ -80,7 +83,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var result = _mapper.Map<BatteryHealthDto>(record);
-            _logger.LogInformation("Battery health record created: {@LogData}", new { record.Id, sensorName, record.Status });
+            _logger.LogInformation("Battery health record created: {@LogData}", new { record.Id, SensorName = Sanitize(sensorName), record.Status });
             return CreatedAtAction(nameof(GetLatestBatteryHealth), new { sensorName }, result);
         }
 
@@ -94,18 +97,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
-            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, sensorName });
+            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("GetLatestBatteryHealth sensor not found: {SensorName}", sensorName);
+                _logger.LogWarning("GetLatestBatteryHealth sensor not found: {SensorName}", Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
             if (!UserHasRequiredRole(sensor.Role))
             {
-                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, sensorName });
+                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
                 return Forbid();
             }
 
@@ -116,7 +119,7 @@ namespace garge_api.Controllers
 
             if (latest == null)
             {
-                _logger.LogWarning("GetLatestBatteryHealth no data for sensor: {SensorName}", sensorName);
+                _logger.LogWarning("GetLatestBatteryHealth no data for sensor: {SensorName}", Sanitize(sensorName));
                 return NotFound(new { message = "No battery health data found for this sensor." });
             }
 
