@@ -36,9 +36,6 @@ namespace garge_api.Controllers
                    userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
         }
 
-        private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
-                                                              .Replace("\n", "", StringComparison.Ordinal);
-
         /// <summary>
         /// Stores a battery health reading for a sensor identified by name.
         /// Called by the operator when a battery health MQTT state message arrives.
@@ -48,6 +45,9 @@ namespace garge_api.Controllers
         [SwaggerResponse(201, "The created battery health record.", typeof(BatteryHealthDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
+        private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
+                                                              .Replace("\n", "", StringComparison.Ordinal);
+
         public async Task<IActionResult> CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto dto)
         {
             _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
