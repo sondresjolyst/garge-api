@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/sondresjolyst/garge-api/compare/v1.3.0...v1.3.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* move Sanitize helper before action methods to fix broken routing ([c49936d](https://github.com/sondresjolyst/garge-api/commit/c49936d47e7217ff4e3cadb5a96304c9ce1c85ba))
+* move Sanitize helper before action methods to fix broken routing ([#46](https://github.com/sondresjolyst/garge-api/issues/46)) ([692a855](https://github.com/sondresjolyst/garge-api/commit/692a85539d1052599aeb9a147d3b0229ed716686))
+
 ## [1.3.0](https://github.com/sondresjolyst/garge-api/compare/v1.2.0...v1.3.0) (2026-03-26)
 
 
