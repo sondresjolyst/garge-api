@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/sondresjolyst/garge-api/compare/v1.2.0...v1.3.0) (2026-03-26)
+
+
+### Features
+
+* add battery health tracking with LastChargedAt ([#42](https://github.com/sondresjolyst/garge-api/issues/42)) ([349f9bb](https://github.com/sondresjolyst/garge-api/commit/349f9bb6a7ce10b84571105917febd31488f18eb))
+
 ## [1.2.0](https://github.com/sondresjolyst/garge-api/compare/v1.1.0...v1.2.0) (2025-08-12)
 
 
