@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/sondresjolyst/garge-api/compare/v1.3.1...v1.3.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* allow non-admin users to access battery health via voltage sensor role ([#47](https://github.com/sondresjolyst/garge-api/issues/47)) ([4a22081](https://github.com/sondresjolyst/garge-api/commit/4a22081d1b33d53ce5881c0f66f4cc6be7e90863))
+
 ## [1.3.1](https://github.com/sondresjolyst/garge-api/compare/v1.3.0...v1.3.1) (2026-03-26)
 
 
