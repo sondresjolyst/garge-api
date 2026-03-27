@@ -108,8 +108,21 @@ namespace garge_api.Controllers
 
             if (!UserHasRequiredRole(sensor.Role))
             {
-                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
-                return Forbid();
+                // Battery health sensors are authorized via the voltage sensor on the same device.
+                if (sensor.Type != "battery")
+                {
+                    _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+                    return Forbid();
+                }
+
+                var voltageSensor = await _context.Sensors
+                    .FirstOrDefaultAsync(s => s.ParentName == sensor.ParentName && s.Type == "voltage");
+
+                if (voltageSensor == null || !UserHasRequiredRole(voltageSensor.Role))
+                {
+                    _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+                    return Forbid();
+                }
             }
 
             var latest = await _context.BatteryHealthData
