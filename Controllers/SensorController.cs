@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 using System.Security.Claims;
@@ -144,7 +145,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSensorData(
             int sensorId, string? timeRange, DateTime? startDate,
-            DateTime? endDate, bool average = false, string? groupBy = "minute",
+            DateTime? endDate, string? groupBy = "5m",
             int pageNumber = 1, int pageSize = 100)
         {
             _logger.LogInformation("GetSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
@@ -166,44 +167,34 @@ namespace garge_api.Controllers
                 .Where(sd => sd.SensorId == sensorId)
                 .AsQueryable();
 
+            DateTime? effectiveStart = null;
+            DateTime? effectiveEnd = null;
+
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
                 var timeSpan = ParseTimeRange(timeRange);
                 if (timeSpan.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
+                {
+                    effectiveStart = now.Subtract(timeSpan.Value);
+                    query = query.Where(sd => sd.Timestamp >= effectiveStart.Value);
+                }
             }
             else
             {
-                if (startDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                if (endDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
+                if (startDate.HasValue) { effectiveStart = startDate; query = query.Where(sd => sd.Timestamp >= startDate.Value); }
+                if (endDate.HasValue) { effectiveEnd = endDate; query = query.Where(sd => sd.Timestamp <= endDate.Value); }
             }
 
             IEnumerable<SensorDataDto> result;
             int totalCount;
 
-            if (average)
+            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
+            if (groupBySpan.HasValue)
             {
-                var grouped = query
-                    .AsEnumerable()
-                    .GroupBy(sd => GetGroupingKey(sd.Timestamp, groupBy))
-                    .Select(g => new SensorDataDto
-                    {
-                        Id = g.First().Id,
-                        SensorId = sensorId,
-                        Timestamp = g.Key,
-                        Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
-                    })
-                    .OrderBy(sd => sd.Timestamp)
-                    .ToList();
-
+                var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd);
                 totalCount = grouped.Count;
-                result = grouped
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                result = grouped;
             }
             else
             {
@@ -244,7 +235,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetMultipleSensorsData(
             [FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate,
-            bool average = false, string? groupBy = "minute",
+            string? groupBy = "5m",
             int pageNumber = 1, int pageSize = 100)
         {
             _logger.LogInformation("GetMultipleSensorsData called by {@LogData}", new { User = User.Identity?.Name, sensorIds });
@@ -269,44 +260,34 @@ namespace garge_api.Controllers
                 .Where(sd => sensorIds.Contains(sd.SensorId))
                 .AsQueryable();
 
+            DateTime? effectiveStart = null;
+            DateTime? effectiveEnd = null;
+
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
                 var timeSpan = ParseTimeRange(timeRange);
                 if (timeSpan.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
+                {
+                    effectiveStart = now.Subtract(timeSpan.Value);
+                    query = query.Where(sd => sd.Timestamp >= effectiveStart.Value);
+                }
             }
             else
             {
-                if (startDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                if (endDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
+                if (startDate.HasValue) { effectiveStart = startDate; query = query.Where(sd => sd.Timestamp >= startDate.Value); }
+                if (endDate.HasValue) { effectiveEnd = endDate; query = query.Where(sd => sd.Timestamp <= endDate.Value); }
             }
 
             IEnumerable<SensorDataDto> result;
             int totalCount;
 
-            if (average)
+            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
+            if (groupBySpan.HasValue)
             {
-                var grouped = query
-                    .AsEnumerable()
-                    .GroupBy(sd => new { sd.SensorId, Timestamp = GetGroupingKey(sd.Timestamp, groupBy) })
-                    .Select(g => new SensorDataDto
-                    {
-                        Id = g.First().Id,
-                        SensorId = g.Key.SensorId,
-                        Timestamp = g.Key.Timestamp,
-                        Value = Math.Round(g.Average(sd => double.Parse(sd.Value)), 3).ToString(CultureInfo.InvariantCulture)
-                    })
-                    .OrderBy(sd => sd.Timestamp)
-                    .ToList();
-
-                totalCount = grouped.Count();
-                result = grouped
-                    .Skip((pageNumber - 1) * pageSize)
-                    .Take(pageSize)
-                    .ToList();
+                var grouped = await GetAveragedDataAsync(sensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd);
+                totalCount = grouped.Count;
+                result = grouped;
             }
             else
             {
@@ -328,6 +309,67 @@ namespace garge_api.Controllers
                 PageSize = pageSize,
                 Data = result
             });
+        }
+
+        private async Task<List<SensorDataDto>> GetAveragedDataAsync(
+            IEnumerable<int> sensorIds, long bucketSeconds, DateTime? effectiveStart, DateTime? effectiveEnd)
+        {
+            var effectiveBucket = EnforcedBucketSeconds(bucketSeconds, effectiveStart, effectiveEnd);
+
+            var whereClauses = new List<string> { "sd.\"SensorId\" = ANY(@sensorIds)" };
+            var parameters = new List<NpgsqlParameter>
+            {
+                new("bucketSeconds", effectiveBucket),
+                new("sensorIds", sensorIds.ToArray()),
+            };
+
+            if (effectiveStart.HasValue) { whereClauses.Add("sd.\"Timestamp\" >= @startDate"); parameters.Add(new("startDate", effectiveStart.Value)); }
+            if (effectiveEnd.HasValue) { whereClauses.Add("sd.\"Timestamp\" <= @endDate"); parameters.Add(new("endDate", effectiveEnd.Value)); }
+
+            var sql = $"""
+                SELECT
+                    MIN(sd."Id") AS "Id",
+                    sd."SensorId",
+                    to_timestamp(FLOOR(EXTRACT(EPOCH FROM sd."Timestamp") / @bucketSeconds) * @bucketSeconds) AS "Timestamp",
+                    ROUND(AVG(sd."Value"::double precision)::numeric, 3)::text AS "Value"
+                FROM "SensorData" sd
+                WHERE {string.Join(" AND ", whereClauses)}
+                GROUP BY sd."SensorId", FLOOR(EXTRACT(EPOCH FROM sd."Timestamp") / @bucketSeconds)
+                ORDER BY "Timestamp"
+                """;
+
+            _context.Database.SetCommandTimeout(120);
+            return await _context.Database
+                .SqlQueryRaw<SensorDataDto>(sql, parameters.Cast<object>().ToArray())
+                .ToListAsync();
+        }
+
+        /// <summary>
+        /// Enforces a minimum bucket size per sensor so the result never exceeds ~500 points per sensor,
+        /// preventing timeouts on large date ranges with fine-grained grouping.
+        /// Each sensor always gets the same granularity regardless of how many sensors are queried.
+        /// The result is always snapped up to a human-friendly interval so timestamps land on clean boundaries.
+        /// </summary>
+        private static long EnforcedBucketSeconds(long requestedBucket, DateTime? start, DateTime? end)
+        {
+            if (!start.HasValue || !end.HasValue) return requestedBucket;
+            var rangeSeconds = (long)(end.Value - start.Value).TotalSeconds;
+            if (rangeSeconds <= 0) return requestedBucket;
+            const int maxPointsPerSensor = 500;
+            var minBucket = (rangeSeconds + maxPointsPerSensor - 1) / maxPointsPerSensor;
+            if (requestedBucket >= minBucket) return requestedBucket;
+            return SnapToCleanInterval(minBucket);
+        }
+
+        // Human-readable bucket boundaries: 5m, 10m, 15m, 30m, 1h, 2h, 3h, 4h, 6h, 12h, 1d, 2d, 1w
+        private static readonly long[] CleanIntervals =
+            [300, 600, 900, 1800, 3600, 7200, 10800, 14400, 21600, 43200, 86400, 172800, 604800];
+
+        private static long SnapToCleanInterval(long seconds)
+        {
+            foreach (var interval in CleanIntervals)
+                if (interval >= seconds) return interval;
+            return CleanIntervals[^1];
         }
 
         private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
