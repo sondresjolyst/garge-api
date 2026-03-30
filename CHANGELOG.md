@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.2](https://github.com/sondresjolyst/garge-api/compare/v1.3.1...v1.3.2) (2026-03-27)
+
+
+### Bug Fixes
+
+* allow non-admin users to access battery health via voltage sensor role ([#47](https://github.com/sondresjolyst/garge-api/issues/47)) ([4a22081](https://github.com/sondresjolyst/garge-api/commit/4a22081d1b33d53ce5881c0f66f4cc6be7e90863))
+
+## [1.3.1](https://github.com/sondresjolyst/garge-api/compare/v1.3.0...v1.3.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* move Sanitize helper before action methods to fix broken routing ([c49936d](https://github.com/sondresjolyst/garge-api/commit/c49936d47e7217ff4e3cadb5a96304c9ce1c85ba))
+* move Sanitize helper before action methods to fix broken routing ([#46](https://github.com/sondresjolyst/garge-api/issues/46)) ([692a855](https://github.com/sondresjolyst/garge-api/commit/692a85539d1052599aeb9a147d3b0229ed716686))
+
+## [1.3.0](https://github.com/sondresjolyst/garge-api/compare/v1.2.0...v1.3.0) (2026-03-26)
+
+
+### Features
+
+* add battery health tracking with LastChargedAt ([#42](https://github.com/sondresjolyst/garge-api/issues/42)) ([349f9bb](https://github.com/sondresjolyst/garge-api/commit/349f9bb6a7ce10b84571105917febd31488f18eb))
+
 ## [1.2.0](https://github.com/sondresjolyst/garge-api/compare/v1.1.0...v1.2.0) (2025-08-12)
 
 
