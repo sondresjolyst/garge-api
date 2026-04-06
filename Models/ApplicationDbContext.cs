@@ -51,6 +51,10 @@ namespace garge_api.Models
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => sd.Timestamp);
 
+            modelBuilder.Entity<SensorData>()
+                .HasIndex(sd => new { sd.SensorId, sd.Timestamp })
+                .HasDatabaseName("IX_SensorData_SensorId_Timestamp");
+
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => bh.SensorId);
 

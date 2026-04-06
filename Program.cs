@@ -14,6 +14,8 @@ using garge_api.Services;
 using AspNetCoreRateLimit;
 using garge_api.Models.Admin;
 using Serilog;
+using Microsoft.AspNetCore.ResponseCompression;
+using System.IO.Compression;
 
 namespace garge_api
 {
@@ -45,6 +47,21 @@ namespace garge_api
             //});
             //builder.Logging.AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.None);
 
+            builder.Services.AddResponseCompression(options =>
+            {
+                options.EnableForHttps = true;
+                options.Providers.Add<BrotliCompressionProvider>();
+                options.Providers.Add<GzipCompressionProvider>();
+            });
+            builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+            {
+                options.Level = CompressionLevel.Fastest;
+            });
+            builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+            {
+                options.Level = CompressionLevel.Fastest;
+            });
+
             builder.Services.AddAutoMapper(typeof(MappingProfile));
             builder.Services.AddScoped<CustomDbCommandInterceptor>();
 
@@ -60,7 +77,7 @@ namespace garge_api
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
-                    options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.Preserve;
+                    options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
                 });
             builder.Services.AddHttpClient<NordPoolService>();
             builder.Services.AddHttpClient<WebhookNotificationService>();
@@ -186,6 +203,7 @@ namespace garge_api
                 await context.SaveChangesAsync();
             }
 
+            app.UseResponseCompression();
             app.UseSwagger();
             app.UseSwaggerUI(c =>
             {
