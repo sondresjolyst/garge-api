@@ -75,7 +75,7 @@ namespace garge_api.Controllers
                 .FirstOrDefaultAsync();
 
             if (previous != null && dto.ChargesRecorded > previous.ChargesRecorded)
-                record.LastChargedAt = DateTime.UtcNow;
+                record.LastChargedAt = DateTime.UtcNow.AddHours(-4);
             else
                 record.LastChargedAt = previous?.LastChargedAt;
 
