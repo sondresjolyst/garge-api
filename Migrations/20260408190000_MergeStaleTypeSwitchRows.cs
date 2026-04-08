@@ -48,6 +48,15 @@ namespace garge_api.Migrations
                 );
             ");
 
+            // Re-point AutomationRules targeting the stale 'switch' rows to their SOCKET equivalents
+            migrationBuilder.Sql(@"
+                UPDATE ""AutomationRules"" ar
+                SET ""TargetId"" = new_sw.""Id""
+                FROM ""Switches"" old_sw
+                INNER JOIN ""Switches"" new_sw ON new_sw.""Name"" = old_sw.""Name"" AND new_sw.""Type"" = 'SOCKET'
+                WHERE ar.""TargetId"" = old_sw.""Id"" AND old_sw.""Type"" = 'switch' AND ar.""TargetType"" = 'switch';
+            ");
+
             // Delete all stale 'switch'-typed rows
             migrationBuilder.Sql(@"
                 DELETE FROM ""Switches"" WHERE ""Type"" = 'switch';
