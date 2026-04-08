@@ -63,26 +63,9 @@ namespace garge_api.Controllers
             }
             else
             {
-                var accessibleSensors = await _context.Sensors
+                sensors = await _context.Sensors
                     .Where(sensor => userRoles.Contains(sensor.Role))
                     .ToListAsync();
-
-                // Also expose battery health sensors for devices the user already has access to,
-                // since battery health is tied to the voltmeter sensor on the same device.
-                var accessibleParentNames = accessibleSensors
-                    .Select(s => s.ParentName)
-                    .Where(p => !string.IsNullOrEmpty(p))
-                    .Distinct()
-                    .ToList();
-
-                var batterySensors = await _context.Sensors
-                    .Where(s => s.Type == "battery" && accessibleParentNames.Contains(s.ParentName))
-                    .ToListAsync();
-
-                var batteryIds = accessibleSensors.Select(s => s.Id).ToHashSet();
-                sensors = accessibleSensors
-                    .Concat(batterySensors.Where(b => !batteryIds.Contains(b.Id)))
-                    .ToList();
             }
 
             // Fetch all custom names for the current user
