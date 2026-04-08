@@ -40,13 +40,13 @@ namespace garge_api.Controllers
                                                               .Replace("\n", "", StringComparison.Ordinal);
 
         /// <summary>
-        /// Stores a battery health reading for a sensor identified by name.
+        /// Stores a battery health reading for the voltage sensor identified by name.
         /// Called by the operator when a battery health MQTT state message arrives.
         /// </summary>
         [HttpPost("name/{sensorName}")]
-        [SwaggerOperation(Summary = "Creates a battery health record for a sensor by name.")]
+        [SwaggerOperation(Summary = "Creates a battery health record for a voltage sensor by name.")]
         [SwaggerResponse(201, "The created battery health record.", typeof(BatteryHealthDto))]
-        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(404, "Voltage sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto dto)
         {
@@ -55,7 +55,7 @@ namespace garge_api.Controllers
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("CreateBatteryHealth sensor not found: {SensorName}", Sanitize(sensorName));
+                _logger.LogWarning("CreateBatteryHealth voltage sensor not found: {SensorName}", Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
@@ -75,7 +75,7 @@ namespace garge_api.Controllers
                 .FirstOrDefaultAsync();
 
             if (previous != null && dto.ChargesRecorded > previous.ChargesRecorded)
-                record.LastChargedAt = DateTime.UtcNow;
+                record.LastChargedAt = DateTime.UtcNow.AddHours(-4);
             else
                 record.LastChargedAt = previous?.LastChargedAt;
 
@@ -88,12 +88,12 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Returns the latest battery health record for a sensor identified by name.
+        /// Returns the latest battery health record for the voltage sensor identified by name.
         /// </summary>
         [HttpGet("name/{sensorName}/latest")]
-        [SwaggerOperation(Summary = "Returns the latest battery health record for a sensor by name.")]
+        [SwaggerOperation(Summary = "Returns the latest battery health record for a voltage sensor by name.")]
         [SwaggerResponse(200, "The latest battery health record.", typeof(BatteryHealthDto))]
-        [SwaggerResponse(404, "Sensor or battery health data not found.")]
+        [SwaggerResponse(404, "Voltage sensor or battery health data not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
@@ -102,27 +102,14 @@ namespace garge_api.Controllers
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("GetLatestBatteryHealth sensor not found: {SensorName}", Sanitize(sensorName));
+                _logger.LogWarning("GetLatestBatteryHealth voltage sensor not found: {SensorName}", Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
             if (!UserHasRequiredRole(sensor.Role))
             {
-                // Battery health sensors are authorized via the voltage sensor on the same device.
-                if (sensor.Type != "battery")
-                {
-                    _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
-                    return Forbid();
-                }
-
-                var voltageSensor = await _context.Sensors
-                    .FirstOrDefaultAsync(s => s.ParentName == sensor.ParentName && s.Type == "voltage");
-
-                if (voltageSensor == null || !UserHasRequiredRole(voltageSensor.Role))
-                {
-                    _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
-                    return Forbid();
-                }
+                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+                return Forbid();
             }
 
             var latest = await _context.BatteryHealthData
