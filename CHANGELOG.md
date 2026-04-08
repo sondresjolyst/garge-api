@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.4](https://github.com/sondresjolyst/garge-api/compare/v1.3.3...v1.3.4) (2026-04-08)
+
+
+### Bug Fixes
+
+* adjust LastChargedAt timestamp calculation in CreateBatteryHealth method ([90c7822](https://github.com/sondresjolyst/garge-api/commit/90c782220bb25d50673283fe02e857bbc6e121c4))
+* remove battery sensor rows, link battery health to voltage sensor ([ecb732f](https://github.com/sondresjolyst/garge-api/commit/ecb732fb9ffe7b60858e364f903ddb3f9569f56c))
+
+## [1.3.3](https://github.com/sondresjolyst/garge-api/compare/v1.3.2...v1.3.3) (2026-04-06)
+
+
+### Performance Improvements
+
+* sensor data performance overhaul ([#56](https://github.com/sondresjolyst/garge-api/issues/56)) ([0634323](https://github.com/sondresjolyst/garge-api/commit/063432346eda64b7d5f7ebd99d9883e59673208e))
+
 ## [1.3.2](https://github.com/sondresjolyst/garge-api/compare/v1.3.1...v1.3.2) (2026-03-27)
 
 
