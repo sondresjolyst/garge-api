@@ -16,7 +16,7 @@ namespace garge_api.Migrations
                 type: "character varying(10)",
                 maxLength: 10,
                 nullable: false,
-                defaultValue: "");
+                defaultValue: "NO2");
         }
 
         /// <inheritdoc />
