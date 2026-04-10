@@ -26,5 +26,9 @@ namespace garge_api.Models.Automation
 
         [Required]
         public required string Action { get; set; }
+
+        public bool IsEnabled { get; set; } = true;
+
+        public DateTime? LastTriggeredAt { get; set; }
     }
 }

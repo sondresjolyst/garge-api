@@ -558,6 +558,55 @@ namespace garge_api.Controllers
             return Ok(new { message = "Sensor successfully claimed and assigned to your account." });
         }
 
+        [HttpDelete("{id}/claim")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Removes the current user's access to a sensor by revoking the sensor role.")]
+        [SwaggerResponse(200, "Sensor unclaimed successfully.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(403, "User does not have access to this sensor.")]
+        public async Task<IActionResult> UnclaimSensor(int id)
+        {
+            _logger.LogInformation("UnclaimSensor called by {@LogData}", new { User = User.Identity?.Name, id });
+
+            var sensor = await _context.Sensors.FindAsync(id);
+            if (sensor == null)
+            {
+                _logger.LogWarning("UnclaimSensor not found: {@LogData}", new { id });
+                return NotFound(new { message = "Sensor not found." });
+            }
+
+            if (!UserHasRequiredRole(sensor.Role))
+            {
+                _logger.LogWarning("UnclaimSensor forbidden for {@LogData}", new { User = User.Identity?.Name, id });
+                return Forbid();
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null)
+                return Unauthorized();
+
+            var userManager = HttpContext.RequestServices.GetRequiredService<UserManager<User>>();
+            var result = await userManager.RemoveFromRoleAsync(user, sensor.Role);
+            if (!result.Succeeded)
+            {
+                _logger.LogError("UnclaimSensor failed to remove role {@LogData}", new { Role = sensor.Role, User = User.Identity?.Name });
+                return StatusCode(500, new { message = "Failed to remove sensor from your account." });
+            }
+
+            // Remove any custom name the user has set for this sensor
+            var customName = await _context.UserSensorCustomNames
+                .FirstOrDefaultAsync(x => x.UserId == userId && x.SensorId == id);
+            if (customName != null)
+            {
+                _context.UserSensorCustomNames.Remove(customName);
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { User = User.Identity?.Name, id });
+            return Ok(new { message = "Sensor removed from your account." });
+        }
+
         private static string GenerateDefaultName(string originalName)
         {
             var parts = originalName.Split('_');

@@ -16,5 +16,6 @@ namespace garge_api.Dtos.User
         [Required]
         public required string Email { get; set; }
         public bool EmailConfirmed { get; set; }
+        public string PriceZone { get; set; } = "NO2";
     }
 }
