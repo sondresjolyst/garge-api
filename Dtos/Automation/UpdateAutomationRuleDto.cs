@@ -18,5 +18,7 @@ namespace garge_api.Dtos.Automation
         public double Threshold { get; set; }
         [Required]
         public required string Action { get; set; }
+
+        public bool IsEnabled { get; set; } = true;
     }
 }

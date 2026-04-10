@@ -71,7 +71,8 @@ namespace garge_api.Controllers
                 SensorId = dto.SensorId,
                 Condition = dto.Condition,
                 Threshold = dto.Threshold,
-                Action = dto.Action
+                Action = dto.Action,
+                IsEnabled = dto.IsEnabled,
             };
 
             if (!await UserHasAccessToAutomationAsync(rule))
@@ -91,10 +92,30 @@ namespace garge_api.Controllers
                 SensorId = rule.SensorId,
                 Condition = rule.Condition,
                 Threshold = rule.Threshold,
-                Action = rule.Action
+                Action = rule.Action,
+                IsEnabled = rule.IsEnabled,
+                LastTriggeredAt = rule.LastTriggeredAt,
             };
 
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Marks an automation rule as triggered (called by the operator).
+        /// </summary>
+        [HttpPatch("{id}/triggered")]
+        [SwaggerOperation(Summary = "Records that an automation rule was triggered.")]
+        [SwaggerResponse(204, "Updated successfully.")]
+        [SwaggerResponse(404, "Rule not found.")]
+        public async Task<IActionResult> MarkTriggered(int id)
+        {
+            var rule = await _context.AutomationRules.FindAsync(id);
+            if (rule == null)
+                return NotFound();
+
+            rule.LastTriggeredAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
         /// <summary>
@@ -122,7 +143,9 @@ namespace garge_api.Controllers
                         SensorId = rule.SensorId,
                         Condition = rule.Condition,
                         Threshold = rule.Threshold,
-                        Action = rule.Action
+                        Action = rule.Action,
+                        IsEnabled = rule.IsEnabled,
+                        LastTriggeredAt = rule.LastTriggeredAt,
                     });
                 }
             }
@@ -170,6 +193,7 @@ namespace garge_api.Controllers
             rule.Condition = dto.Condition;
             rule.Threshold = dto.Threshold;
             rule.Action = dto.Action;
+            rule.IsEnabled = dto.IsEnabled;
 
             await _context.SaveChangesAsync();
 
@@ -182,7 +206,9 @@ namespace garge_api.Controllers
                 SensorId = rule.SensorId,
                 Condition = rule.Condition,
                 Threshold = rule.Threshold,
-                Action = rule.Action
+                Action = rule.Action,
+                IsEnabled = rule.IsEnabled,
+                LastTriggeredAt = rule.LastTriggeredAt,
             };
 
             return Ok(result);

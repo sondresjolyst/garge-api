@@ -72,9 +72,40 @@ namespace garge_api.Controllers
             }
 
             var profileResponse = _mapper.Map<UserProfileDto>(userProfile);
+            profileResponse.EmailConfirmed = user.EmailConfirmed;
+            profileResponse.PriceZone = userProfile.PriceZone;
 
             _logger.LogInformation("User profile returned for {@LogData}", new { id });
             return Ok(profileResponse);
+        }
+
+        /// <summary>
+        /// Updates user preferences (e.g. price zone).
+        /// </summary>
+        [HttpPut("{id}/preferences")]
+        [SwaggerOperation(Summary = "Updates user preferences.")]
+        [SwaggerResponse(200, "Preferences updated.", typeof(UserProfileDto))]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User profile not found.")]
+        public async Task<IActionResult> UpdatePreferences(string id, [FromBody] UpdateUserPreferencesDto dto)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || userIdClaim.Value != id)
+                return Forbid();
+
+            var userProfile = await _context.UserProfiles.SingleOrDefaultAsync(up => up.Id == id);
+            if (userProfile == null)
+                return NotFound(new { message = "User profile not found!" });
+
+            userProfile.PriceZone = dto.PriceZone;
+            await _context.SaveChangesAsync();
+
+            var user = await _userManager.FindByIdAsync(id);
+            var response = _mapper.Map<UserProfileDto>(userProfile);
+            response.EmailConfirmed = user?.EmailConfirmed ?? false;
+            response.PriceZone = userProfile.PriceZone;
+
+            return Ok(response);
         }
     }
 }

@@ -15,4 +15,7 @@ public class UserProfile
     [MaxLength(50)]
     public required string Email { get; set; }
     public required User User { get; set; }
+
+    [MaxLength(10)]
+    public string PriceZone { get; set; } = "NO2";
 }
