@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.0](https://github.com/sondresjolyst/garge-api/compare/v1.3.4...v1.4.0) (2026-04-09)
+
+
+### Features
+
+* daily cleanup of revoked and expired refresh tokens ([#69](https://github.com/sondresjolyst/garge-api/issues/69)) ([76d4551](https://github.com/sondresjolyst/garge-api/commit/76d4551c9406966ef774c55af868e54d01fc7e08))
+
+
+### Bug Fixes
+
+* add Designer.cs for ReattachBatteryHealthToVoltageSensor migration ([c6570af](https://github.com/sondresjolyst/garge-api/commit/c6570af9c61f0d3b527a2742ec5162b4154297b0))
+* deduplicate SOCKET switches and add unique constraint on Name ([#68](https://github.com/sondresjolyst/garge-api/issues/68)) ([4116e76](https://github.com/sondresjolyst/garge-api/commit/4116e763b0185dc709ba8e1c9190510952ce0f42))
+* migrate SwitchData from stale switch-typed rows to SOCKET rows ([09c4bb8](https://github.com/sondresjolyst/garge-api/commit/09c4bb86da0f9ffee81a1a9821ff1c783c0d23d3))
+
 ## [1.3.4](https://github.com/sondresjolyst/garge-api/compare/v1.3.3...v1.3.4) (2026-04-08)
 
 
