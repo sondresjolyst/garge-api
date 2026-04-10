@@ -1,5 +1,3 @@
-// Copyright (c) 2023-2026 Sondre Sjølyst
-
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 

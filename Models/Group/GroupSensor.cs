@@ -1,5 +1,3 @@
-// Copyright (c) 2023-2026 Sondre Sjølyst
-
 namespace garge_api.Models.Group
 {
     public class GroupSensor
