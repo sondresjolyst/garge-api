@@ -6,5 +6,6 @@ namespace garge_api.Dtos.Group
         public string Name { get; set; } = string.Empty;
         public string? Icon { get; set; }
         public List<int> SensorIds { get; set; } = new();
+        public List<int> SwitchIds { get; set; } = new();
     }
 }

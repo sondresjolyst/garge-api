@@ -2,7 +2,6 @@
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
@@ -19,14 +18,12 @@ namespace garge_api.Controllers
     public class SwitchesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
         private readonly ILogger<SwitchesController> _logger;
 
-        public SwitchesController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper, ILogger<SwitchesController> logger)
+        public SwitchesController(ApplicationDbContext context, IMapper mapper, ILogger<SwitchesController> logger)
         {
             _context = context;
-            _roleManager = roleManager;
             _mapper = mapper;
             _logger = logger;
         }
@@ -37,16 +34,21 @@ namespace garge_api.Controllers
 
             // Admins always have access
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains(switchEntity.Role, StringComparer.OrdinalIgnoreCase))
+                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            // Use ParentName for device access
-            var accessibleParentNames = await _context.Sensors
-                .Where(sensor => userRoles.Contains(sensor.Role))
-                .Select(sensor => sensor.ParentName)
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Direct ownership via UserSwitches
+            if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id))
+                return true;
+
+            // Use ParentName of sensors the user owns to derive switch access
+            var accessibleParentNames = await _context.UserSensors
+                .Where(us => us.UserId == userId)
+                .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
                 .ToListAsync();
 
             // Check if any device the user can access has discovered this switch
@@ -79,7 +81,18 @@ namespace garge_api.Controllers
                 }
             }
 
-            var dtos = _mapper.Map<IEnumerable<SwitchDto>>(accessibleSwitches);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var switchIds = accessibleSwitches.Select(s => s.Id).ToList();
+            var customNames = await _context.UserSwitchCustomNames
+                .Where(x => x.UserId == userId && switchIds.Contains(x.SwitchId))
+                .ToDictionaryAsync(x => x.SwitchId, x => x.CustomName);
+
+            var dtos = accessibleSwitches.Select(sw =>
+            {
+                var dto = _mapper.Map<SwitchDto>(sw);
+                dto.CustomName = customNames.TryGetValue(sw.Id, out var cn) ? cn : null;
+                return dto;
+            });
 
             _logger.LogInformation("Returning {@LogData}", new { Count = accessibleSwitches.Count, User = User.Identity?.Name });
             return Ok(dtos);
@@ -110,7 +123,14 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var customName = await _context.UserSwitchCustomNames
+                .Where(x => x.UserId == userId && x.SwitchId == id)
+                .Select(x => x.CustomName)
+                .FirstOrDefaultAsync();
+
             var dto = _mapper.Map<SwitchDto>(switchEntity);
+            dto.CustomName = customName;
 
             _logger.LogInformation("Returning switch {@LogData}", new { id, User = User.Identity?.Name });
             return Ok(dto);
@@ -137,16 +157,7 @@ namespace garge_api.Controllers
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
-
-            if (!await _roleManager.RoleExistsAsync(switchEntity.Role))
-            {
-                var roleResult = await _roleManager.CreateAsync(new IdentityRole(switchEntity.Role));
-                if (!roleResult.Succeeded)
-                {
-                    _logger.LogError("CreateSwitch failed to create role for {@LogData}", new { switchEntity.Role });
-                    return StatusCode(500, new { message = "Failed to create role!" });
-                }
-            }
+            switchEntity.RegistrationCode = await GenerateSwitchRegistrationCodeAsync();
 
             _context.Switches.Add(switchEntity);
             try
@@ -586,6 +597,130 @@ namespace garge_api.Controllers
                 "y" => TimeSpan.FromDays(intValue * 365),
                 _ => null,
             };
+        }
+
+        /// <summary>
+        /// Set or update the custom display name for a switch (per user).
+        /// </summary>
+        [HttpPatch("{switchId}/custom-name")]
+        [SwaggerOperation(Summary = "Set or update the custom display name for a switch.")]
+        [SwaggerResponse(200, "Updated switch DTO.", typeof(SwitchDto))]
+        [SwaggerResponse(404, "Switch not found.")]
+        [SwaggerResponse(403, "User does not have access to this switch.")]
+        public async Task<IActionResult> UpdateCustomName(
+            int switchId,
+            [FromBody] garge_api.Dtos.Sensor.UpdateCustomNameDto dto)
+        {
+            _logger.LogInformation("UpdateCustomName (switch) called by {@LogData}", new { User = User.Identity?.Name, switchId });
+
+            var switchEntity = await _context.Switches.FindAsync(switchId);
+            if (switchEntity == null)
+            {
+                _logger.LogWarning("UpdateCustomName (switch) not found: {@LogData}", new { switchId });
+                return NotFound(new { message = "Switch not found!" });
+            }
+
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("UpdateCustomName (switch) forbidden for {@LogData}", new { User = User.Identity?.Name, switchId });
+                return Forbid();
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+
+            var existing = await _context.UserSwitchCustomNames
+                .FirstOrDefaultAsync(x => x.UserId == userId && x.SwitchId == switchId);
+
+            if (existing != null)
+            {
+                existing.CustomName = dto.CustomName;
+            }
+            else
+            {
+                _context.UserSwitchCustomNames.Add(new Models.Switch.UserSwitchCustomName
+                {
+                    UserId = userId,
+                    SwitchId = switchId,
+                    CustomName = dto.CustomName,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            await _context.SaveChangesAsync();
+
+            var result = new SwitchDto
+            {
+                Id = switchEntity.Id,
+                Name = switchEntity.Name,
+                Type = switchEntity.Type,
+                Role = switchEntity.Role,
+                CustomName = dto.CustomName
+            };
+
+            return Ok(result);
+        }
+
+        [HttpPost("claim")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Claims a switch using a registration code.")]
+        [SwaggerResponse(200, "Switch claimed successfully.")]
+        [SwaggerResponse(400, "Registration code is required.")]
+        [SwaggerResponse(404, "Invalid registration code.")]
+        public async Task<IActionResult> ClaimSwitch([FromBody] ClaimSwitchDto dto)
+        {
+            _logger.LogInformation("ClaimSwitch called by {@LogData}", new { User = User.Identity?.Name, dto.RegistrationCode });
+
+            if (string.IsNullOrWhiteSpace(dto.RegistrationCode))
+                return BadRequest(new { message = "Registration code is required." });
+
+            var switchEntity = await _context.Switches.FirstOrDefaultAsync(s => s.RegistrationCode == dto.RegistrationCode);
+            if (switchEntity == null)
+                return NotFound(new { message = "Invalid registration code." });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var alreadyClaimed = await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id);
+            if (!alreadyClaimed)
+            {
+                _context.UserSwitches.Add(new UserSwitch { UserId = userId!, SwitchId = switchEntity.Id });
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("ClaimSwitch assigned switch to user {@LogData}", new { switchEntity.Id, User = User.Identity?.Name });
+            }
+            return Ok(new { message = "Switch successfully claimed.", switchId = switchEntity.Id, registrationCode = switchEntity.RegistrationCode });
+        }
+
+        [HttpDelete("{id}/claim")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Removes the current user's direct access to a switch.")]
+        [SwaggerResponse(200, "Switch unclaimed successfully.")]
+        [SwaggerResponse(404, "Switch not found.")]
+        public async Task<IActionResult> UnclaimSwitch(int id)
+        {
+            _logger.LogInformation("UnclaimSwitch called by {@LogData}", new { User = User.Identity?.Name, id });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userSwitch = await _context.UserSwitches.FirstOrDefaultAsync(us => us.UserId == userId && us.SwitchId == id);
+            if (userSwitch != null)
+            {
+                _context.UserSwitches.Remove(userSwitch);
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Switch unclaimed by user {@LogData}", new { User = User.Identity?.Name, id });
+            return Ok(new { message = "Switch removed from your account." });
+        }
+
+        private async Task<string> GenerateSwitchRegistrationCodeAsync(int length = 10)
+        {
+            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+            var random = new Random();
+            string code;
+            bool exists;
+            do
+            {
+                code = new string(Enumerable.Range(0, length).Select(_ => chars[random.Next(chars.Length)]).ToArray());
+                exists = await _context.Switches.AnyAsync(s => s.RegistrationCode == code);
+            } while (exists);
+            return code;
         }
     }
 }

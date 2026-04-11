@@ -29,11 +29,15 @@ namespace garge_api.Controllers
             _logger = logger;
         }
 
-        private bool UserHasRequiredRole(string sensorRole)
+        private bool IsAdmin() =>
+            User.FindAll(ClaimTypes.Role).Select(r => r.Value)
+                .Any(r => AdminRoles.Contains(r, StringComparer.OrdinalIgnoreCase));
+
+        private async Task<bool> UserCanAccessSensorAsync(int sensorId)
         {
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            return userRoles.Any(role => role.Equals(sensorRole, StringComparison.OrdinalIgnoreCase)) ||
-                   userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
+            if (IsAdmin()) return true;
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
         private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
@@ -59,7 +63,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (!UserHasRequiredRole(sensor.Role))
+            if (!await UserCanAccessSensorAsync(sensor.Id))
             {
                 _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
                 return Forbid();
@@ -106,7 +110,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (!UserHasRequiredRole(sensor.Role))
+            if (!await UserCanAccessSensorAsync(sensor.Id))
             {
                 _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
                 return Forbid();

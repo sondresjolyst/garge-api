@@ -22,5 +22,8 @@ namespace garge_api.Models.Switch
         [Required]
         [MaxLength(50)]
         public required string Role { get; set; }
+
+        [MaxLength(20)]
+        public string? RegistrationCode { get; set; }
     }
 }

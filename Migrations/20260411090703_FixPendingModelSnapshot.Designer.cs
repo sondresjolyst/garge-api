@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260411090703_FixPendingModelSnapshot")]
+    partial class FixPendingModelSnapshot
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -646,24 +649,6 @@ namespace garge_api.Migrations
                     b.ToTable("SensorData");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasColumnType("text");
-
-                    b.Property<int>("SensorId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserId", "SensorId");
-
-                    b.HasIndex("SensorId");
-
-                    b.ToTable("UserSensors");
-                });
-
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensorCustomName", b =>
                 {
                     b.Property<string>("UserId")
@@ -698,10 +683,6 @@ namespace garge_api.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)");
-
-                    b.Property<string>("RegistrationCode")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -741,24 +722,6 @@ namespace garge_api.Migrations
                     b.HasIndex("SwitchId");
 
                     b.ToTable("SwitchData", (string)null);
-                });
-
-            modelBuilder.Entity("garge_api.Models.Switch.UserSwitch", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasColumnType("text");
-
-                    b.Property<int>("SwitchId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("UserId", "SwitchId");
-
-                    b.HasIndex("SwitchId");
-
-                    b.ToTable("UserSwitches");
                 });
 
             modelBuilder.Entity("garge_api.Models.Switch.UserSwitchCustomName", b =>
@@ -937,25 +900,6 @@ namespace garge_api.Migrations
                     b.Navigation("Sensor");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>
-                {
-                    b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
-                        .WithMany()
-                        .HasForeignKey("SensorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Sensor");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensorCustomName", b =>
                 {
                     b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
@@ -984,25 +928,6 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("Switch");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Switch.UserSwitch", b =>
-                {
-                    b.HasOne("garge_api.Models.Switch.Switch", "Switch")
-                        .WithMany()
-                        .HasForeignKey("SwitchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Switch");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("garge_api.Models.Switch.UserSwitchCustomName", b =>

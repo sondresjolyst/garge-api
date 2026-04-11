@@ -27,7 +27,7 @@ namespace garge_api.Controllers
         private string GetUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
         /// <summary>
-        /// Get all groups for the current user, including their sensor IDs.
+        /// Get all groups for the current user, including their sensor and switch IDs.
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetGroups()
@@ -36,12 +36,14 @@ namespace garge_api.Controllers
             var groups = await _context.Groups
                 .Where(g => g.UserId == userId)
                 .Include(g => g.GroupSensors)
+                .Include(g => g.GroupSwitches)
                 .Select(g => new GroupDto
                 {
                     Id = g.Id,
                     Name = g.Name,
                     Icon = g.Icon,
-                    SensorIds = g.GroupSensors.Select(gs => gs.SensorId).ToList()
+                    SensorIds = g.GroupSensors.Select(gs => gs.SensorId).ToList(),
+                    SwitchIds = g.GroupSwitches.Select(gs => gs.SwitchId).ToList()
                 })
                 .ToListAsync();
 
@@ -72,7 +74,8 @@ namespace garge_api.Controllers
                 Id = group.Id,
                 Name = group.Name,
                 Icon = group.Icon,
-                SensorIds = new List<int>()
+                SensorIds = new List<int>(),
+                SwitchIds = new List<int>()
             });
         }
 
@@ -96,7 +99,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Delete a group and all its sensor associations.
+        /// Delete a group and all its sensor and switch associations.
         /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteGroup(int id)
@@ -104,11 +107,13 @@ namespace garge_api.Controllers
             var userId = GetUserId();
             var group = await _context.Groups
                 .Include(g => g.GroupSensors)
+                .Include(g => g.GroupSwitches)
                 .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
 
             if (group == null) return NotFound();
 
             _context.GroupSensors.RemoveRange(group.GroupSensors);
+            _context.GroupSwitches.RemoveRange(group.GroupSwitches);
             _context.Groups.Remove(group);
             await _context.SaveChangesAsync();
 
@@ -157,6 +162,54 @@ namespace garge_api.Controllers
             if (gs != null)
             {
                 _context.GroupSensors.Remove(gs);
+                await _context.SaveChangesAsync();
+            }
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Add a switch to a group.
+        /// </summary>
+        [HttpPost("{id}/switches/{switchId}")]
+        public async Task<IActionResult> AddSwitch(int id, int switchId)
+        {
+            var userId = GetUserId();
+            var group = await _context.Groups
+                .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
+
+            if (group == null) return NotFound();
+
+            var exists = await _context.GroupSwitches
+                .AnyAsync(gs => gs.GroupId == id && gs.SwitchId == switchId);
+
+            if (!exists)
+            {
+                _context.GroupSwitches.Add(new GroupSwitch { GroupId = id, SwitchId = switchId });
+                await _context.SaveChangesAsync();
+            }
+
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Remove a switch from a group.
+        /// </summary>
+        [HttpDelete("{id}/switches/{switchId}")]
+        public async Task<IActionResult> RemoveSwitch(int id, int switchId)
+        {
+            var userId = GetUserId();
+            var group = await _context.Groups
+                .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
+
+            if (group == null) return NotFound();
+
+            var gs = await _context.GroupSwitches
+                .FirstOrDefaultAsync(x => x.GroupId == id && x.SwitchId == switchId);
+
+            if (gs != null)
+            {
+                _context.GroupSwitches.Remove(gs);
                 await _context.SaveChangesAsync();
             }
 
