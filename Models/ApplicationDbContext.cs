@@ -30,6 +30,8 @@ namespace garge_api.Models
         public DbSet<AutomationRule> AutomationRules { get; set; }
         public DbSet<Group.Group> Groups { get; set; }
         public DbSet<GroupSensor> GroupSensors { get; set; }
+        public DbSet<GroupSwitch> GroupSwitches { get; set; }
+        public DbSet<UserSwitchCustomName> UserSwitchCustomNames { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -107,6 +109,32 @@ namespace garge_api.Models
                 .HasOne(gs => gs.Sensor)
                 .WithMany()
                 .HasForeignKey(gs => gs.SensorId);
+
+            modelBuilder.Entity<GroupSwitch>()
+                .HasKey(gs => new { gs.GroupId, gs.SwitchId });
+
+            modelBuilder.Entity<GroupSwitch>()
+                .HasOne(gs => gs.Group)
+                .WithMany(g => g.GroupSwitches)
+                .HasForeignKey(gs => gs.GroupId);
+
+            modelBuilder.Entity<GroupSwitch>()
+                .HasOne(gs => gs.Switch)
+                .WithMany()
+                .HasForeignKey(gs => gs.SwitchId);
+
+            modelBuilder.Entity<UserSwitchCustomName>()
+                .HasKey(x => new { x.UserId, x.SwitchId });
+
+            modelBuilder.Entity<UserSwitchCustomName>()
+                .HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId);
+
+            modelBuilder.Entity<UserSwitchCustomName>()
+                .HasOne(x => x.Switch)
+                .WithMany()
+                .HasForeignKey(x => x.SwitchId);
         }
         public void EnsureTriggers()
         {
