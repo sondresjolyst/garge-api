@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/sondresjolyst/garge-api/compare/v1.5.0...v1.6.0) (2026-04-11)
+
+
+### Features
+
+* UserSensors + UserSwitches DB-based access control ([#78](https://github.com/sondresjolyst/garge-api/issues/78)) ([3f27f70](https://github.com/sondresjolyst/garge-api/commit/3f27f7015a7f5ec8eb19bf4d93fffe62356a7ddb))
+
 ## [1.5.0](https://github.com/sondresjolyst/garge-api/compare/v1.4.0...v1.5.0) (2026-04-10)
 
 
