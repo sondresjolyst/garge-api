@@ -35,10 +35,12 @@ namespace garge_api.Controllers
                 return true;
             }
 
-            // Get accessible parent names from sensors the user has a role for
-            var accessibleParentNames = await _context.Sensors
-                .Where(sensor => userRoles.Contains(sensor.Role))
-                .Select(sensor => sensor.ParentName)
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Get accessible parent names from sensors the user owns
+            var accessibleParentNames = await _context.UserSensors
+                .Where(us => us.UserId == userId)
+                .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
                 .ToListAsync();
 
             // Fetch the target name (switch)

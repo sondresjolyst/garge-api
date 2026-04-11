@@ -2,7 +2,6 @@
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
@@ -19,14 +18,12 @@ namespace garge_api.Controllers
     public class SwitchesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IMapper _mapper;
         private readonly ILogger<SwitchesController> _logger;
 
-        public SwitchesController(ApplicationDbContext context, RoleManager<IdentityRole> roleManager, IMapper mapper, ILogger<SwitchesController> logger)
+        public SwitchesController(ApplicationDbContext context, IMapper mapper, ILogger<SwitchesController> logger)
         {
             _context = context;
-            _roleManager = roleManager;
             _mapper = mapper;
             _logger = logger;
         }
@@ -37,16 +34,17 @@ namespace garge_api.Controllers
 
             // Admins always have access
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains(switchEntity.Role, StringComparer.OrdinalIgnoreCase))
+                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            // Use ParentName for device access
-            var accessibleParentNames = await _context.Sensors
-                .Where(sensor => userRoles.Contains(sensor.Role))
-                .Select(sensor => sensor.ParentName)
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // Use ParentName of sensors the user owns to derive switch access
+            var accessibleParentNames = await _context.UserSensors
+                .Where(us => us.UserId == userId)
+                .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
                 .ToListAsync();
 
             // Check if any device the user can access has discovered this switch
@@ -155,16 +153,6 @@ namespace garge_api.Controllers
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
-
-            if (!await _roleManager.RoleExistsAsync(switchEntity.Role))
-            {
-                var roleResult = await _roleManager.CreateAsync(new IdentityRole(switchEntity.Role));
-                if (!roleResult.Succeeded)
-                {
-                    _logger.LogError("CreateSwitch failed to create role for {@LogData}", new { switchEntity.Role });
-                    return StatusCode(500, new { message = "Failed to create role!" });
-                }
-            }
 
             _context.Switches.Add(switchEntity);
             try

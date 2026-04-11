@@ -32,6 +32,7 @@ namespace garge_api.Models
         public DbSet<GroupSensor> GroupSensors { get; set; }
         public DbSet<GroupSwitch> GroupSwitches { get; set; }
         public DbSet<UserSwitchCustomName> UserSwitchCustomNames { get; set; }
+        public DbSet<UserSensor> UserSensors { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -135,6 +136,21 @@ namespace garge_api.Models
                 .HasOne(x => x.Switch)
                 .WithMany()
                 .HasForeignKey(x => x.SwitchId);
+
+            modelBuilder.Entity<UserSensor>()
+                .HasKey(x => new { x.UserId, x.SensorId });
+
+            modelBuilder.Entity<UserSensor>()
+                .HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserSensor>()
+                .HasOne(x => x.Sensor)
+                .WithMany()
+                .HasForeignKey(x => x.SensorId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
         public void EnsureTriggers()
         {
