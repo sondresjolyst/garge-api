@@ -23,5 +23,6 @@ namespace garge_api.Models.Group
         public required string UserId { get; set; }
 
         public ICollection<GroupSensor> GroupSensors { get; set; } = new List<GroupSensor>();
+        public ICollection<GroupSwitch> GroupSwitches { get; set; } = new List<GroupSwitch>();
     }
 }

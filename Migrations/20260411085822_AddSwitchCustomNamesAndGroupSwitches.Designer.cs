@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260411085822_AddSwitchCustomNamesAndGroupSwitches")]
+    partial class AddSwitchCustomNamesAndGroupSwitches
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -414,21 +417,6 @@ namespace garge_api.Migrations
                     b.ToTable("GroupSensors");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Group.GroupSwitch", b =>
-                {
-                    b.Property<int>("GroupId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("SwitchId")
-                        .HasColumnType("integer");
-
-                    b.HasKey("GroupId", "SwitchId");
-
-                    b.HasIndex("SwitchId");
-
-                    b.ToTable("GroupSwitches");
-                });
-
             modelBuilder.Entity("garge_api.Models.Mqtt.DiscoveredDevice", b =>
                 {
                     b.Property<int>("Id")
@@ -721,28 +709,6 @@ namespace garge_api.Migrations
                     b.ToTable("SwitchData", (string)null);
                 });
 
-            modelBuilder.Entity("garge_api.Models.Switch.UserSwitchCustomName", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasColumnType("text");
-
-                    b.Property<int>("SwitchId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("CustomName")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("UserId", "SwitchId");
-
-                    b.HasIndex("SwitchId");
-
-                    b.ToTable("UserSwitchCustomNames");
-                });
-
             modelBuilder.Entity("garge_api.Models.Webhook.WebhookSubscription", b =>
                 {
                     b.Property<int>("Id")
@@ -856,25 +822,6 @@ namespace garge_api.Migrations
                     b.Navigation("Sensor");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Group.GroupSwitch", b =>
-                {
-                    b.HasOne("garge_api.Models.Group.Group", "Group")
-                        .WithMany("GroupSwitches")
-                        .HasForeignKey("GroupId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("garge_api.Models.Switch.Switch", "Switch")
-                        .WithMany()
-                        .HasForeignKey("SwitchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Group");
-
-                    b.Navigation("Switch");
-                });
-
             modelBuilder.Entity("garge_api.Models.Sensor.BatteryHealth", b =>
                 {
                     b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
@@ -927,30 +874,9 @@ namespace garge_api.Migrations
                     b.Navigation("Switch");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Switch.UserSwitchCustomName", b =>
-                {
-                    b.HasOne("garge_api.Models.Switch.Switch", "Switch")
-                        .WithMany()
-                        .HasForeignKey("SwitchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Switch");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("garge_api.Models.Group.Group", b =>
                 {
                     b.Navigation("GroupSensors");
-
-                    b.Navigation("GroupSwitches");
                 });
 #pragma warning restore 612, 618
         }

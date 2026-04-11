@@ -79,7 +79,18 @@ namespace garge_api.Controllers
                 }
             }
 
-            var dtos = _mapper.Map<IEnumerable<SwitchDto>>(accessibleSwitches);
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var switchIds = accessibleSwitches.Select(s => s.Id).ToList();
+            var customNames = await _context.UserSwitchCustomNames
+                .Where(x => x.UserId == userId && switchIds.Contains(x.SwitchId))
+                .ToDictionaryAsync(x => x.SwitchId, x => x.CustomName);
+
+            var dtos = accessibleSwitches.Select(sw =>
+            {
+                var dto = _mapper.Map<SwitchDto>(sw);
+                dto.CustomName = customNames.TryGetValue(sw.Id, out var cn) ? cn : null;
+                return dto;
+            });
 
             _logger.LogInformation("Returning {@LogData}", new { Count = accessibleSwitches.Count, User = User.Identity?.Name });
             return Ok(dtos);
@@ -110,7 +121,14 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var customName = await _context.UserSwitchCustomNames
+                .Where(x => x.UserId == userId && x.SwitchId == id)
+                .Select(x => x.CustomName)
+                .FirstOrDefaultAsync();
+
             var dto = _mapper.Map<SwitchDto>(switchEntity);
+            dto.CustomName = customName;
 
             _logger.LogInformation("Returning switch {@LogData}", new { id, User = User.Identity?.Name });
             return Ok(dto);
@@ -586,6 +604,67 @@ namespace garge_api.Controllers
                 "y" => TimeSpan.FromDays(intValue * 365),
                 _ => null,
             };
+        }
+
+        /// <summary>
+        /// Set or update the custom display name for a switch (per user).
+        /// </summary>
+        [HttpPatch("{switchId}/custom-name")]
+        [SwaggerOperation(Summary = "Set or update the custom display name for a switch.")]
+        [SwaggerResponse(200, "Updated switch DTO.", typeof(SwitchDto))]
+        [SwaggerResponse(404, "Switch not found.")]
+        [SwaggerResponse(403, "User does not have access to this switch.")]
+        public async Task<IActionResult> UpdateCustomName(
+            int switchId,
+            [FromBody] garge_api.Dtos.Sensor.UpdateCustomNameDto dto)
+        {
+            _logger.LogInformation("UpdateCustomName (switch) called by {@LogData}", new { User = User.Identity?.Name, switchId });
+
+            var switchEntity = await _context.Switches.FindAsync(switchId);
+            if (switchEntity == null)
+            {
+                _logger.LogWarning("UpdateCustomName (switch) not found: {@LogData}", new { switchId });
+                return NotFound(new { message = "Switch not found!" });
+            }
+
+            if (!await UserHasRequiredRoleAsync(switchEntity))
+            {
+                _logger.LogWarning("UpdateCustomName (switch) forbidden for {@LogData}", new { User = User.Identity?.Name, switchId });
+                return Forbid();
+            }
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+
+            var existing = await _context.UserSwitchCustomNames
+                .FirstOrDefaultAsync(x => x.UserId == userId && x.SwitchId == switchId);
+
+            if (existing != null)
+            {
+                existing.CustomName = dto.CustomName;
+            }
+            else
+            {
+                _context.UserSwitchCustomNames.Add(new Models.Switch.UserSwitchCustomName
+                {
+                    UserId = userId,
+                    SwitchId = switchId,
+                    CustomName = dto.CustomName,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
+            await _context.SaveChangesAsync();
+
+            var result = new SwitchDto
+            {
+                Id = switchEntity.Id,
+                Name = switchEntity.Name,
+                Type = switchEntity.Type,
+                Role = switchEntity.Role,
+                CustomName = dto.CustomName
+            };
+
+            return Ok(result);
         }
     }
 }
