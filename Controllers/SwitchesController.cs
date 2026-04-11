@@ -41,6 +41,10 @@ namespace garge_api.Controllers
 
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
+            // Direct ownership via UserSwitches
+            if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id))
+                return true;
+
             // Use ParentName of sensors the user owns to derive switch access
             var accessibleParentNames = await _context.UserSensors
                 .Where(us => us.UserId == userId)
@@ -153,6 +157,7 @@ namespace garge_api.Controllers
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
+            switchEntity.RegistrationCode = await GenerateSwitchRegistrationCodeAsync();
 
             _context.Switches.Add(switchEntity);
             try
@@ -653,6 +658,69 @@ namespace garge_api.Controllers
             };
 
             return Ok(result);
+        }
+
+        [HttpPost("claim")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Claims a switch using a registration code.")]
+        [SwaggerResponse(200, "Switch claimed successfully.")]
+        [SwaggerResponse(400, "Registration code is required.")]
+        [SwaggerResponse(404, "Invalid registration code.")]
+        public async Task<IActionResult> ClaimSwitch([FromBody] ClaimSwitchDto dto)
+        {
+            _logger.LogInformation("ClaimSwitch called by {@LogData}", new { User = User.Identity?.Name, dto.RegistrationCode });
+
+            if (string.IsNullOrWhiteSpace(dto.RegistrationCode))
+                return BadRequest(new { message = "Registration code is required." });
+
+            var switchEntity = await _context.Switches.FirstOrDefaultAsync(s => s.RegistrationCode == dto.RegistrationCode);
+            if (switchEntity == null)
+                return NotFound(new { message = "Invalid registration code." });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var alreadyClaimed = await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id);
+            if (!alreadyClaimed)
+            {
+                _context.UserSwitches.Add(new UserSwitch { UserId = userId!, SwitchId = switchEntity.Id });
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("ClaimSwitch assigned switch to user {@LogData}", new { switchEntity.Id, User = User.Identity?.Name });
+            }
+            return Ok(new { message = "Switch successfully claimed.", switchId = switchEntity.Id, registrationCode = switchEntity.RegistrationCode });
+        }
+
+        [HttpDelete("{id}/claim")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Removes the current user's direct access to a switch.")]
+        [SwaggerResponse(200, "Switch unclaimed successfully.")]
+        [SwaggerResponse(404, "Switch not found.")]
+        public async Task<IActionResult> UnclaimSwitch(int id)
+        {
+            _logger.LogInformation("UnclaimSwitch called by {@LogData}", new { User = User.Identity?.Name, id });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userSwitch = await _context.UserSwitches.FirstOrDefaultAsync(us => us.UserId == userId && us.SwitchId == id);
+            if (userSwitch != null)
+            {
+                _context.UserSwitches.Remove(userSwitch);
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Switch unclaimed by user {@LogData}", new { User = User.Identity?.Name, id });
+            return Ok(new { message = "Switch removed from your account." });
+        }
+
+        private async Task<string> GenerateSwitchRegistrationCodeAsync(int length = 10)
+        {
+            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+            var random = new Random();
+            string code;
+            bool exists;
+            do
+            {
+                code = new string(Enumerable.Range(0, length).Select(_ => chars[random.Next(chars.Length)]).ToArray());
+                exists = await _context.Switches.AnyAsync(s => s.RegistrationCode == code);
+            } while (exists);
+            return code;
         }
     }
 }
