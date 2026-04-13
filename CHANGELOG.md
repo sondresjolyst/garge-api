@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.6.0](https://github.com/sondresjolyst/garge-api/compare/v1.5.0...v1.6.0) (2026-04-11)
+
+
+### Features
+
+* UserSensors + UserSwitches DB-based access control ([#78](https://github.com/sondresjolyst/garge-api/issues/78)) ([3f27f70](https://github.com/sondresjolyst/garge-api/commit/3f27f7015a7f5ec8eb19bf4d93fffe62356a7ddb))
+
+## [1.5.0](https://github.com/sondresjolyst/garge-api/compare/v1.4.0...v1.5.0) (2026-04-10)
+
+
+### Features
+
+* automation improvements and user price zone preference ([#72](https://github.com/sondresjolyst/garge-api/issues/72)) ([9e49823](https://github.com/sondresjolyst/garge-api/commit/9e49823e6a32e8f72c5946626b6dc55de35b2dd1))
+* daily cleanup of revoked and expired refresh tokens ([81b8d15](https://github.com/sondresjolyst/garge-api/commit/81b8d152f5de90ba1517454f6b055b43b0f9a334))
+* **groups:** add vehicle grouping API ([#71](https://github.com/sondresjolyst/garge-api/issues/71)) ([81b8d15](https://github.com/sondresjolyst/garge-api/commit/81b8d152f5de90ba1517454f6b055b43b0f9a334))
+* **groups:** add vehicle grouping API (models, DTOs, controller, EF migration) ([81b8d15](https://github.com/sondresjolyst/garge-api/commit/81b8d152f5de90ba1517454f6b055b43b0f9a334))
+* **sensors:** add DELETE /sensors/{id}/claim endpoint to unclaim sensor from user account ([81b8d15](https://github.com/sondresjolyst/garge-api/commit/81b8d152f5de90ba1517454f6b055b43b0f9a334))
+
+
+### Bug Fixes
+
+* resolve merge conflict in MergeStaleTypeSwitchRows migration ([81b8d15](https://github.com/sondresjolyst/garge-api/commit/81b8d152f5de90ba1517454f6b055b43b0f9a334))
+
 ## [1.4.0](https://github.com/sondresjolyst/garge-api/compare/v1.3.4...v1.4.0) (2026-04-09)
 
 
