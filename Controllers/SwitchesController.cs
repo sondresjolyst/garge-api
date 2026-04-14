@@ -305,7 +305,7 @@ namespace garge_api.Controllers
         /// </summary>
         [HttpGet("{switchId}/state")]
         [SwaggerOperation(Summary = "Retrieves state for a specific switch.")]
-        [SwaggerResponse(200, "The state for the specified switch.", typeof(IEnumerable<SwitchDataDto>))]
+        [SwaggerResponse(200, "The state for the specified switch, or null if no data exists yet.", typeof(SwitchDataDto))]
         [SwaggerResponse(404, "Switch not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitchState(int switchId)
@@ -332,8 +332,8 @@ namespace garge_api.Controllers
 
             if (query == null)
             {
-                _logger.LogWarning("GetSwitchState no data found for {@LogData}", new { switchId });
-                return NotFound(new { message = "No data found for this switch!" });
+                _logger.LogInformation("GetSwitchState no data found for {@LogData}", new { switchId });
+                return Ok((SwitchDataDto?)null);
             }
 
             var dto = _mapper.Map<SwitchDataDto>(query);
