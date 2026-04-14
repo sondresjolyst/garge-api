@@ -23,6 +23,9 @@ namespace garge_api.Controllers
         private readonly ILogger<ElectricityController> _logger;
         private readonly ApplicationDbContext _context;
 
+        private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
+                                                              .Replace("\n", "", StringComparison.Ordinal);
+
         public ElectricityController(NordPoolService nordPoolService, IMapper mapper, ILogger<ElectricityController> logger, ApplicationDbContext context)
         {
             _nordPoolService = nordPoolService;
@@ -42,7 +45,7 @@ namespace garge_api.Controllers
         [HttpGet("prices")]
         public async Task<IActionResult> GetPrices([FromQuery] string type, [FromQuery] string area, [FromQuery] DateTime? date, [FromQuery] string currency = "NOK")
         {
-            _logger.LogInformation("GetPrices called by {@LogData}", new { User = User.Identity?.Name, type, area, date, currency });
+            _logger.LogInformation("GetPrices called by {@LogData}", new { User = User.Identity?.Name, type = Sanitize(type), area = Sanitize(area), date, currency });
 
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
@@ -68,13 +71,13 @@ namespace garge_api.Controllers
             var storedEntries = await GetStoredPricesAsync(resolution, area, queryDate);
             if (storedEntries.Count > 0)
             {
-                _logger.LogInformation("Serving {Count} {Resolution} price entries from DB for area {Area}", storedEntries.Count, resolution, area);
+                _logger.LogInformation("Serving {Count} {Resolution} price entries from DB for area {Area}", storedEntries.Count, Sanitize(resolution), Sanitize(area));
                 var dbDto = BuildPriceResponseDto(storedEntries, area, currency);
                 return Ok(dbDto);
             }
 
             // Fall back to NordPool
-            _logger.LogInformation("No DB data found, fetching from NordPool {@LogData}", new { type, area, date, currency });
+            _logger.LogInformation("No DB data found, fetching from NordPool {@LogData}", new { type = Sanitize(type), area = Sanitize(area), date, currency });
             var data = await _nordPoolService.FetchPricesAsync(resolution, queryDate, new List<string> { area }, currency);
 
             if (data == null)
@@ -89,7 +92,7 @@ namespace garge_api.Controllers
                     entry.Value /= 1000m;
 
             var dto = _mapper.Map<PriceResponseDto>(data);
-            _logger.LogInformation("Returning NordPool price data {@LogData}", new { type, area, date, currency });
+            _logger.LogInformation("Returning NordPool price data {@LogData}", new { type = Sanitize(type), area = Sanitize(area), date, currency });
             return Ok(dto);
         }
 
