@@ -75,6 +75,11 @@ namespace garge_api.Controllers
                 Threshold = dto.Threshold,
                 Action = dto.Action,
                 IsEnabled = dto.IsEnabled,
+                ElectricityPriceCondition = dto.ElectricityPriceCondition,
+                ElectricityPriceThreshold = dto.ElectricityPriceThreshold,
+                ElectricityPriceArea = dto.ElectricityPriceArea,
+                ElectricityPriceOperator = dto.ElectricityPriceOperator,
+                TimerDurationHours = dto.TimerDurationHours,
             };
 
             if (!await UserHasAccessToAutomationAsync(rule))
@@ -97,6 +102,12 @@ namespace garge_api.Controllers
                 Action = rule.Action,
                 IsEnabled = rule.IsEnabled,
                 LastTriggeredAt = rule.LastTriggeredAt,
+                ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                ElectricityPriceArea = rule.ElectricityPriceArea,
+                ElectricityPriceOperator = rule.ElectricityPriceOperator,
+                TimerDurationHours = rule.TimerDurationHours,
+                TimerActivatedAt = rule.TimerActivatedAt,
             };
 
             return Ok(result);
@@ -148,6 +159,12 @@ namespace garge_api.Controllers
                         Action = rule.Action,
                         IsEnabled = rule.IsEnabled,
                         LastTriggeredAt = rule.LastTriggeredAt,
+                        ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                        ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                        ElectricityPriceArea = rule.ElectricityPriceArea,
+                        ElectricityPriceOperator = rule.ElectricityPriceOperator,
+                        TimerDurationHours = rule.TimerDurationHours,
+                        TimerActivatedAt = rule.TimerActivatedAt,
                     });
                 }
             }
@@ -196,6 +213,11 @@ namespace garge_api.Controllers
             rule.Threshold = dto.Threshold;
             rule.Action = dto.Action;
             rule.IsEnabled = dto.IsEnabled;
+            rule.ElectricityPriceCondition = dto.ElectricityPriceCondition;
+            rule.ElectricityPriceThreshold = dto.ElectricityPriceThreshold;
+            rule.ElectricityPriceArea = dto.ElectricityPriceArea;
+            rule.ElectricityPriceOperator = dto.ElectricityPriceOperator;
+            rule.TimerDurationHours = dto.TimerDurationHours;
 
             await _context.SaveChangesAsync();
 
@@ -211,9 +233,51 @@ namespace garge_api.Controllers
                 Action = rule.Action,
                 IsEnabled = rule.IsEnabled,
                 LastTriggeredAt = rule.LastTriggeredAt,
+                ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                ElectricityPriceArea = rule.ElectricityPriceArea,
+                ElectricityPriceOperator = rule.ElectricityPriceOperator,
+                TimerDurationHours = rule.TimerDurationHours,
+                TimerActivatedAt = rule.TimerActivatedAt,
             };
 
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Starts the timer on a timed automation rule (called by the operator).
+        /// </summary>
+        [HttpPatch("{id}/timer-start")]
+        [SwaggerOperation(Summary = "Sets TimerActivatedAt to now for a timed rule.")]
+        [SwaggerResponse(204, "Timer started.")]
+        [SwaggerResponse(404, "Rule not found.")]
+        public async Task<IActionResult> TimerStart(int id)
+        {
+            var rule = await _context.AutomationRules.FindAsync(id);
+            if (rule == null)
+                return NotFound();
+
+            rule.TimerActivatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Clears the timer on a timed automation rule (called by the operator when timer expires).
+        /// </summary>
+        [HttpPatch("{id}/timer-clear")]
+        [SwaggerOperation(Summary = "Clears TimerActivatedAt, re-arming the rule.")]
+        [SwaggerResponse(204, "Timer cleared.")]
+        [SwaggerResponse(404, "Rule not found.")]
+        public async Task<IActionResult> TimerClear(int id)
+        {
+            var rule = await _context.AutomationRules.FindAsync(id);
+            if (rule == null)
+                return NotFound();
+
+            rule.TimerActivatedAt = null;
+            await _context.SaveChangesAsync();
+            return NoContent();
         }
 
         /// <summary>

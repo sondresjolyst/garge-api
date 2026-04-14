@@ -96,8 +96,8 @@ namespace garge_api.Controllers
         /// </summary>
         [HttpGet("name/{sensorName}/latest")]
         [SwaggerOperation(Summary = "Returns the latest battery health record for a voltage sensor by name.")]
-        [SwaggerResponse(200, "The latest battery health record.", typeof(BatteryHealthDto))]
-        [SwaggerResponse(404, "Voltage sensor or battery health data not found.")]
+        [SwaggerResponse(200, "The latest battery health record, or null if no data exists yet.", typeof(BatteryHealthDto))]
+        [SwaggerResponse(404, "Voltage sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
@@ -123,8 +123,8 @@ namespace garge_api.Controllers
 
             if (latest == null)
             {
-                _logger.LogWarning("GetLatestBatteryHealth no data for sensor: {SensorName}", Sanitize(sensorName));
-                return NotFound(new { message = "No battery health data found for this sensor." });
+                _logger.LogInformation("GetLatestBatteryHealth no data for sensor: {SensorName}", Sanitize(sensorName));
+                return Ok((BatteryHealthDto?)null);
             }
 
             return Ok(_mapper.Map<BatteryHealthDto>(latest));
