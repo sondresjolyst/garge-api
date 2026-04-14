@@ -75,6 +75,10 @@ namespace garge_api.Controllers
                 Threshold = dto.Threshold,
                 Action = dto.Action,
                 IsEnabled = dto.IsEnabled,
+                ElectricityPriceCondition = dto.ElectricityPriceCondition,
+                ElectricityPriceThreshold = dto.ElectricityPriceThreshold,
+                ElectricityPriceArea = dto.ElectricityPriceArea,
+                ElectricityPriceOperator = dto.ElectricityPriceOperator,
             };
 
             if (!await UserHasAccessToAutomationAsync(rule))
@@ -97,6 +101,10 @@ namespace garge_api.Controllers
                 Action = rule.Action,
                 IsEnabled = rule.IsEnabled,
                 LastTriggeredAt = rule.LastTriggeredAt,
+                ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                ElectricityPriceArea = rule.ElectricityPriceArea,
+                ElectricityPriceOperator = rule.ElectricityPriceOperator,
             };
 
             return Ok(result);
@@ -148,6 +156,10 @@ namespace garge_api.Controllers
                         Action = rule.Action,
                         IsEnabled = rule.IsEnabled,
                         LastTriggeredAt = rule.LastTriggeredAt,
+                        ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                        ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                        ElectricityPriceArea = rule.ElectricityPriceArea,
+                        ElectricityPriceOperator = rule.ElectricityPriceOperator,
                     });
                 }
             }
@@ -196,6 +208,10 @@ namespace garge_api.Controllers
             rule.Threshold = dto.Threshold;
             rule.Action = dto.Action;
             rule.IsEnabled = dto.IsEnabled;
+            rule.ElectricityPriceCondition = dto.ElectricityPriceCondition;
+            rule.ElectricityPriceThreshold = dto.ElectricityPriceThreshold;
+            rule.ElectricityPriceArea = dto.ElectricityPriceArea;
+            rule.ElectricityPriceOperator = dto.ElectricityPriceOperator;
 
             await _context.SaveChangesAsync();
 
@@ -211,6 +227,10 @@ namespace garge_api.Controllers
                 Action = rule.Action,
                 IsEnabled = rule.IsEnabled,
                 LastTriggeredAt = rule.LastTriggeredAt,
+                ElectricityPriceCondition = rule.ElectricityPriceCondition,
+                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
+                ElectricityPriceArea = rule.ElectricityPriceArea,
+                ElectricityPriceOperator = rule.ElectricityPriceOperator,
             };
 
             return Ok(result);
