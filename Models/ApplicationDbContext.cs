@@ -1,6 +1,7 @@
 ﻿using garge_api.Models.Admin;
 using garge_api.Models.Auth;
 using garge_api.Models.Automation;
+using garge_api.Models.Electricity;
 using garge_api.Models.Group;
 using garge_api.Models.Mqtt;
 using garge_api.Models.Sensor;
@@ -34,6 +35,7 @@ namespace garge_api.Models
         public DbSet<UserSwitchCustomName> UserSwitchCustomNames { get; set; }
         public DbSet<UserSensor> UserSensors { get; set; }
         public DbSet<UserSwitch> UserSwitches { get; set; }
+        public DbSet<StoredElectricityPrice> StoredElectricityPrices { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -167,6 +169,10 @@ namespace garge_api.Models
                 .WithMany()
                 .HasForeignKey(x => x.SwitchId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<StoredElectricityPrice>()
+                .HasIndex(p => new { p.Area, p.Resolution, p.DeliveryStart })
+                .IsUnique();
         }
         public void EnsureTriggers()
         {

@@ -80,6 +80,7 @@ namespace garge_api
                     options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
                 });
             builder.Services.AddHttpClient<NordPoolService>();
+            builder.Services.AddHostedService<ElectricityPriceFetchService>();
             builder.Services.AddHttpClient<WebhookNotificationService>();
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
