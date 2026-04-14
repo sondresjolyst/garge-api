@@ -96,9 +96,19 @@ namespace garge_api.Services
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var fetchedAt = DateTime.UtcNow;
 
+                // Collect all delivery starts from the response so we can bulk-fetch existing rows
+                // in a single query per area instead of one query per entry (N+1).
                 foreach (var (area, areaPrices) in priceResponse.Areas)
                 {
                     if (!Areas.Contains(area)) continue;
+
+                    var incomingStarts = areaPrices.Values
+                        .Select(e => e.Start.ToUniversalTime())
+                        .ToHashSet();
+
+                    var existing = await db.StoredElectricityPrices
+                        .Where(p => p.Area == area && p.Resolution == resolution && incomingStarts.Contains(p.DeliveryStart))
+                        .ToDictionaryAsync(p => p.DeliveryStart, stoppingToken);
 
                     foreach (var entry in areaPrices.Values)
                     {
@@ -106,13 +116,10 @@ namespace garge_api.Services
                         var deliveryEnd = entry.End.ToUniversalTime();
                         var valueKwh = (double)(entry.Value / 1000m);
 
-                        var existing = await db.StoredElectricityPrices
-                            .FirstOrDefaultAsync(p => p.Area == area && p.Resolution == resolution && p.DeliveryStart == deliveryStart, stoppingToken);
-
-                        if (existing != null)
+                        if (existing.TryGetValue(deliveryStart, out var row))
                         {
-                            existing.Value = valueKwh;
-                            existing.FetchedAt = fetchedAt;
+                            row.Value = valueKwh;
+                            row.FetchedAt = fetchedAt;
                         }
                         else
                         {
