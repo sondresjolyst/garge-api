@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/sondresjolyst/garge-api/compare/v1.7.0...v1.7.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **switches:** whitelist SOCKET type in GET /api/switches ([#91](https://github.com/sondresjolyst/garge-api/issues/91)) ([f765bc5](https://github.com/sondresjolyst/garge-api/commit/f765bc50e8e0556653f077c582dc55a8a4aa6a00))
+
 ## [1.7.0](https://github.com/sondresjolyst/garge-api/compare/v1.6.0...v1.7.0) (2026-04-14)
 
 
