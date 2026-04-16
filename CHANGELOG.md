@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.7.1](https://github.com/sondresjolyst/garge-api/compare/v1.7.0...v1.7.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **switches:** whitelist SOCKET type in GET /api/switches ([#91](https://github.com/sondresjolyst/garge-api/issues/91)) ([f765bc5](https://github.com/sondresjolyst/garge-api/commit/f765bc50e8e0556653f077c582dc55a8a4aa6a00))
+
+## [1.7.0](https://github.com/sondresjolyst/garge-api/compare/v1.6.0...v1.7.0) (2026-04-14)
+
+
+### Features
+
+* **automations:** timed auto-off support ([#87](https://github.com/sondresjolyst/garge-api/issues/87)) ([2168185](https://github.com/sondresjolyst/garge-api/commit/2168185671bc1c8cca04974cd98a815ecd44f694))
+* electricity price conditions in automations and DB price storage ([#86](https://github.com/sondresjolyst/garge-api/issues/86)) ([8908e17](https://github.com/sondresjolyst/garge-api/commit/8908e17a3731d6f7e0b496a53568bd08172a57c0))
+
+
+### Bug Fixes
+
+* return 200 null instead of 404 when switch or battery health has no data ([#88](https://github.com/sondresjolyst/garge-api/issues/88)) ([2c9ccc9](https://github.com/sondresjolyst/garge-api/commit/2c9ccc9ee54cb280348aa2062cbf39ce23960da3))
+* sanitize user input before logging in ElectricityController ([890c253](https://github.com/sondresjolyst/garge-api/commit/890c2535e9d3869c3372fccd0feb0cec752dbdf0))
+
 ## [1.6.0](https://github.com/sondresjolyst/garge-api/compare/v1.5.0...v1.6.0) (2026-04-11)
 
 
