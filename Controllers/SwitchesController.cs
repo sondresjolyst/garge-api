@@ -71,7 +71,7 @@ namespace garge_api.Controllers
             _logger.LogInformation("GetAllSwitches called by {@LogData}", new { User = User.Identity?.Name });
 
             var allSwitches = await _context.Switches
-                .Where(sw => sw.Type.Equals("SOCKET", StringComparison.OrdinalIgnoreCase))
+                .Where(sw => sw.Type.ToUpper() == "SOCKET")
                 .ToListAsync();
             var accessibleSwitches = new List<Switch>();
 
