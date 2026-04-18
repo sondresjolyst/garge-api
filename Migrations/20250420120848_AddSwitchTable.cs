@@ -26,10 +26,6 @@ namespace garge_api.Migrations
                     table.PrimaryKey("PK_Switches", x => x.Id);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "IX_SensorData_Timestamp",
-                table: "SensorData",
-                column: "Timestamp");
         }
 
         /// <inheritdoc />
