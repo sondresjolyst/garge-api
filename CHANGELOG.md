@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/sondresjolyst/garge-api/compare/v1.7.1...v1.7.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* replace string.Equals with ToUpper comparison in SwitchesController ([#94](https://github.com/sondresjolyst/garge-api/issues/94)) ([#95](https://github.com/sondresjolyst/garge-api/issues/95)) ([18d842f](https://github.com/sondresjolyst/garge-api/commit/18d842f1143f37ce4e7c4b1e20932ad8982f82f9))
+
 ## [1.7.1](https://github.com/sondresjolyst/garge-api/compare/v1.7.0...v1.7.1) (2026-04-16)
 
 

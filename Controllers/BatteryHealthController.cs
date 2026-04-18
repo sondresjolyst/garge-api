@@ -20,7 +20,7 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
         private readonly ILogger<BatteryHealthController> _logger;
-        private static readonly List<string> AdminRoles = new() { "sensor_admin", "admin" };
+        private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
         public BatteryHealthController(ApplicationDbContext context, IMapper mapper, ILogger<BatteryHealthController> logger)
         {
