@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/sondresjolyst/garge-api/compare/v1.7.2...v2.0.0) (2026-04-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename roles ([#97](https://github.com/sondresjolyst/garge-api/issues/97))
+
+### Features
+
+* rename roles ([#97](https://github.com/sondresjolyst/garge-api/issues/97)) ([04de8f8](https://github.com/sondresjolyst/garge-api/commit/04de8f835e68516e82b5101f830719073388976b))
+
 ## [1.7.2](https://github.com/sondresjolyst/garge-api/compare/v1.7.1...v1.7.2) (2026-04-16)
 
 
