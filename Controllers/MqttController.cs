@@ -20,7 +20,7 @@ namespace garge_api.Controllers
     public class MqttController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private static readonly List<string> AdminRoles = new() { "mqtt_admin", "admin" };
+        private static readonly List<string> AdminRoles = new() { "MqttAdmin", "admin" };
         private readonly ILogger<MqttController> _logger;
 
         public MqttController(ApplicationDbContext context, ILogger<MqttController> logger)

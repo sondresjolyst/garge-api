@@ -34,7 +34,7 @@ namespace garge_api.Controllers
 
             // Admins always have access
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase))
+                userRoles.Contains("SwitchAdmin", StringComparer.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -150,7 +150,7 @@ namespace garge_api.Controllers
             _logger.LogInformation("CreateSwitch called by {@LogData}", new { User = User.Identity?.Name, switchDto.Name, switchDto.Type });
 
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            if (!userRoles.Contains("switch_admin", StringComparer.OrdinalIgnoreCase) &&
+            if (!userRoles.Contains("SwitchAdmin", StringComparer.OrdinalIgnoreCase) &&
                 !userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase))
             {
                 _logger.LogWarning("CreateSwitch forbidden for {@LogData}", new { User = User.Identity?.Name });
