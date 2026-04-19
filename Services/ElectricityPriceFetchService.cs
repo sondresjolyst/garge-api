@@ -103,7 +103,7 @@ namespace garge_api.Services
                     if (!Areas.Contains(area)) continue;
 
                     var incomingStarts = areaPrices.Values
-                        .Select(e => e.Start.ToUniversalTime())
+                        .Select(e => e.Start)
                         .ToHashSet();
 
                     var existing = await db.StoredElectricityPrices
@@ -112,8 +112,8 @@ namespace garge_api.Services
 
                     foreach (var entry in areaPrices.Values)
                     {
-                        var deliveryStart = entry.Start.ToUniversalTime();
-                        var deliveryEnd = entry.End.ToUniversalTime();
+                        var deliveryStart = entry.Start;
+                        var deliveryEnd = entry.End;
                         var valueKwh = (double)(entry.Value / 1000m);
 
                         if (existing.TryGetValue(deliveryStart, out var row))

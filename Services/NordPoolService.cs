@@ -65,8 +65,8 @@ namespace garge_api.Services
 
             foreach (var entry in entries)
             {
-                DateTime start = entry.deliveryStart != null ? DateTime.Parse((string)entry.deliveryStart) : DateTime.MinValue;
-                DateTime end = entry.deliveryEnd != null ? DateTime.Parse((string)entry.deliveryEnd) : DateTime.MinValue;
+                DateTime start = entry.deliveryStart != null ? ParseDeliveryDate((string)entry.deliveryStart) : DateTime.MinValue;
+                DateTime end = entry.deliveryEnd != null ? ParseDeliveryDate((string)entry.deliveryEnd) : DateTime.MinValue;
 
                 if (priceResponse.Start == DateTime.MinValue || start < priceResponse.Start)
                 {
@@ -115,7 +115,28 @@ namespace garge_api.Services
             }
         }
 
-        private (string, string) GetUrlParams(string dataType, DateTime? endDate, List<string> areas, string currency)
+        /// <summary>
+        /// Parses a NordPool delivery date string to UTC.
+        /// HOURLY entries use full ISO timestamps (e.g. "2026-04-18T22:00:00Z") — parsed as exact UTC.
+        /// DAILY/MONTHLY entries use date-only strings (e.g. "2026-04-11") — treated as UTC midnight of
+        /// that calendar date, making storage environment-independent (Docker UTC vs Windows UTC+2).
+        /// </summary>
+        private static DateTime ParseDeliveryDate(string raw)
+        {
+            if (raw.Contains('T'))
+            {
+                // Full datetime string — parse with timezone awareness and convert to UTC
+                return DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture).UtcDateTime;
+            }
+
+            // Date-only string — always store as UTC midnight of that date
+            return DateTime.SpecifyKind(
+                DateTime.ParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture),
+                DateTimeKind.Utc);
+        }
+
+
+        private static (string, string) GetUrlParams(string dataType, DateTime? endDate, List<string> areas, string currency)
         {
             endDate ??= DateTime.UtcNow.AddDays(1);
             areas ??= new List<string> { "DK1", "DK2", "FI", "NO1", "NO2", "NO3", "NO4", "SE1", "SE2", "SE3", "SE4", "EE", "LT", "LV", "AT", "BE", "FR", "GER", "NL", "PL", "SYS" };
