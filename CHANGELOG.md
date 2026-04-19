@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/sondresjolyst/garge-api/compare/v2.0.0...v2.0.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* automation admin role check ([#101](https://github.com/sondresjolyst/garge-api/issues/101)) ([1d867b4](https://github.com/sondresjolyst/garge-api/commit/1d867b4ad858551dfee2284671754554f2ffa357))
+
 ## [2.0.0](https://github.com/sondresjolyst/garge-api/compare/v1.7.2...v2.0.0) (2026-04-18)
 
 
