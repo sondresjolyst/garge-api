@@ -30,7 +30,7 @@ namespace garge_api.Controllers
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
             if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains("automation_admin", StringComparer.OrdinalIgnoreCase))
+                userRoles.Contains("AutomationAdmin", StringComparer.OrdinalIgnoreCase))
             {
                 return true;
             }
