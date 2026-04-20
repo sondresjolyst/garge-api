@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.2](https://github.com/sondresjolyst/garge-api/compare/v2.0.1...v2.0.2) (2026-04-19)
+
+
+### Bug Fixes
+
+* **electricity:** normalize date parsing to prevent timezone-dependent duplicates ([#103](https://github.com/sondresjolyst/garge-api/issues/103)) ([cf90a26](https://github.com/sondresjolyst/garge-api/commit/cf90a2614f863c415b78beb3d4bf966a7ec7e8ac))
+
 ## [2.0.1](https://github.com/sondresjolyst/garge-api/compare/v2.0.0...v2.0.1) (2026-04-19)
 
 
