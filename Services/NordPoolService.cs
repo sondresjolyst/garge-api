@@ -107,7 +107,7 @@ namespace garge_api.Services
 
             if (json.updatedAt != null)
             {
-                priceResponse.Updated = DateTime.Parse((string)json.updatedAt);
+                priceResponse.Updated = DateTime.Parse((string)json.updatedAt, CultureInfo.InvariantCulture);
             }
             else
             {
@@ -118,8 +118,8 @@ namespace garge_api.Services
         /// <summary>
         /// Parses a NordPool delivery date string to UTC.
         /// HOURLY entries use full ISO timestamps (e.g. "2026-04-18T22:00:00Z") — parsed as exact UTC.
-        /// DAILY/MONTHLY entries use date-only strings (e.g. "2026-04-11") — treated as UTC midnight of
-        /// that calendar date, making storage environment-independent (Docker UTC vs Windows UTC+2).
+        /// DAILY/MONTHLY entries may arrive as "MM/dd/yyyy HH:mm:ss" or "yyyy-MM-dd" — always stored
+        /// as UTC midnight of that calendar date so results are environment-independent (UTC vs UTC+2).
         /// </summary>
         private static DateTime ParseDeliveryDate(string raw)
         {
@@ -127,6 +127,12 @@ namespace garge_api.Services
             {
                 // Full datetime string — parse with timezone awareness and convert to UTC
                 return DateTimeOffset.Parse(raw, CultureInfo.InvariantCulture).UtcDateTime;
+            }
+
+            // "MM/dd/yyyy HH:mm:ss" format returned by NordPool
+            if (DateTime.TryParseExact(raw, "MM/dd/yyyy HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtSlash))
+            {
+                return DateTime.SpecifyKind(dtSlash, DateTimeKind.Utc);
             }
 
             // Date-only string — always store as UTC midnight of that date
