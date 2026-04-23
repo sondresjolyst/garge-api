@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3](https://github.com/sondresjolyst/garge-api/compare/v2.0.2...v2.0.3) (2026-04-21)
+
+
+### Bug Fixes
+
+* handle MM/dd/yyyy HH:mm:ss date format from NordPool API ([#111](https://github.com/sondresjolyst/garge-api/issues/111)) ([97a29bb](https://github.com/sondresjolyst/garge-api/commit/97a29bb10fdd7da86e86f0306b6ed7b3a18e8640))
+
 ## [2.0.2](https://github.com/sondresjolyst/garge-api/compare/v2.0.1...v2.0.2) (2026-04-19)
 
 
