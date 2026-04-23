@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.4](https://github.com/sondresjolyst/garge-api/compare/v2.0.3...v2.0.4) (2026-04-23)
+
+
+### Bug Fixes
+
+* **electricity:** surface NordPool warnings and refresh today+tomorrow on daily run ([8fd04f1](https://github.com/sondresjolyst/garge-api/commit/8fd04f1ac351f89972267e93017a86c378bd1435))
+* **electricity:** surface NordPool warnings and refresh today+tomorrow on daily run ([#114](https://github.com/sondresjolyst/garge-api/issues/114)) ([2420724](https://github.com/sondresjolyst/garge-api/commit/24207249c7ae7aa0813043673e5f3685eb9da805))
+
 ## [2.0.3](https://github.com/sondresjolyst/garge-api/compare/v2.0.2...v2.0.3) (2026-04-21)
 
 
