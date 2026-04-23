@@ -11,15 +11,18 @@ namespace garge_api.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<ElectricityPriceFetchService> _logger;
+        private readonly ILoggerFactory _loggerFactory;
 
         public ElectricityPriceFetchService(
             IServiceScopeFactory scopeFactory,
             IHttpClientFactory httpClientFactory,
-            ILogger<ElectricityPriceFetchService> logger)
+            ILogger<ElectricityPriceFetchService> logger,
+            ILoggerFactory loggerFactory)
         {
             _scopeFactory = scopeFactory;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
+            _loggerFactory = loggerFactory;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -69,7 +72,8 @@ namespace garge_api.Services
             var now = DateTime.UtcNow;
             var currYear = now.Year;
 
-            // HOURLY: next day
+            // HOURLY: today (refreshes any slots published after startup) + next day
+            await FetchAndStoreAsync("HOURLY", now, stoppingToken);
             await FetchAndStoreAsync("HOURLY", now.AddDays(1), stoppingToken);
             // DAILY + MONTHLY: refresh current year
             await FetchAndStoreAsync("DAILY", new DateTime(currYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken);
@@ -82,8 +86,8 @@ namespace garge_api.Services
             try
             {
                 var httpClient = _httpClientFactory.CreateClient();
-                var nordPoolService = new NordPoolService(httpClient,
-                    Microsoft.Extensions.Logging.Abstractions.NullLogger<NordPoolService>.Instance);
+                // Use real logger so NordPool parse warnings (e.g. missing JSON keys) are visible.
+                var nordPoolService = new NordPoolService(httpClient, _loggerFactory.CreateLogger<NordPoolService>());
 
                 var priceResponse = await nordPoolService.FetchPricesAsync(resolution, date, Areas.ToList(), "NOK");
                 if (priceResponse == null)
@@ -92,15 +96,28 @@ namespace garge_api.Services
                     return;
                 }
 
+                if (priceResponse.Areas.Count == 0)
+                {
+                    _logger.LogWarning("ElectricityPriceFetchService: NordPool returned empty areas for {Resolution} on {Date:yyyy-MM-dd} — no entries stored.", resolution, date);
+                    return;
+                }
+
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var fetchedAt = DateTime.UtcNow;
+                var totalStored = 0;
 
                 // Collect all delivery starts from the response so we can bulk-fetch existing rows
                 // in a single query per area instead of one query per entry (N+1).
                 foreach (var (area, areaPrices) in priceResponse.Areas)
                 {
                     if (!Areas.Contains(area)) continue;
+
+                    if (areaPrices.Values.Count == 0)
+                    {
+                        _logger.LogWarning("ElectricityPriceFetchService: 0 entries for area {Area} {Resolution} on {Date:yyyy-MM-dd}.", area, resolution, date);
+                        continue;
+                    }
 
                     var incomingStarts = areaPrices.Values
                         .Select(e => e.Start)
@@ -134,11 +151,12 @@ namespace garge_api.Services
                                 FetchedAt = fetchedAt,
                             });
                         }
+                        totalStored++;
                     }
                 }
 
                 await db.SaveChangesAsync(stoppingToken);
-                _logger.LogInformation("ElectricityPriceFetchService: stored {Resolution} prices for {Date:yyyy-MM-dd}", resolution, date);
+                _logger.LogInformation("ElectricityPriceFetchService: stored {Count} {Resolution} entries for {Date:yyyy-MM-dd}", totalStored, resolution, date);
             }
             catch (Exception ex)
             {
