@@ -203,6 +203,11 @@ namespace garge_api
                 }
 
                 await context.SaveChangesAsync();
+
+                if (app.Environment.IsDevelopment())
+                {
+                    await DevDataSeeder.SeedAsync(context, logger);
+                }
             }
 
             app.UseResponseCompression();
