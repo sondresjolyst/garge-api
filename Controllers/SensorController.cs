@@ -1066,5 +1066,79 @@ namespace garge_api.Controllers
             var dto = _mapper.Map<SensorDataDto>(latestData);
             return Ok(dto);
         }
+
+        [HttpPost("{sensorId}/photo")]
+        [SwaggerOperation(Summary = "Upload or replace a photo for a sensor.")]
+        [SwaggerResponse(200, "Photo saved.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        [SwaggerResponse(403, "No access to sensor.")]
+        public async Task<IActionResult> UploadSensorPhoto(int sensorId, [FromBody] UploadSensorPhotoDto dto)
+        {
+            if (!await UserCanAccessSensorAsync(sensorId))
+                return Forbid();
+
+            if (string.IsNullOrWhiteSpace(dto.Data) || string.IsNullOrWhiteSpace(dto.ContentType))
+                return BadRequest(new { message = "Data and ContentType are required." });
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+
+            var existing = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
+            if (existing != null)
+            {
+                existing.Data = dto.Data;
+                existing.ContentType = dto.ContentType;
+                existing.UserId = userId;
+                existing.CreatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _context.SensorPhotos.Add(new Models.Sensor.SensorPhoto
+                {
+                    SensorId = sensorId,
+                    UserId = userId,
+                    Data = dto.Data,
+                    ContentType = dto.ContentType
+                });
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Photo saved." });
+        }
+
+        [HttpGet("{sensorId}/photo")]
+        [SwaggerOperation(Summary = "Get the photo for a sensor.")]
+        [SwaggerResponse(200, "Photo data.")]
+        [SwaggerResponse(403, "No access to sensor.")]
+        [SwaggerResponse(404, "No photo found.")]
+        public async Task<IActionResult> GetSensorPhoto(int sensorId)
+        {
+            if (!await UserCanAccessSensorAsync(sensorId))
+                return Forbid();
+
+            var photo = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
+            if (photo == null)
+                return NotFound(new { message = "No photo found." });
+
+            return Ok(new { data = photo.Data, contentType = photo.ContentType });
+        }
+
+        [HttpDelete("{sensorId}/photo")]
+        [SwaggerOperation(Summary = "Delete the photo for a sensor.")]
+        [SwaggerResponse(200, "Photo deleted.")]
+        [SwaggerResponse(403, "No access to sensor.")]
+        [SwaggerResponse(404, "No photo found.")]
+        public async Task<IActionResult> DeleteSensorPhoto(int sensorId)
+        {
+            if (!await UserCanAccessSensorAsync(sensorId))
+                return Forbid();
+
+            var photo = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
+            if (photo == null)
+                return NotFound(new { message = "No photo found." });
+
+            _context.SensorPhotos.Remove(photo);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Photo deleted." });
+        }
     }
 }
