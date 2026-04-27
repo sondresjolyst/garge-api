@@ -37,6 +37,7 @@ namespace garge_api.Models
         public DbSet<UserSensor> UserSensors { get; set; }
         public DbSet<UserSwitch> UserSwitches { get; set; }
         public DbSet<StoredElectricityPrice> StoredElectricityPrices { get; set; }
+        public DbSet<SensorPhoto> SensorPhotos { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -185,6 +186,22 @@ namespace garge_api.Models
 
             modelBuilder.Entity<StoredElectricityPrice>()
                 .HasIndex(p => new { p.Area, p.Resolution, p.DeliveryStart })
+                .IsUnique();
+
+            modelBuilder.Entity<SensorPhoto>()
+                .HasOne(sp => sp.Sensor)
+                .WithMany()
+                .HasForeignKey(sp => sp.SensorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SensorPhoto>()
+                .HasOne(sp => sp.User)
+                .WithMany()
+                .HasForeignKey(sp => sp.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SensorPhoto>()
+                .HasIndex(sp => sp.SensorId)
                 .IsUnique();
         }
         public void EnsureTriggers()
