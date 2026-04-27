@@ -40,5 +40,7 @@ namespace garge_api.Models.Automation
         // Optional timed action: keep socket ON for this many hours then auto-off
         public double? TimerDurationHours { get; set; }
         public DateTime? TimerActivatedAt { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }
