@@ -203,6 +203,23 @@ namespace garge_api
                 }
 
                 await context.SaveChangesAsync();
+
+                // DevDataSeeder seeds dummy motorcycle voltmeters for local development.
+                // Belt-and-suspenders: requires Development env AND a connection string that
+                // looks like a non-production target (localhost, or "dev"/"test" in the host
+                // or database name). Pointing the local app at the prod DB is a no-op here.
+                if (app.Environment.IsDevelopment())
+                {
+                    var connStr = builder.Configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+                    if (DevDataSeeder.LooksLikeNonProductionConnection(connStr))
+                    {
+                        await DevDataSeeder.SeedAsync(context, logger);
+                    }
+                    else
+                    {
+                        logger.LogInformation("DevDataSeeder skipped: connection string does not look like a dev/test target.");
+                    }
+                }
             }
 
             app.UseResponseCompression();
