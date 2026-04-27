@@ -26,11 +26,6 @@ namespace garge_api.Models.Sensor
 
         public string? Notes { get; set; }
 
-        /// <summary>
-        /// Optional odometer reading (km) at the time of the activity.
-        /// </summary>
-        public int? OdometerKm { get; set; }
-
         [Required]
         public DateTime ActivityDate { get; set; }
 

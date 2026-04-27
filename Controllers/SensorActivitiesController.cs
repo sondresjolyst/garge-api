@@ -140,7 +140,6 @@ namespace garge_api.Controllers
                 UserId = userId,
                 Title = dto.Title,
                 Notes = dto.Notes,
-                OdometerKm = dto.OdometerKm,
                 ActivityDate = (dto.ActivityDate ?? now).ToUniversalTime(),
                 CreatedAt = now
             };
@@ -184,7 +183,6 @@ namespace garge_api.Controllers
 
             activity.Title = dto.Title;
             activity.Notes = dto.Notes;
-            activity.OdometerKm = dto.OdometerKm;
             if (dto.ActivityDate.HasValue)
                 activity.ActivityDate = dto.ActivityDate.Value.ToUniversalTime();
             activity.UpdatedAt = DateTime.UtcNow;
