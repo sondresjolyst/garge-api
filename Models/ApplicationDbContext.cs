@@ -25,6 +25,7 @@ namespace garge_api.Models
         public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
+        public DbSet<SensorActivity> SensorActivities { get; set; }
         public DbSet<EMQXMqttUser> EMQXMqttUsers { get; set; }
         public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
         public DbSet<DiscoveredDevice> DiscoveredDevices { get; set; }
@@ -85,6 +86,18 @@ namespace garge_api.Models
                 .HasOne(x => x.Sensor)
                 .WithMany()
                 .HasForeignKey(x => x.SensorId);
+
+            modelBuilder.Entity<SensorActivity>()
+                .HasOne(sa => sa.Sensor)
+                .WithMany()
+                .HasForeignKey(sa => sa.SensorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SensorActivity>()
+                .HasIndex(sa => sa.SensorId);
+
+            modelBuilder.Entity<SensorActivity>()
+                .HasIndex(sa => sa.ActivityDate);
 
             OnModelCreatingPartial(modelBuilder);
 

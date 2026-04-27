@@ -35,6 +35,9 @@ public class MappingProfile : Profile
         CreateMap<SensorData, SensorDataDto>().ReverseMap();
         CreateMap<BatteryHealth, BatteryHealthDto>().ReverseMap();
         CreateMap<CreateBatteryHealthDto, BatteryHealth>();
+        CreateMap<SensorActivity, SensorActivityDto>().ReverseMap();
+        CreateMap<CreateSensorActivityDto, SensorActivity>();
+        CreateMap<UpdateSensorActivityDto, SensorActivity>();
 
         // Switch mappings
         CreateMap<Switch, SwitchDto>().ReverseMap();
