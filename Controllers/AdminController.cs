@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 using AutoMapper;
 using garge_api.Models.Admin;
+using Microsoft.EntityFrameworkCore;
 
 namespace garge_api.Controllers
 {
