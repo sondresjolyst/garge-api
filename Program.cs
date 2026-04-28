@@ -8,8 +8,6 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi.Models;
 using System.Reflection;
-using Microsoft.EntityFrameworkCore.Diagnostics;
-using System.Data.Common;
 using garge_api.Services;
 using AspNetCoreRateLimit;
 using garge_api.Models.Admin;
@@ -63,12 +61,9 @@ namespace garge_api
             });
 
             builder.Services.AddAutoMapper(typeof(MappingProfile));
-            builder.Services.AddScoped<CustomDbCommandInterceptor>();
 
-            builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
-                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
-                       .EnableSensitiveDataLogging()
-                       .AddInterceptors(serviceProvider.GetRequiredService<CustomDbCommandInterceptor>()));
+            builder.Services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
             builder.Services.AddIdentity<User, IdentityRole>()
                 .AddEntityFrameworkStores<ApplicationDbContext>()
@@ -111,14 +106,18 @@ namespace garge_api
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
             });
 
+            var allowedOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>() ?? [];
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAllOrigins",
-                    builder =>
+                    policy =>
                     {
-                        builder.AllowAnyOrigin()
-                               .AllowAnyMethod()
-                               .AllowAnyHeader();
+                        policy.WithOrigins(allowedOrigins)
+                              .AllowAnyMethod()
+                              .AllowAnyHeader();
                     });
             });
 
@@ -228,30 +227,5 @@ namespace garge_api
         }
     }
 
-    public class CustomDbCommandInterceptor : DbCommandInterceptor
-    {
-        private readonly ILogger<CustomDbCommandInterceptor> _logger;
 
-        public CustomDbCommandInterceptor(ILogger<CustomDbCommandInterceptor> logger)
-        {
-            _logger = logger;
-        }
-
-        public override InterceptionResult<DbDataReader> ReaderExecuting(
-            DbCommand command,
-            CommandEventData eventData,
-            InterceptionResult<DbDataReader> result)
-        {
-            LogCommand(command, eventData);
-            return base.ReaderExecuting(command, eventData, result);
-        }
-
-        private void LogCommand(DbCommand command, CommandEventData eventData)
-        {
-            _logger.LogInformation("Executing DbCommand: {CommandText} with parameters: {Parameters} at {Timestamp}",
-                command.CommandText,
-                string.Join(", ", command.Parameters.Cast<DbParameter>().Select(p => $"{p.ParameterName}={p.Value}")),
-                DateTime.UtcNow);
-        }
-    }
 }
