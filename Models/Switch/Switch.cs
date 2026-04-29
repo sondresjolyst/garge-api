@@ -25,5 +25,7 @@ namespace garge_api.Models.Switch
 
         [MaxLength(20)]
         public string? RegistrationCode { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }
