@@ -114,11 +114,11 @@ namespace garge_api.Controllers
             var result = await _userManager.DeleteAsync(user);
             if (!result.Succeeded)
             {
-                _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", id, result.Errors);
+                _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", SanitizeForLog(id), result.Errors);
                 return BadRequest(result.Errors);
             }
 
-            _logger.LogInformation("Account deleted by user {UserId}", id);
+            _logger.LogInformation("Account deleted by user {UserId}", SanitizeForLog(id));
             return NoContent();
         }
 
@@ -244,7 +244,7 @@ namespace garge_api.Controllers
                 })
             };
 
-            _logger.LogInformation("Data exported for user {UserId}", id);
+            _logger.LogInformation("Data exported for user {UserId}", SanitizeForLog(id));
             return Ok(export);
         }
 
@@ -276,5 +276,7 @@ namespace garge_api.Controllers
 
             return Ok(response);
         }
+
+        private static string SanitizeForLog(string value) => value.Replace('\n', '_').Replace('\r', '_');
     }
 }
