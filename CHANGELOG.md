@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.0](https://github.com/sondresjolyst/garge-api/compare/v2.0.4...v2.1.0) (2026-04-27)
+
+
+### Features
+
+* activities ([#126](https://github.com/sondresjolyst/garge-api/issues/126)) ([22b5675](https://github.com/sondresjolyst/garge-api/commit/22b5675c7ad3a540ab54eca7b53f35f6f5db7eea))
+* admin page, sensor activities, and CreatedAt tracking ([#124](https://github.com/sondresjolyst/garge-api/issues/124)) ([0902b8e](https://github.com/sondresjolyst/garge-api/commit/0902b8efa8eae55f30d845a9c88155b93d251fd6))
+* **sensor:** photo upload endpoint and SensorPhoto model ([#125](https://github.com/sondresjolyst/garge-api/issues/125)) ([7c2ce1d](https://github.com/sondresjolyst/garge-api/commit/7c2ce1d7fa73ef3f084dbe31b4be36f18d800a82))
+
 ## [2.0.4](https://github.com/sondresjolyst/garge-api/compare/v2.0.3...v2.0.4) (2026-04-23)
 
 

@@ -13,4 +13,5 @@ public class User : IdentityUser
     public DateTime? EmailVerificationCodeExpiration { get; set; }
     public string? PasswordResetCodeHash { get; set; }
     public DateTime? PasswordResetCodeExpiration { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
