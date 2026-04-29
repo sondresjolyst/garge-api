@@ -32,5 +32,7 @@ namespace garge_api.Models.Sensor
 
         [Required]
         public required string ParentName { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

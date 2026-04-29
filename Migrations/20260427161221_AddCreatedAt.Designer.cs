@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,13 +12,15 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260427161221_AddCreatedAt")]
+    partial class AddCreatedAt
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "9.0.15")
+                .HasAnnotation("ProductVersion", "9.0.14")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -700,6 +703,9 @@ namespace garge_api.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<int?>("OdometerKm")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SensorId")
                         .HasColumnType("integer");
 
@@ -752,43 +758,6 @@ namespace garge_api.Migrations
                         .HasDatabaseName("IX_SensorData_SensorId_Timestamp");
 
                     b.ToTable("SensorData");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Sensor.SensorPhoto", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Data")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("SensorId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SensorId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("SensorPhotos");
                 });
 
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>
@@ -1094,25 +1063,6 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("Sensor");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Sensor.SensorPhoto", b =>
-                {
-                    b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
-                        .WithMany()
-                        .HasForeignKey("SensorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Sensor");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>

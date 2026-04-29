@@ -201,19 +201,117 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Gets all users.
+        /// Gets all users with their roles.
         /// </summary>
         /// <returns>A list of all users.</returns>
         [HttpGet("/api/users")]
         [SwaggerOperation(Summary = "Gets all users.")]
         [SwaggerResponse(200, "Users retrieved successfully.", typeof(IEnumerable<UserDto>))]
-        public IActionResult GetUsers()
+        public async Task<IActionResult> GetUsers()
         {
             _logger.LogInformation("GetUsers called by {@LogData}", new { User = User.Identity?.Name });
 
             var users = _userManager.Users.ToList();
-            var dtos = _mapper.Map<IEnumerable<UserDto>>(users);
+            var dtos = new List<UserDto>();
+            foreach (var user in users)
+            {
+                var dto = _mapper.Map<UserDto>(user);
+                dto.Roles = await _userManager.GetRolesAsync(user);
+                dtos.Add(dto);
+            }
             return Ok(dtos);
+        }
+
+        /// <summary>
+        /// Gets aggregate platform stats.
+        /// </summary>
+        [HttpGet("/api/admin/stats")]
+        [SwaggerOperation(Summary = "Gets aggregate platform stats.")]
+        [SwaggerResponse(200, "Stats retrieved successfully.", typeof(AdminStatsDto))]
+        public async Task<IActionResult> GetStats()
+        {
+            _logger.LogInformation("GetStats called by {@LogData}", new { User = User.Identity?.Name });
+
+            var stats = new AdminStatsDto
+            {
+                TotalUsers = await _userManager.Users.CountAsync(),
+                TotalSensors = await _context.Sensors.CountAsync(),
+                TotalSwitches = await _context.Switches.CountAsync(),
+                ActiveAutomations = await _context.AutomationRules.CountAsync(r => r.IsEnabled),
+            };
+            return Ok(stats);
+        }
+
+        /// <summary>
+        /// Gets all discovered MQTT devices.
+        /// </summary>
+        [HttpGet("/api/admin/devices")]
+        [SwaggerOperation(Summary = "Gets all discovered MQTT devices.")]
+        public async Task<IActionResult> GetDevices()
+        {
+            _logger.LogInformation("GetDevices called by {@LogData}", new { User = User.Identity?.Name });
+
+            var devices = await _context.DiscoveredDevices
+                .OrderByDescending(d => d.Timestamp)
+                .ToListAsync();
+            return Ok(devices);
+        }
+
+        /// <summary>
+        /// Gets cumulative daily stats over time for charting.
+        /// </summary>
+        [HttpGet("/api/admin/stats/history")]
+        [SwaggerOperation(Summary = "Gets cumulative daily stats over time.")]
+        public async Task<IActionResult> GetStatsHistory()
+        {
+            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { User = User.Identity?.Name });
+
+            var userDates = await _userManager.Users
+                .Select(u => u.CreatedAt.Date)
+                .ToListAsync();
+
+            var sensorDates = await _context.Sensors
+                .Select(s => s.CreatedAt.Date)
+                .ToListAsync();
+
+            var switchDates = await _context.Switches
+                .Select(s => s.CreatedAt.Date)
+                .ToListAsync();
+
+            var automationDates = await _context.AutomationRules
+                .Select(a => a.CreatedAt.Date)
+                .ToListAsync();
+
+            var sanityFloor = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var allDates = userDates.Concat(sensorDates).Concat(switchDates).Concat(automationDates)
+                .Where(d => d >= sanityFloor)
+                .ToList();
+            if (!allDates.Any()) return Ok(new List<object>());
+
+            var start = allDates.Min();
+            var today = DateTime.UtcNow.Date;
+
+            var result = new List<object>();
+            int users = 0, sensors = 0, switches = 0, automations = 0;
+
+            for (var date = start; date <= today; date = date.AddDays(1))
+            {
+                users += userDates.Count(d => d == date);
+                sensors += sensorDates.Count(d => d == date);
+                switches += switchDates.Count(d => d == date);
+                automations += automationDates.Count(d => d == date);
+
+                result.Add(new
+                {
+                    date = date.ToString("yyyy-MM-dd"),
+                    totalUsers = users,
+                    totalSensors = sensors,
+                    totalSwitches = switches,
+                    totalAutomations = automations,
+                });
+            }
+
+            return Ok(result);
         }
 
         /// <summary>
