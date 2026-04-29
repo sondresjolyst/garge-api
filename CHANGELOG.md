@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/sondresjolyst/garge-api/compare/v2.1.0...v2.2.0) (2026-04-29)
+
+
+### Features
+
+* GDPR compliance improvements ([#132](https://github.com/sondresjolyst/garge-api/issues/132)) ([8715fc7](https://github.com/sondresjolyst/garge-api/commit/8715fc7d98236615ab7413fc701257cd0a8ced7a))
+
+
+### Bug Fixes
+
+* migrate -infinity CreatedAt values to migration run timestamp ([#131](https://github.com/sondresjolyst/garge-api/issues/131)) ([55a56a8](https://github.com/sondresjolyst/garge-api/commit/55a56a81f7edd24d73a1f5aecd2e0831216dc198))
+* sanitize user ID before logging to prevent log injection ([9564291](https://github.com/sondresjolyst/garge-api/commit/9564291d1200efb532a36dae01c3c2b0fd61b35f))
+
 ## [2.1.0](https://github.com/sondresjolyst/garge-api/compare/v2.0.4...v2.1.0) (2026-04-27)
 
 
