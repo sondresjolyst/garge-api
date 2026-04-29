@@ -17,6 +17,7 @@
 
             foreach (var header in context.Request.Headers)
             {
+                if (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase)) continue;
                 _logger.LogDebug("Header {@LogData}", new { header.Key, Value = header.Value.ToString() });
             }
 

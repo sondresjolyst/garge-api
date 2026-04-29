@@ -63,7 +63,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Email is already registered.")]
         public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto)
         {
-            _logger.LogInformation("Register called for {@LogData}", new { registerUserDto.Email });
+            _logger.LogInformation("Register called");
 
             if (string.IsNullOrEmpty(registerUserDto.Email))
             {
@@ -74,7 +74,7 @@ namespace garge_api.Controllers
             var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
             if (existingUser != null)
             {
-                _logger.LogWarning("Register failed: Email already registered {@LogData}", new { registerUserDto.Email });
+                _logger.LogWarning("Register failed: Email already registered");
                 return Conflict(new { message = "Email is already registered!" });
             }
 
@@ -104,11 +104,11 @@ namespace garge_api.Controllers
 
                 await _emailService.SendEmailAsync(user.Email!, "Confirm your email", $"Your verification code is: {verificationCode}");
 
-                _logger.LogInformation("User registered successfully {@LogData}", new { user.Email });
+                _logger.LogInformation("User registered successfully {UserId}", user.Id);
                 return Ok(new { message = "User registered successfully. Please check your email to confirm your account." });
             }
 
-            _logger.LogError("Register failed for {@LogData}: {@Errors}", new { registerUserDto.Email }, result.Errors);
+            _logger.LogError("Register failed: {@Errors}", result.Errors);
             return BadRequest(result.Errors);
         }
 
@@ -125,7 +125,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(401, "Invalid credentials.")]
         public async Task<IActionResult> Login([FromBody] LoginModel login)
         {
-            _logger.LogInformation("Login called for {@LogData}", new { login.Email });
+            _logger.LogInformation("Login called");
 
             if (string.IsNullOrEmpty(login.Email) || string.IsNullOrEmpty(login.Password))
             {
@@ -137,14 +137,14 @@ namespace garge_api.Controllers
             var user = await _userManager.FindByEmailAsync(email);
             if (user == null)
             {
-                _logger.LogWarning("Login failed: Invalid credentials {@LogData}", new { email });
+                _logger.LogWarning("Login failed: Invalid credentials");
                 return Unauthorized(new { message = "Invalid credentials!" });
             }
 
             var result = await _signInManager.PasswordSignInAsync(user.UserName ?? string.Empty, login.Password, false, false);
             if (!result.Succeeded)
             {
-                _logger.LogWarning("Login failed: Invalid credentials {@LogData}", new { email });
+                _logger.LogWarning("Login failed: Invalid credentials");
                 return Unauthorized(new { message = "Invalid credentials!" });
             }
 
@@ -199,7 +199,7 @@ namespace garge_api.Controllers
             _context.RefreshTokens.Add(refreshToken);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("User logged in successfully {@LogData}", new { user.Email });
+            _logger.LogInformation("User logged in successfully {UserId}", user.Id);
             return Ok(new { token = tokenString, refreshToken = rawToken });
         }
 
@@ -213,33 +213,22 @@ namespace garge_api.Controllers
         [SwaggerOperation(Summary = "Resends the email verification code.")]
         [SwaggerResponse(200, "Email verification sent successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
-        [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ResendEmailConfirmation([FromBody] ResendEmailConfirmationDto model)
         {
-            _logger.LogInformation("ResendEmailConfirmation called for {@LogData}", new { model.Email });
+            _logger.LogInformation("ResendEmailConfirmation called");
 
             var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user == null)
+            if (user != null && !user.EmailConfirmed)
             {
-                _logger.LogWarning("ResendEmailConfirmation failed: User not found {@LogData}", new { model.Email });
-                return NotFound(new { message = "User not found!" });
+                var verificationCode = GenerateVerificationCode();
+                user.EmailVerificationCode = verificationCode;
+                user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
+                await _userManager.UpdateAsync(user);
+                await _emailService.SendEmailAsync(user.Email!, "Verify your email", $"Your verification code is: {verificationCode}");
+                _logger.LogInformation("Verification code resent for user {UserId}", user.Id);
             }
 
-            if (user.EmailConfirmed)
-            {
-                _logger.LogWarning("ResendEmailConfirmation failed: Email already verified {@LogData}", new { model.Email });
-                return BadRequest(new { message = "Email is already verified!" });
-            }
-
-            var verificationCode = GenerateVerificationCode();
-            user.EmailVerificationCode = verificationCode;
-            user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
-            await _userManager.UpdateAsync(user);
-
-            await _emailService.SendEmailAsync(user.Email!, "Verify your email", $"Your verification code is: {verificationCode}");
-
-            _logger.LogInformation("Verification code resent {@LogData}", new { user.Email });
-            return Ok(new { message = "Email verification sent successfully. Please check your email to verify your account." });
+            return Ok(new { message = "If this email is registered and unverified, a verification code has been sent." });
         }
 
         /// <summary>
@@ -255,24 +244,24 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto model)
         {
-            _logger.LogInformation("VerifyEmail called for {@LogData}", new { model.Email });
+            _logger.LogInformation("VerifyEmail called");
 
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("VerifyEmail failed: User not found {@LogData}", new { model.Email });
+                _logger.LogWarning("VerifyEmail failed: User not found");
                 return NotFound(new { message = "User not found!" });
             }
 
             if (user.EmailConfirmed)
             {
-                _logger.LogWarning("VerifyEmail failed: Email already verified {@LogData}", new { model.Email });
+                _logger.LogWarning("VerifyEmail failed: Email already verified");
                 return BadRequest(new { message = "Email is already verified!" });
             }
 
             if (user.EmailVerificationCode != model.Code || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
             {
-                _logger.LogWarning("VerifyEmail failed: Invalid or expired code {@LogData}", new { model.Email });
+                _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
                 return BadRequest(new { message = "Invalid or expired verification code!" });
             }
 
@@ -281,7 +270,7 @@ namespace garge_api.Controllers
             user.EmailVerificationCodeExpiration = null;
             await _userManager.UpdateAsync(user);
 
-            _logger.LogInformation("Email verified successfully {@LogData}", new { user.Email });
+            _logger.LogInformation("Email verified successfully {UserId}", user.Id);
             return Ok(new { message = "Email verified successfully!" });
         }
 
@@ -298,7 +287,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(401, "Invalid or expired refresh token.")]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto request)
         {
-            _logger.LogInformation("RefreshToken called for {@LogData}", new { request.Token });
+            _logger.LogInformation("RefreshToken called");
 
             var principal = GetPrincipalFromExpiredToken(request.Token);
             if (principal == null)
@@ -398,28 +387,23 @@ namespace garge_api.Controllers
         [HttpPost("request-password-reset")]
         [AllowAnonymous]
         [SwaggerOperation(Summary = "Request a password reset code via email.")]
-        [SwaggerResponse(200, "Reset code sent.")]
-        [SwaggerResponse(404, "User not found.")]
+        [SwaggerResponse(200, "Reset code sent (always, to prevent email enumeration).")]
         public async Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetDto model)
         {
-            _logger.LogInformation("RequestPasswordReset called for {@LogData}", new { model.Email });
+            _logger.LogInformation("RequestPasswordReset called");
 
             var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user == null)
+            if (user != null)
             {
-                _logger.LogWarning("RequestPasswordReset failed: User not found {@LogData}", new { model.Email });
-                return NotFound(new { message = "User not found!" });
+                var code = GenerateVerificationCode();
+                user.PasswordResetCodeHash = HashText(code);
+                user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
+                await _userManager.UpdateAsync(user);
+                await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", $"Your password reset code is: {code}");
+                _logger.LogInformation("Password reset code sent for user {UserId}", user.Id);
             }
 
-            var code = GenerateVerificationCode();
-            user.PasswordResetCodeHash = HashText(code);
-            user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
-            await _userManager.UpdateAsync(user);
-
-            await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", $"Your password reset code is: {code}");
-
-            _logger.LogInformation("Password reset code sent {@LogData}", new { user.Email });
-            return Ok(new { message = "Password reset code sent. Please check your email." });
+            return Ok(new { message = "If this email is registered, a password reset code has been sent." });
         }
 
         /// <summary>
@@ -435,18 +419,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto model)
         {
-            _logger.LogInformation("ResetPassword called for {@LogData}", new { model.Email });
+            _logger.LogInformation("ResetPassword called");
 
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("ResetPassword failed: User not found {@LogData}", new { model.Email });
+                _logger.LogWarning("ResetPassword failed: User not found");
                 return NotFound(new { message = "User not found!" });
             }
 
             if (user.PasswordResetCodeHash != HashText(model.Code) || user.PasswordResetCodeExpiration < DateTime.UtcNow)
             {
-                _logger.LogWarning("ResetPassword failed: Invalid or expired code {@LogData}", new { model.Email });
+                _logger.LogWarning("ResetPassword failed: Invalid or expired code");
                 return BadRequest(new { message = "Invalid or expired reset code!" });
             }
 
@@ -455,7 +439,7 @@ namespace garge_api.Controllers
 
             if (!result.Succeeded)
             {
-                _logger.LogError("ResetPassword failed for {@LogData}: {@Errors}", new { model.Email }, result.Errors);
+                _logger.LogError("ResetPassword failed: {@Errors}", result.Errors);
                 return BadRequest(result.Errors);
             }
 
@@ -463,16 +447,17 @@ namespace garge_api.Controllers
             user.PasswordResetCodeExpiration = null;
             await _userManager.UpdateAsync(user);
 
-            _logger.LogInformation("Password reset successfully {@LogData}", new { user.Email });
+            _logger.LogInformation("Password reset successfully {UserId}", user.Id);
             return Ok(new { message = "Password reset successfully." });
         }
 
-        private string GenerateVerificationCode()
+        private static string GenerateVerificationCode()
         {
-            var random = new Random();
             const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            return new string(Enumerable.Repeat(chars, 6)
-                .Select(s => s[random.Next(s.Length)]).ToArray());
+            var result = new char[6];
+            for (int i = 0; i < result.Length; i++)
+                result[i] = chars[RandomNumberGenerator.GetInt32(chars.Length)];
+            return new string(result);
         }
 
         private string HashText(string text)
