@@ -13,5 +13,7 @@ namespace garge_api.Models.Webhook
 
         [Required]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public string UserId { get; set; } = string.Empty;
     }
 }

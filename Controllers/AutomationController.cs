@@ -126,6 +126,9 @@ namespace garge_api.Controllers
             if (rule == null)
                 return NotFound();
 
+            if (!await UserHasAccessToAutomationAsync(rule))
+                return Forbid();
+
             rule.LastTriggeredAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             return NoContent();
@@ -257,6 +260,9 @@ namespace garge_api.Controllers
             if (rule == null)
                 return NotFound();
 
+            if (!await UserHasAccessToAutomationAsync(rule))
+                return Forbid();
+
             rule.TimerActivatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             return NoContent();
@@ -274,6 +280,9 @@ namespace garge_api.Controllers
             var rule = await _context.AutomationRules.FindAsync(id);
             if (rule == null)
                 return NotFound();
+
+            if (!await UserHasAccessToAutomationAsync(rule))
+                return Forbid();
 
             rule.TimerActivatedAt = null;
             await _context.SaveChangesAsync();
