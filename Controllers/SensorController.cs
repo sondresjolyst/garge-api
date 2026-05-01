@@ -414,14 +414,13 @@ namespace garge_api.Controllers
         private async Task<string> GenerateSensorRegistrationCodeAsync(int length = 10)
         {
             const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            var random = new Random();
             string code;
             bool exists;
 
             do
             {
-                code = new string(Enumerable.Repeat(chars, length)
-                    .Select(s => s[random.Next(s.Length)]).ToArray());
+                code = new string(Enumerable.Range(0, length)
+                    .Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
                 exists = await _context.Sensors.AnyAsync(s => s.RegistrationCode == code);
             } while (exists);
 

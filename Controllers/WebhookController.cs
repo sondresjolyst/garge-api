@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using AutoMapper;
 using garge_api.Models.Webhook;
+using System.Security.Claims;
 
 namespace garge_api.Controllers
 {
@@ -41,6 +42,7 @@ namespace garge_api.Controllers
 
             var webhookSubscription = _mapper.Map<WebhookSubscription>(webhookDto);
             webhookSubscription.CreatedAt = DateTime.UtcNow;
+            webhookSubscription.UserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
 
             _context.WebhookSubscriptions.Add(webhookSubscription);
             await _context.SaveChangesAsync();
@@ -68,6 +70,10 @@ namespace garge_api.Controllers
                 _logger.LogWarning("GetWebhook not found: {@LogData}", new { id });
                 return NotFound();
             }
+
+            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (webhookSubscription.UserId != currentUserId)
+                return Forbid();
 
             var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 

@@ -31,9 +31,9 @@ namespace garge_api
 
             builder.Host.UseSerilog();
 
+            builder.Configuration.AddEnvironmentVariables();
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
             var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
-            builder.Configuration.AddEnvironmentVariables();
 
             builder.Services.AddResponseCompression(options =>
             {
@@ -208,6 +208,7 @@ namespace garge_api
 
             app.UseStaticFiles();
             app.UseRouting();
+            app.UseMiddleware<RequestLoggingMiddleware>();
             app.UseCors("AllowAllOrigins");
             app.UseAuthentication();
             app.UseAuthorization();
