@@ -25,4 +25,5 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 ENV ASPNETCORE_URLS="http://*:7297"
+USER app
 ENTRYPOINT ["dotnet", "garge-api.dll"]

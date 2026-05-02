@@ -98,7 +98,7 @@ namespace garge_api.Controllers
                 await _context.SaveChangesAsync();
 
                 var verificationCode = GenerateVerificationCode();
-                user.EmailVerificationCode = verificationCode;
+                user.EmailVerificationCodeHash = HashText(verificationCode);
                 user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
                 await _userManager.UpdateAsync(user);
 
@@ -141,7 +141,7 @@ namespace garge_api.Controllers
                 return Unauthorized(new { message = "Invalid credentials!" });
             }
 
-            var result = await _signInManager.PasswordSignInAsync(user.UserName ?? string.Empty, login.Password, false, false);
+            var result = await _signInManager.PasswordSignInAsync(user.UserName ?? string.Empty, login.Password, false, lockoutOnFailure: true);
             if (!result.Succeeded)
             {
                 _logger.LogWarning("Login failed: Invalid credentials");
@@ -221,7 +221,7 @@ namespace garge_api.Controllers
             if (user != null && !user.EmailConfirmed)
             {
                 var verificationCode = GenerateVerificationCode();
-                user.EmailVerificationCode = verificationCode;
+                user.EmailVerificationCodeHash = HashText(verificationCode);
                 user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
                 await _userManager.UpdateAsync(user);
                 await _emailService.SendEmailAsync(user.Email!, "Verify your email", $"Your verification code is: {verificationCode}");
@@ -259,14 +259,14 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = "Email is already verified!" });
             }
 
-            if (user.EmailVerificationCode != model.Code || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
+            if (user.EmailVerificationCodeHash != HashText(model.Code) || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
             {
                 _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
                 return BadRequest(new { message = "Invalid or expired verification code!" });
             }
 
             user.EmailConfirmed = true;
-            user.EmailVerificationCode = null;
+            user.EmailVerificationCodeHash = null;
             user.EmailVerificationCodeExpiration = null;
             await _userManager.UpdateAsync(user);
 
@@ -398,6 +398,7 @@ namespace garge_api.Controllers
                 var code = GenerateVerificationCode();
                 user.PasswordResetCodeHash = HashText(code);
                 user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
+                user.PasswordResetAttempts = 0;
                 await _userManager.UpdateAsync(user);
                 await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", $"Your password reset code is: {code}");
                 _logger.LogInformation("Password reset code sent for user {UserId}", user.Id);
@@ -428,8 +429,16 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User not found!" });
             }
 
+            if (user.PasswordResetAttempts >= 5)
+            {
+                _logger.LogWarning("ResetPassword failed: Too many attempts {UserId}", user.Id);
+                return StatusCode(429, new { message = "Too many attempts. Request a new reset code." });
+            }
+
             if (user.PasswordResetCodeHash != HashText(model.Code) || user.PasswordResetCodeExpiration < DateTime.UtcNow)
             {
+                user.PasswordResetAttempts++;
+                await _userManager.UpdateAsync(user);
                 _logger.LogWarning("ResetPassword failed: Invalid or expired code");
                 return BadRequest(new { message = "Invalid or expired reset code!" });
             }
@@ -445,6 +454,7 @@ namespace garge_api.Controllers
 
             user.PasswordResetCodeHash = null;
             user.PasswordResetCodeExpiration = null;
+            user.PasswordResetAttempts = 0;
             await _userManager.UpdateAsync(user);
 
             _logger.LogInformation("Password reset successfully {UserId}", user.Id);

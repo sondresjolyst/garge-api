@@ -132,6 +132,10 @@ namespace garge_api.Controllers
 
             if (group == null) return NotFound();
 
+            var ownsSensor = await _context.UserSensors
+                .AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
+            if (!ownsSensor) return Forbid();
+
             var exists = await _context.GroupSensors
                 .AnyAsync(gs => gs.GroupId == id && gs.SensorId == sensorId);
 
@@ -179,6 +183,10 @@ namespace garge_api.Controllers
                 .FirstOrDefaultAsync(g => g.Id == id && g.UserId == userId);
 
             if (group == null) return NotFound();
+
+            var ownsSwitch = await _context.UserSwitches
+                .AnyAsync(us => us.UserId == userId && us.SwitchId == switchId);
+            if (!ownsSwitch) return Forbid();
 
             var exists = await _context.GroupSwitches
                 .AnyAsync(gs => gs.GroupId == id && gs.SwitchId == switchId);

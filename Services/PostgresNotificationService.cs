@@ -79,7 +79,7 @@ public class PostgresNotificationService : BackgroundService
         var subscriptions = await context.WebhookSubscriptions.ToListAsync();
         foreach (var subscription in subscriptions)
         {
-            await webhookService.NotifyClientAsync(subscription.WebhookUrl, switchData);
+            await webhookService.NotifyClientAsync(subscription.WebhookUrl, switchData, subscription.WebhookSecret);
         }
     }
 }

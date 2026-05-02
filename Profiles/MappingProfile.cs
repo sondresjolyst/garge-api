@@ -53,6 +53,7 @@ public class MappingProfile : Profile
 
         // Webhook mappings
         CreateMap<WebhookSubscription, WebhookSubscriptionDto>().ReverseMap();
+        CreateMap<CreateWebhookSubscriptionDto, WebhookSubscription>();
 
     }
 }
