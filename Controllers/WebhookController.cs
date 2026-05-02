@@ -30,7 +30,7 @@ namespace garge_api.Controllers
         /// <param name="webhookDto">The webhook subscription data.</param>
         /// <returns>The created webhook subscription.</returns>
         [HttpPost]
-        public async Task<IActionResult> AddWebhook([FromBody] WebhookSubscriptionDto webhookDto)
+        public async Task<IActionResult> AddWebhook([FromBody] CreateWebhookSubscriptionDto webhookDto)
         {
             _logger.LogInformation("AddWebhook called by {@LogData}", new { User = User.Identity?.Name });
 
