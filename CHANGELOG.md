@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1](https://github.com/sondresjolyst/garge-api/compare/v2.2.0...v2.2.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* add webhook secret authentication for operator callbacks ([#139](https://github.com/sondresjolyst/garge-api/issues/139)) ([6626084](https://github.com/sondresjolyst/garge-api/commit/662608495167bce14dcf33d308e97f45b5f17a25))
+* address security advisory GHSA-9xmw-j53q-f48j ([#138](https://github.com/sondresjolyst/garge-api/issues/138)) ([ad604b5](https://github.com/sondresjolyst/garge-api/commit/ad604b5ff9922669a012c0115e40d7e56b3e4839))
+
 ## [2.2.0](https://github.com/sondresjolyst/garge-api/compare/v2.1.0...v2.2.0) (2026-04-29)
 
 
