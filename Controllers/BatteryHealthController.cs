@@ -78,8 +78,12 @@ namespace garge_api.Controllers
                 .OrderByDescending(bh => bh.Timestamp)
                 .FirstOrDefaultAsync();
 
+            // Offset matches firmware BatteryHealthController.h:
+            //   DISCONNECT_CONFIRM_CYCLES (18) + POST_CHARGE_WAIT_CYCLES (6) = 24h
+            // from real charger removal to record creation. Update both in
+            // lockstep if firmware constants change.
             if (previous != null && dto.ChargesRecorded > previous.ChargesRecorded)
-                record.LastChargedAt = DateTime.UtcNow.AddHours(-4);
+                record.LastChargedAt = DateTime.UtcNow.AddHours(-24);
             else
                 record.LastChargedAt = previous?.LastChargedAt;
 
