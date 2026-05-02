@@ -137,8 +137,9 @@ namespace garge_api.Controllers
         /// <param name="timeRange">The time range for the data (e.g., 5m, 10m, 30m, 1h). Takes precedence over startDate and endDate.</param>
         /// <param name="startDate">The start date for the data range.</param>
         /// <param name="endDate">The end date for the data range.</param>
-        /// <param name="average">Whether to return averaged data.</param>
         /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
+        /// <param name="pageNumber">The page number for pagination.</param>
+        /// <param name="pageSize">The number of items per page.</param>
         /// <returns>The data for the specified sensor.</returns>
         [HttpGet("{sensorId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific sensor.")]
@@ -227,8 +228,9 @@ namespace garge_api.Controllers
         /// <param name="timeRange">The time range for the data (e.g., 5m, 10m, 30m, 1h). Takes precedence over startDate and endDate.</param>
         /// <param name="startDate">The start date for the data range.</param>
         /// <param name="endDate">The end date for the data range.</param>
-        /// <param name="average">Whether to return averaged data.</param>
         /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
+        /// <param name="pageNumber">The page number for pagination.</param>
+        /// <param name="pageSize">The number of items per page.</param>
         /// <returns>The data for the specified sensors.</returns>
         [HttpGet("data")]
         [SwaggerOperation(Summary = "Retrieves data for multiple sensors.")]
@@ -939,6 +941,7 @@ namespace garge_api.Controllers
         /// </summary>
         /// <param name="sensorId">The ID of the sensor to update.</param>
         /// <param name="dto">The new custom name.</param>
+        /// <param name="userId">Optional user ID (admin only). Defaults to the authenticated user.</param>
         /// <returns>The custom name data.</returns>
         [HttpPatch("{sensorId}/custom-name")]
         [SwaggerOperation(Summary = "Updates the custom name of a sensor for a user.")]
