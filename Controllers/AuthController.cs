@@ -192,7 +192,7 @@ namespace garge_api.Controllers
             var refreshToken = new RefreshToken
             {
                 Token = hashedToken,
-                UserId = user.Id,
+                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
             };
@@ -368,7 +368,7 @@ namespace garge_api.Controllers
             var newRefreshToken = new RefreshToken
             {
                 Token = newHashedToken,
-                UserId = user.Id,
+                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
             };

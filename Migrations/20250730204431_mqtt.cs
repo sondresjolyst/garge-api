@@ -6,7 +6,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace garge_api.Migrations
 {
     /// <inheritdoc />
-    public partial class mqtt : Migration
+    public partial class Mqtt : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

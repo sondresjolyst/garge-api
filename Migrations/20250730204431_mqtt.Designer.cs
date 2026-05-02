@@ -13,7 +13,7 @@ namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
     [Migration("20250730204431_mqtt")]
-    partial class mqtt
+    partial class Mqtt
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
