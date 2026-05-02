@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.2](https://github.com/sondresjolyst/garge-api/compare/v2.2.1...v2.2.2) (2026-05-02)
+
+
+### Bug Fixes
+
+* bump Dockerfile base images to .NET 10 ([#146](https://github.com/sondresjolyst/garge-api/issues/146)) ([d791f5e](https://github.com/sondresjolyst/garge-api/commit/d791f5ecce3504a23daf682f86eea6003d1b2616))
+* bump LastChargedAt offset to 24h to match firmware ([#147](https://github.com/sondresjolyst/garge-api/issues/147)) ([e06ef7f](https://github.com/sondresjolyst/garge-api/commit/e06ef7fbbcedeb3a3c084920bf7f84e01f3e05d1))
+* resolve build warnings (CS8981, CS8601, CS1572, CS1573) ([#144](https://github.com/sondresjolyst/garge-api/issues/144)) ([a704716](https://github.com/sondresjolyst/garge-api/commit/a70471689e12efffa263953b4050d7eaaec6b500))
+
 ## [2.2.1](https://github.com/sondresjolyst/garge-api/compare/v2.2.0...v2.2.1) (2026-05-02)
 
 
