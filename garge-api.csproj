@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <DefaultItemExcludes>$(DefaultItemExcludes);garge-api.Tests\**</DefaultItemExcludes>
     <RootNamespace>garge_api</RootNamespace>
     <UserSecretsId>a0e33732-a687-460d-ae97-563565a27798</UserSecretsId>
 	<GenerateDocumentationFile>true</GenerateDocumentationFile>

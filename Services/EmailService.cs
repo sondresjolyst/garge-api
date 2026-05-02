@@ -3,7 +3,7 @@ using brevo_csharp.Api;
 using brevo_csharp.Client;
 using brevo_csharp.Model;
 
-public class EmailService
+public class EmailService : IEmailService
 {
     private readonly IConfiguration _configuration;
     private readonly ILogger<EmailService> _logger;

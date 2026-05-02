@@ -70,7 +70,7 @@ namespace garge_api
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
-            builder.Services.AddScoped<EmailService>();
+            builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAuthentication(options =>
