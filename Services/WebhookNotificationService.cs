@@ -15,7 +15,7 @@ public class WebhookNotificationService
         _logger.LogInformation("WebhookNotificationService initialized");
     }
 
-    public async Task NotifyClientAsync(string webhookUrl, SwitchData switchData)
+    public async Task NotifyClientAsync(string webhookUrl, SwitchData switchData, string? webhookSecret = null)
     {
         if (!Uri.TryCreate(webhookUrl, UriKind.Absolute, out var uri) ||
             !uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
@@ -33,9 +33,13 @@ public class WebhookNotificationService
         var payload = JsonConvert.SerializeObject(switchData);
         var content = new StringContent(payload, Encoding.UTF8, "application/json");
 
+        using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl) { Content = content };
+        if (!string.IsNullOrEmpty(webhookSecret))
+            request.Headers.Add("X-Webhook-Secret", webhookSecret);
+
         try
         {
-            var response = await _httpClient.PostAsync(webhookUrl, content);
+            var response = await _httpClient.SendAsync(request);
             response.EnsureSuccessStatusCode();
             _logger.LogInformation("Webhook notified successfully: {WebhookUrl}", webhookUrl);
         }
