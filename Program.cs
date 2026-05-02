@@ -35,16 +35,6 @@ namespace garge_api
             var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
             var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
 
-            //builder.Logging.ClearProviders();
-            //builder.Logging.AddConfiguration(builder.Configuration.GetSection("Logging"));
-            //builder.Logging.AddSimpleConsole(options =>
-            //{
-            //    options.TimestampFormat = "yyyy-MM-dd HH:mm:ss ";
-            //    options.IncludeScopes = false; // disables the extra scope/tracing info
-            //    options.SingleLine = true;
-            //});
-            //builder.Logging.AddFilter(DbLoggerCategory.Database.Command.Name, LogLevel.None);
-
             builder.Services.AddResponseCompression(options =>
             {
                 options.EnableForHttps = true;
