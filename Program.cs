@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 using System.Reflection;
 using garge_api.Services;
 using AspNetCoreRateLimit;
@@ -50,7 +50,7 @@ namespace garge_api
                 options.Level = CompressionLevel.Fastest;
             });
 
-            builder.Services.AddAutoMapper(typeof(MappingProfile));
+            builder.Services.AddAutoMapper(_ => { }, typeof(MappingProfile));
 
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -70,7 +70,7 @@ namespace garge_api
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
-            builder.Services.AddScoped<EmailService>();
+            builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAuthentication(options =>
@@ -133,18 +133,11 @@ namespace garge_api
                     Scheme = "Bearer"
                 });
 
-                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                c.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
                 {
                     {
-                        new OpenApiSecurityScheme
-                        {
-                            Reference = new OpenApiReference
-                            {
-                                Type = ReferenceType.SecurityScheme,
-                                Id = "Bearer"
-                            }
-                        },
-                        new string[] {}
+                        new OpenApiSecuritySchemeReference("Bearer"),
+                        new List<string>()
                     }
                 });
             });

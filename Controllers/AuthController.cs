@@ -28,7 +28,7 @@ namespace garge_api.Controllers
         private readonly SignInManager<User> _signInManager;
         private readonly IConfiguration _configuration;
         private readonly ApplicationDbContext _context;
-        private readonly EmailService _emailService;
+        private readonly IEmailService _emailService;
         private readonly IMapper _mapper;
         private readonly ILogger<AuthController> _logger;
 
@@ -37,7 +37,7 @@ namespace garge_api.Controllers
             SignInManager<User> signInManager,
             IConfiguration configuration,
             ApplicationDbContext context,
-            EmailService emailService,
+            IEmailService emailService,
             IMapper mapper,
             ILogger<AuthController> logger)
         {
@@ -192,7 +192,7 @@ namespace garge_api.Controllers
             var refreshToken = new RefreshToken
             {
                 Token = hashedToken,
-                UserId = user.Id,
+                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
             };
@@ -368,7 +368,7 @@ namespace garge_api.Controllers
             var newRefreshToken = new RefreshToken
             {
                 Token = newHashedToken,
-                UserId = user.Id,
+                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
             };

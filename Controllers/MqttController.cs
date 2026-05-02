@@ -46,8 +46,7 @@ namespace garge_api.Controllers
         private static string HashPasswordPBKDF2(string password, string salt, int iterations = 300_000, int hashByteSize = 32)
         {
             var saltBytes = Encoding.UTF8.GetBytes(salt);
-            using var pbkdf2 = new Rfc2898DeriveBytes(password, saltBytes, iterations, HashAlgorithmName.SHA512);
-            var hash = pbkdf2.GetBytes(hashByteSize);
+            var hash = Rfc2898DeriveBytes.Pbkdf2(password, saltBytes, iterations, HashAlgorithmName.SHA512, hashByteSize);
             return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
