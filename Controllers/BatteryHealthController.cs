@@ -1,5 +1,6 @@
 using AutoMapper;
 using garge_api.Dtos.Sensor;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Sensor;
 using Microsoft.AspNetCore.Authorization;
@@ -40,9 +41,6 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
-        private static string Sanitize(string input) => input.Replace("\r", "", StringComparison.Ordinal)
-                                                              .Replace("\n", "", StringComparison.Ordinal);
-
         /// <summary>
         /// Stores a battery health reading for the voltage sensor identified by name.
         /// Called by the operator when a battery health MQTT state message arrives.
@@ -54,18 +52,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto dto)
         {
-            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("CreateBatteryHealth voltage sensor not found: {SensorName}", Sanitize(sensorName));
+                _logger.LogWarning("CreateBatteryHealth voltage sensor not found: {SensorName}", LogSanitizer.Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
                 return Forbid();
             }
 
@@ -91,7 +89,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var result = _mapper.Map<BatteryHealthDto>(record);
-            _logger.LogInformation("Battery health record created: {@LogData}", new { record.Id, SensorName = Sanitize(sensorName), record.Status });
+            _logger.LogInformation("Battery health record created: {@LogData}", new { record.Id, SensorName = LogSanitizer.Sanitize(sensorName), record.Status });
             return CreatedAtAction(nameof(GetLatestBatteryHealth), new { sensorName }, result);
         }
 
@@ -105,18 +103,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
-            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
-                _logger.LogWarning("GetLatestBatteryHealth voltage sensor not found: {SensorName}", Sanitize(sensorName));
+                _logger.LogWarning("GetLatestBatteryHealth voltage sensor not found: {SensorName}", LogSanitizer.Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
             }
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = Sanitize(sensorName) });
+                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
                 return Forbid();
             }
 
@@ -127,7 +125,7 @@ namespace garge_api.Controllers
 
             if (latest == null)
             {
-                _logger.LogInformation("GetLatestBatteryHealth no data for sensor: {SensorName}", Sanitize(sensorName));
+                _logger.LogInformation("GetLatestBatteryHealth no data for sensor: {SensorName}", LogSanitizer.Sanitize(sensorName));
                 return Ok((BatteryHealthDto?)null);
             }
 

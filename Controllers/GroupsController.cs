@@ -1,4 +1,5 @@
 using garge_api.Dtos.Group;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Group;
 using Microsoft.AspNetCore.Authorization;
@@ -67,7 +68,7 @@ namespace garge_api.Controllers
             _context.Groups.Add(group);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Group {Name} created by {UserId}", group.Name, userId);
+            _logger.LogInformation("Group {Name} created by {UserId}", LogSanitizer.Sanitize(group.Name), userId);
 
             return CreatedAtAction(nameof(GetGroups), new GroupDto
             {
