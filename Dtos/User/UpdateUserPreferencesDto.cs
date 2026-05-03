@@ -7,5 +7,10 @@ namespace garge_api.Dtos.User
         [Required]
         [MaxLength(10)]
         public required string PriceZone { get; set; }
+
+        public bool? PushNotificationsEnabled { get; set; }
+
+        [Range(1, 168)]
+        public int? OfflineAlertThresholdHours { get; set; }
     }
 }

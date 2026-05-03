@@ -21,19 +21,22 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AdminController> _logger;
         private readonly IMapper _mapper;
+        private readonly IEmailService _emailService;
 
         public AdminController(
             RoleManager<IdentityRole> roleManager,
             UserManager<User> userManager,
             ApplicationDbContext context,
             ILogger<AdminController> logger,
-            IMapper mapper)
+            IMapper mapper,
+            IEmailService emailService)
         {
             _roleManager = roleManager;
             _userManager = userManager;
             _context = context;
             _logger = logger;
             _mapper = mapper;
+            _emailService = emailService;
         }
 
         /// <summary>
@@ -259,6 +262,27 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Gets Brevo transactional email stats for the last N days.
+        /// </summary>
+        [HttpGet("/api/admin/email-stats")]
+        [SwaggerOperation(Summary = "Gets Brevo email stats.")]
+        [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
+        public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
+        {
+            _logger.LogInformation("GetEmailStats called by {@LogData}", new { User = User.Identity?.Name });
+            try
+            {
+                var stats = await _emailService.GetEmailStatsAsync(days);
+                return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("GetEmailStats failed: {Error}", ex.Message);
+                return StatusCode(502, new { message = "Failed to fetch email stats from Brevo." });
+            }
+        }
+
+        /// <summary>
         /// Gets cumulative daily stats over time for charting.
         /// </summary>
         [HttpGet("/api/admin/stats/history")]
@@ -377,6 +401,44 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(new { message = "Permission assigned successfully!" });
+        }
+
+        /// <summary>
+        /// Gets app-wide settings. Public — called by the frontend without authentication.
+        /// </summary>
+        [HttpGet("/api/admin/settings")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Gets app-wide settings.")]
+        [SwaggerResponse(200, "Settings retrieved.", typeof(AppSettingsDto))]
+        public async Task<IActionResult> GetAppSettings()
+        {
+            var settings = await _context.AppSettings.FindAsync(1)
+                ?? new AppSettings { Id = 1, CookieBannerEnabled = true };
+            return Ok(_mapper.Map<AppSettingsDto>(settings));
+        }
+
+        /// <summary>
+        /// Updates app-wide settings.
+        /// </summary>
+        [HttpPut("/api/admin/settings")]
+        [SwaggerOperation(Summary = "Updates app-wide settings.")]
+        [SwaggerResponse(200, "Settings updated.", typeof(AppSettingsDto))]
+        public async Task<IActionResult> UpdateAppSettings([FromBody] UpdateAppSettingsDto dto)
+        {
+            _logger.LogInformation("UpdateAppSettings called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+
+            var settings = await _context.AppSettings.FindAsync(1);
+            if (settings == null)
+            {
+                settings = new AppSettings { Id = 1 };
+                _context.AppSettings.Add(settings);
+            }
+
+            _mapper.Map(dto, settings);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("AppSettings updated: {@LogData}", new { dto.CookieBannerEnabled, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+            return Ok(_mapper.Map<AppSettingsDto>(settings));
         }
     }
 }

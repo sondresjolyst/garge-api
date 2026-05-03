@@ -1,5 +1,6 @@
 using AutoMapper;
 using garge_api.Dtos.User;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Auth;
 using Microsoft.AspNetCore.Authorization;
@@ -103,6 +104,8 @@ namespace garge_api.Controllers
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == id));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == id));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == id));
+            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == id));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == id));
 
             var profile = await _context.UserProfiles.FindAsync(id);
             if (profile != null)
@@ -114,11 +117,11 @@ namespace garge_api.Controllers
             var result = await _userManager.DeleteAsync(user);
             if (!result.Succeeded)
             {
-                _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", SanitizeForLog(id), result.Errors);
+                _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
                 return BadRequest(result.Errors);
             }
 
-            _logger.LogInformation("Account deleted by user {UserId}", SanitizeForLog(id));
+            _logger.LogInformation("Account deleted by user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
         }
 
@@ -244,7 +247,7 @@ namespace garge_api.Controllers
                 })
             };
 
-            _logger.LogInformation("Data exported for user {UserId}", SanitizeForLog(id));
+            _logger.LogInformation("Data exported for user {UserId}", LogSanitizer.Sanitize(id));
             return Ok(export);
         }
 
@@ -267,6 +270,10 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User profile not found!" });
 
             userProfile.PriceZone = dto.PriceZone;
+            if (dto.PushNotificationsEnabled.HasValue)
+                userProfile.PushNotificationsEnabled = dto.PushNotificationsEnabled.Value;
+            if (dto.OfflineAlertThresholdHours.HasValue)
+                userProfile.OfflineAlertThresholdHours = dto.OfflineAlertThresholdHours.Value;
             await _context.SaveChangesAsync();
 
             var user = await _userManager.FindByIdAsync(id);
@@ -277,6 +284,5 @@ namespace garge_api.Controllers
             return Ok(response);
         }
 
-        private static string SanitizeForLog(string value) => value.Replace('\n', '_').Replace('\r', '_');
     }
 }

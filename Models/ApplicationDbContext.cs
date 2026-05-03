@@ -4,6 +4,7 @@ using garge_api.Models.Automation;
 using garge_api.Models.Electricity;
 using garge_api.Models.Group;
 using garge_api.Models.Mqtt;
+using garge_api.Models.Push;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
@@ -38,6 +39,9 @@ namespace garge_api.Models
         public DbSet<UserSwitch> UserSwitches { get; set; }
         public DbSet<StoredElectricityPrice> StoredElectricityPrices { get; set; }
         public DbSet<SensorPhoto> SensorPhotos { get; set; }
+        public DbSet<PushSubscription> PushSubscriptions { get; set; }
+        public DbSet<SensorOfflineNotification> SensorOfflineNotifications { get; set; }
+        public DbSet<AppSettings> AppSettings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -203,6 +207,23 @@ namespace garge_api.Models
             modelBuilder.Entity<SensorPhoto>()
                 .HasIndex(sp => sp.SensorId)
                 .IsUnique();
+
+            modelBuilder.Entity<PushSubscription>()
+                .HasIndex(ps => new { ps.UserId, ps.Endpoint })
+                .IsUnique();
+
+            modelBuilder.Entity<SensorOfflineNotification>()
+                .HasIndex(n => new { n.UserId, n.SensorId, n.ResolvedAt });
+
+            modelBuilder.Entity<AppSettings>()
+                .Property(s => s.Id)
+                .ValueGeneratedNever();
+
+            modelBuilder.Entity<AppSettings>()
+                .ToTable(t => t.HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1"));
+
+            modelBuilder.Entity<AppSettings>()
+                .HasData(new AppSettings { Id = 1, CookieBannerEnabled = true });
         }
         public void EnsureTriggers()
         {

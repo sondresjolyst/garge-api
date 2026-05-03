@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260503122116_AddAppSettings")]
+    partial class AddAppSettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -280,6 +283,29 @@ namespace garge_api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("UserProfiles");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Admin.AppSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("CookieBannerEnabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AppSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CookieBannerEnabled = true
+                        });
                 });
 
             modelBuilder.Entity("garge_api.Models.Admin.RolePermission", b =>
