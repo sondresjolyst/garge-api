@@ -220,7 +220,7 @@ namespace garge_api.Models
                 .ValueGeneratedNever();
 
             modelBuilder.Entity<AppSettings>()
-                .HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1");
+                .ToTable(t => t.HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1"));
 
             modelBuilder.Entity<AppSettings>()
                 .HasData(new AppSettings { Id = 1, CookieBannerEnabled = true });
