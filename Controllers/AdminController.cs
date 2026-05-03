@@ -402,5 +402,43 @@ namespace garge_api.Controllers
             _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(new { message = "Permission assigned successfully!" });
         }
+
+        /// <summary>
+        /// Gets app-wide settings. Public — called by the frontend without authentication.
+        /// </summary>
+        [HttpGet("/api/admin/settings")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Gets app-wide settings.")]
+        [SwaggerResponse(200, "Settings retrieved.", typeof(AppSettingsDto))]
+        public async Task<IActionResult> GetAppSettings()
+        {
+            var settings = await _context.AppSettings.FindAsync(1)
+                ?? new AppSettings { Id = 1, CookieBannerEnabled = true };
+            return Ok(_mapper.Map<AppSettingsDto>(settings));
+        }
+
+        /// <summary>
+        /// Updates app-wide settings.
+        /// </summary>
+        [HttpPut("/api/admin/settings")]
+        [SwaggerOperation(Summary = "Updates app-wide settings.")]
+        [SwaggerResponse(200, "Settings updated.", typeof(AppSettingsDto))]
+        public async Task<IActionResult> UpdateAppSettings([FromBody] UpdateAppSettingsDto dto)
+        {
+            _logger.LogInformation("UpdateAppSettings called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+
+            var settings = await _context.AppSettings.FindAsync(1);
+            if (settings == null)
+            {
+                settings = new AppSettings { Id = 1 };
+                _context.AppSettings.Add(settings);
+            }
+
+            _mapper.Map(dto, settings);
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("AppSettings updated: {@LogData}", new { dto.CookieBannerEnabled, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+            return Ok(_mapper.Map<AppSettingsDto>(settings));
+        }
     }
 }
