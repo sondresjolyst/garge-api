@@ -18,4 +18,8 @@ public class UserProfile
 
     [MaxLength(10)]
     public string PriceZone { get; set; } = "NO2";
+
+    public bool PushNotificationsEnabled { get; set; } = false;
+
+    public int OfflineAlertThresholdHours { get; set; } = 4;
 }
