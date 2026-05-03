@@ -12,7 +12,7 @@ namespace garge_api.Services
 {
     public interface IWebPushService
     {
-        Task SendAsync(string userId, string title, string body, CancellationToken ct = default);
+        Task<bool> SendAsync(string userId, string title, string body, CancellationToken ct = default);
     }
 
     public class WebPushService(
@@ -21,7 +21,7 @@ namespace garge_api.Services
         IConfiguration configuration,
         ILogger<WebPushService> logger) : IWebPushService
     {
-        public async Task SendAsync(string userId, string title, string body, CancellationToken ct = default)
+        public async Task<bool> SendAsync(string userId, string title, string body, CancellationToken ct = default)
         {
             var publicKey = configuration["Vapid:PublicKey"] ?? string.Empty;
             var privateKey = configuration["Vapid:PrivateKey"] ?? string.Empty;
@@ -30,14 +30,14 @@ namespace garge_api.Services
             if (string.IsNullOrEmpty(publicKey) || string.IsNullOrEmpty(privateKey))
             {
                 logger.LogWarning("VAPID keys not configured — push skipped");
-                return;
+                return false;
             }
 
             var subscriptions = await db.PushSubscriptions
                 .Where(s => s.UserId == userId)
                 .ToListAsync(ct);
 
-            if (subscriptions.Count == 0) return;
+            if (subscriptions.Count == 0) return false;
 
             var payload = JsonSerializer.SerializeToUtf8Bytes(new { title, body });
             var toRemove = new List<int>();
@@ -74,6 +74,8 @@ namespace garge_api.Services
 
             if (successCount == 0 && lastError != null)
                 throw lastError;
+
+            return successCount > 0;
         }
 
         private async Task SendToSubscriptionAsync(
