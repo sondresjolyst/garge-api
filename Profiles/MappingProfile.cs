@@ -21,6 +21,8 @@ public class MappingProfile : Profile
         CreateMap<IdentityRole, RoleDto>();
         CreateMap<RolePermission, RolePermissionDto>().ReverseMap();
         CreateMap<User, UserDto>();
+        CreateMap<AppSettings, AppSettingsDto>();
+        CreateMap<UpdateAppSettingsDto, AppSettings>();
 
         // Electricity mappings
         CreateMap<PriceResponse, PriceResponseDto>();

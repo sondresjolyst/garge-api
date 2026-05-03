@@ -41,6 +41,7 @@ namespace garge_api.Models
         public DbSet<SensorPhoto> SensorPhotos { get; set; }
         public DbSet<PushSubscription> PushSubscriptions { get; set; }
         public DbSet<SensorOfflineNotification> SensorOfflineNotifications { get; set; }
+        public DbSet<AppSettings> AppSettings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -213,6 +214,16 @@ namespace garge_api.Models
 
             modelBuilder.Entity<SensorOfflineNotification>()
                 .HasIndex(n => new { n.UserId, n.SensorId, n.ResolvedAt });
+
+            modelBuilder.Entity<AppSettings>()
+                .Property(s => s.Id)
+                .ValueGeneratedNever();
+
+            modelBuilder.Entity<AppSettings>()
+                .HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1");
+
+            modelBuilder.Entity<AppSettings>()
+                .HasData(new AppSettings { Id = 1, CookieBannerEnabled = true });
         }
         public void EnsureTriggers()
         {
