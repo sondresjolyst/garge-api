@@ -104,6 +104,8 @@ namespace garge_api.Controllers
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == id));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == id));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == id));
+            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == id));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == id));
 
             var profile = await _context.UserProfiles.FindAsync(id);
             if (profile != null)
@@ -268,6 +270,10 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User profile not found!" });
 
             userProfile.PriceZone = dto.PriceZone;
+            if (dto.PushNotificationsEnabled.HasValue)
+                userProfile.PushNotificationsEnabled = dto.PushNotificationsEnabled.Value;
+            if (dto.OfflineAlertThresholdHours.HasValue)
+                userProfile.OfflineAlertThresholdHours = dto.OfflineAlertThresholdHours.Value;
             await _context.SaveChangesAsync();
 
             var user = await _userManager.FindByIdAsync(id);
