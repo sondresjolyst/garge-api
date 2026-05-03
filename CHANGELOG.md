@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.1](https://github.com/sondresjolyst/garge-api/compare/v2.3.0...v2.3.1) (2026-05-03)
+
+
+### Bug Fixes
+
+* log warning when VAPID config missing instead of silent 503 ([#157](https://github.com/sondresjolyst/garge-api/issues/157)) ([3693d0e](https://github.com/sondresjolyst/garge-api/commit/3693d0e971b1fba8916628414cb118cdcf78d7d3))
+* regenerate AddAppSettings migration to sync model snapshot ([#156](https://github.com/sondresjolyst/garge-api/issues/156)) ([8b2e435](https://github.com/sondresjolyst/garge-api/commit/8b2e43528fd72b9d42cb598b3390c22dfce60050))
+
 ## [2.3.0](https://github.com/sondresjolyst/garge-api/compare/v2.2.2...v2.3.0) (2026-05-03)
 
 
