@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.3.0](https://github.com/sondresjolyst/garge-api/compare/v2.2.2...v2.3.0) (2026-05-03)
+
+
+### Features
+
+* add app-wide settings endpoint with cookie banner toggle ([#152](https://github.com/sondresjolyst/garge-api/issues/152)) ([04e4b27](https://github.com/sondresjolyst/garge-api/commit/04e4b27041eefca650aa034773a8238a5e6ce04c))
+* add Brevo email stats endpoint to admin API ([#149](https://github.com/sondresjolyst/garge-api/issues/149)) ([ab1e4f7](https://github.com/sondresjolyst/garge-api/commit/ab1e4f74021e26feab81cd1551bbc56bddd6ebf3))
+* add push notification infrastructure with VAPID encryption and offline alerts ([#151](https://github.com/sondresjolyst/garge-api/issues/151)) ([30e0fc2](https://github.com/sondresjolyst/garge-api/commit/30e0fc2e3de3627214019414567c203a5f54200d))
+
+
+### Bug Fixes
+
+* replace per-controller Sanitize with shared LogSanitizer helper ([#150](https://github.com/sondresjolyst/garge-api/issues/150)) ([4742288](https://github.com/sondresjolyst/garge-api/commit/4742288f4ea757bd3af3e12a50ff7305eb95e7da))
+* use ToTable().HasCheckConstraint() to silence CS0618 warning ([#153](https://github.com/sondresjolyst/garge-api/issues/153)) ([1128d30](https://github.com/sondresjolyst/garge-api/commit/1128d30c1ae699646977b6137d5cda5088b015f9))
+
 ## [2.2.2](https://github.com/sondresjolyst/garge-api/compare/v2.2.1...v2.2.2) (2026-05-02)
 
 
