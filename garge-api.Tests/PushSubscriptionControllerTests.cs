@@ -5,6 +5,7 @@ using garge_api.Models.Push;
 using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -25,8 +26,9 @@ public class PushSubscriptionControllerTests : ControllerTestBase
             .Build();
 
         var push = new Mock<IWebPushService>();
+        var logger = new Mock<ILogger<PushSubscriptionController>>();
 
-        var controller = new PushSubscriptionController(db, config, push.Object);
+        var controller = new PushSubscriptionController(db, config, push.Object, logger.Object);
         controller.ControllerContext = MakeControllerContext(userId);
         return controller;
     }

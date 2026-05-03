@@ -19,7 +19,8 @@ namespace garge_api.Controllers
     public class PushSubscriptionController(
         ApplicationDbContext db,
         IConfiguration configuration,
-        IWebPushService webPushService) : ControllerBase
+        IWebPushService webPushService,
+        ILogger<PushSubscriptionController> logger) : ControllerBase
     {
         /// <summary>Returns the VAPID public key needed by the browser to subscribe.</summary>
         [HttpGet("vapid-public-key")]
@@ -28,7 +29,10 @@ namespace garge_api.Controllers
         {
             var key = configuration["Vapid:PublicKey"];
             if (string.IsNullOrEmpty(key))
+            {
+                logger.LogWarning("VAPID public key not configured — push notifications unavailable");
                 return StatusCode(503, new { message = "Push notifications not configured." });
+            }
             return Ok(new { publicKey = key });
         }
 
