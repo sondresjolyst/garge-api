@@ -21,19 +21,22 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AdminController> _logger;
         private readonly IMapper _mapper;
+        private readonly IEmailService _emailService;
 
         public AdminController(
             RoleManager<IdentityRole> roleManager,
             UserManager<User> userManager,
             ApplicationDbContext context,
             ILogger<AdminController> logger,
-            IMapper mapper)
+            IMapper mapper,
+            IEmailService emailService)
         {
             _roleManager = roleManager;
             _userManager = userManager;
             _context = context;
             _logger = logger;
             _mapper = mapper;
+            _emailService = emailService;
         }
 
         /// <summary>
@@ -256,6 +259,27 @@ namespace garge_api.Controllers
                 .OrderByDescending(d => d.Timestamp)
                 .ToListAsync();
             return Ok(devices);
+        }
+
+        /// <summary>
+        /// Gets Brevo transactional email stats for the last N days.
+        /// </summary>
+        [HttpGet("/api/admin/email-stats")]
+        [SwaggerOperation(Summary = "Gets Brevo email stats.")]
+        [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
+        public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
+        {
+            _logger.LogInformation("GetEmailStats called by {@LogData}", new { User = User.Identity?.Name });
+            try
+            {
+                var stats = await _emailService.GetEmailStatsAsync(days);
+                return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("GetEmailStats failed: {Error}", ex.Message);
+                return StatusCode(502, new { message = "Failed to fetch email stats from Brevo." });
+            }
         }
 
         /// <summary>
