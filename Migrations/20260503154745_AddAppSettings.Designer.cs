@@ -12,7 +12,7 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260503122116_AddAppSettings")]
+    [Migration("20260503154745_AddAppSettings")]
     partial class AddAppSettings
     {
         /// <inheritdoc />

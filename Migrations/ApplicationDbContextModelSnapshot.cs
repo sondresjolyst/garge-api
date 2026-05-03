@@ -282,6 +282,29 @@ namespace garge_api.Migrations
                     b.ToTable("UserProfiles");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Admin.AppSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("CookieBannerEnabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AppSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            CookieBannerEnabled = true
+                        });
+                });
+
             modelBuilder.Entity("garge_api.Models.Admin.RolePermission", b =>
                 {
                     b.Property<int>("Id")

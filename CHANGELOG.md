@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.3.0](https://github.com/sondresjolyst/garge-api/compare/v2.2.2...v2.3.0) (2026-05-03)
+
+
+### Features
+
+* add app-wide settings endpoint with cookie banner toggle ([#152](https://github.com/sondresjolyst/garge-api/issues/152)) ([04e4b27](https://github.com/sondresjolyst/garge-api/commit/04e4b27041eefca650aa034773a8238a5e6ce04c))
+* add Brevo email stats endpoint to admin API ([#149](https://github.com/sondresjolyst/garge-api/issues/149)) ([ab1e4f7](https://github.com/sondresjolyst/garge-api/commit/ab1e4f74021e26feab81cd1551bbc56bddd6ebf3))
+* add push notification infrastructure with VAPID encryption and offline alerts ([#151](https://github.com/sondresjolyst/garge-api/issues/151)) ([30e0fc2](https://github.com/sondresjolyst/garge-api/commit/30e0fc2e3de3627214019414567c203a5f54200d))
+
+
+### Bug Fixes
+
+* replace per-controller Sanitize with shared LogSanitizer helper ([#150](https://github.com/sondresjolyst/garge-api/issues/150)) ([4742288](https://github.com/sondresjolyst/garge-api/commit/4742288f4ea757bd3af3e12a50ff7305eb95e7da))
+* use ToTable().HasCheckConstraint() to silence CS0618 warning ([#153](https://github.com/sondresjolyst/garge-api/issues/153)) ([1128d30](https://github.com/sondresjolyst/garge-api/commit/1128d30c1ae699646977b6137d5cda5088b015f9))
+
+## [2.2.2](https://github.com/sondresjolyst/garge-api/compare/v2.2.1...v2.2.2) (2026-05-02)
+
+
+### Bug Fixes
+
+* bump Dockerfile base images to .NET 10 ([#146](https://github.com/sondresjolyst/garge-api/issues/146)) ([d791f5e](https://github.com/sondresjolyst/garge-api/commit/d791f5ecce3504a23daf682f86eea6003d1b2616))
+* bump LastChargedAt offset to 24h to match firmware ([#147](https://github.com/sondresjolyst/garge-api/issues/147)) ([e06ef7f](https://github.com/sondresjolyst/garge-api/commit/e06ef7fbbcedeb3a3c084920bf7f84e01f3e05d1))
+* resolve build warnings (CS8981, CS8601, CS1572, CS1573) ([#144](https://github.com/sondresjolyst/garge-api/issues/144)) ([a704716](https://github.com/sondresjolyst/garge-api/commit/a70471689e12efffa263953b4050d7eaaec6b500))
+
+## [2.2.1](https://github.com/sondresjolyst/garge-api/compare/v2.2.0...v2.2.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* add webhook secret authentication for operator callbacks ([#139](https://github.com/sondresjolyst/garge-api/issues/139)) ([6626084](https://github.com/sondresjolyst/garge-api/commit/662608495167bce14dcf33d308e97f45b5f17a25))
+* address security advisory GHSA-9xmw-j53q-f48j ([#138](https://github.com/sondresjolyst/garge-api/issues/138)) ([ad604b5](https://github.com/sondresjolyst/garge-api/commit/ad604b5ff9922669a012c0115e40d7e56b3e4839))
+
 ## [2.2.0](https://github.com/sondresjolyst/garge-api/compare/v2.1.0...v2.2.0) (2026-04-29)
 
 
