@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.2](https://github.com/sondresjolyst/garge-api/compare/v2.3.1...v2.3.2) (2026-05-04)
+
+
+### Bug Fixes
+
+* only record offline notification if push was actually sent ([#160](https://github.com/sondresjolyst/garge-api/issues/160)) ([afddfb0](https://github.com/sondresjolyst/garge-api/commit/afddfb04fb8e676e31aa0d7c5d65f3bfe90118d5))
+
 ## [2.3.1](https://github.com/sondresjolyst/garge-api/compare/v2.3.0...v2.3.1) (2026-05-03)
 
 
