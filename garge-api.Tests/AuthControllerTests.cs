@@ -87,7 +87,7 @@ public class AuthControllerTests : ControllerTestBase
                 Created = DateTime.UtcNow.AddMinutes(-i)
             });
         }
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
         MockSignInManager
@@ -139,7 +139,7 @@ public class AuthControllerTests : ControllerTestBase
             Expires = DateTime.UtcNow.AddMonths(1),
             Created = DateTime.UtcNow
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
         MockUserManager.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string>());

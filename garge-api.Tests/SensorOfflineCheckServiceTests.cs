@@ -21,6 +21,8 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
     private static (TestableService service, Mock<IWebPushService> push) BuildService(ApplicationDbContext db)
     {
         var push = new Mock<IWebPushService>();
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var sp = new Mock<IServiceProvider>();
         sp.Setup(x => x.GetService(typeof(ApplicationDbContext))).Returns(db);
@@ -56,10 +58,10 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
         // Last data 10 hours ago, threshold is 4 hours → offline
         db.SensorData.Add(new SensorData { SensorId = 1, Value = "20", Timestamp = DateTime.UtcNow.AddHours(-10) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Single(db.SensorOfflineNotifications);
@@ -78,10 +80,10 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         {
             UserId = "u1", SensorId = 1, NotifiedAt = DateTime.UtcNow.AddHours(-1)
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -100,13 +102,13 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
             UserId = "u1", SensorId = 1, NotifiedAt = DateTime.UtcNow.AddHours(-5)
         };
         db.SensorOfflineNotifications.Add(notification);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        var resolved = await db.SensorOfflineNotifications.FindAsync(notification.Id);
+        var resolved = await db.SensorOfflineNotifications.FindAsync([notification.Id], TestContext.Current.CancellationToken);
         Assert.NotNull(resolved!.ResolvedAt);
     }
 
@@ -118,10 +120,10 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         db.UserProfiles.Add(profile);
         db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
         // No SensorData at all
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -134,10 +136,10 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         db.UserProfiles.Add(profile);
         db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
         db.SensorData.Add(new SensorData { SensorId = 1, Value = "20", Timestamp = DateTime.UtcNow.AddHours(-10) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);
@@ -151,10 +153,10 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         db.UserProfiles.Add(profile);
         db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
         db.SensorData.Add(new SensorData { SensorId = 1, Value = "20", Timestamp = DateTime.UtcNow.AddMinutes(-30) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var (svc, push) = BuildService(db);
-        await svc.RunCheckAsync();
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
         push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);

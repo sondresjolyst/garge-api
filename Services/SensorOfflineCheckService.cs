@@ -67,9 +67,10 @@ namespace garge_api.Services
                         var sensor = await db.Sensors.FindAsync([sensorId], ct);
                         var name = customName ?? sensor?.DefaultName ?? $"Sensor #{sensorId}";
 
+                        bool sent;
                         try
                         {
-                            await push.SendAsync(
+                            sent = await push.SendAsync(
                                 user.Id,
                                 "Sensor offline",
                                 $"{name} has not reported in over {user.OfflineAlertThresholdHours}h.",
@@ -81,15 +82,18 @@ namespace garge_api.Services
                             continue;
                         }
 
-                        db.SensorOfflineNotifications.Add(new SensorOfflineNotification
+                        if (sent)
                         {
-                            UserId = user.Id,
-                            SensorId = sensorId,
-                            NotifiedAt = now,
-                        });
-                        await db.SaveChangesAsync(ct);
+                            db.SensorOfflineNotifications.Add(new SensorOfflineNotification
+                            {
+                                UserId = user.Id,
+                                SensorId = sensorId,
+                                NotifiedAt = now,
+                            });
+                            await db.SaveChangesAsync(ct);
 
-                        logger.LogInformation("Offline notification sent: sensor {SensorId} user {UserId}", sensorId, user.Id);
+                            logger.LogInformation("Offline notification sent: sensor {SensorId} user {UserId}", sensorId, user.Id);
+                        }
                     }
                     else if (!isOffline && activeNotification != null)
                     {

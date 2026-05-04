@@ -26,7 +26,7 @@ public class AutomationControllerTests : ControllerTestBase
     {
         var db = CreateDbContext();
         db.AutomationRules.AddRange(MakeRule(), MakeRule(targetId: 20, sensorId: 6));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAutomationController(db, isAdmin: true).GetRules();
 
@@ -55,7 +55,7 @@ public class AutomationControllerTests : ControllerTestBase
             MakeRule(targetId: 10, sensorId: 5),   // accessible
             MakeRule(targetId: 99, sensorId: 99)    // not accessible
         );
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
 
@@ -69,7 +69,7 @@ public class AutomationControllerTests : ControllerTestBase
     {
         var db = CreateDbContext();
         db.AutomationRules.Add(MakeRule());
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
 
@@ -113,7 +113,7 @@ public class AutomationControllerTests : ControllerTestBase
         var db = CreateDbContext();
         var rule = MakeRule();
         db.AutomationRules.Add(rule);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAutomationController(db, isAdmin: true).MarkTriggered(rule.Id);
 

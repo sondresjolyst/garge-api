@@ -92,7 +92,7 @@ public class PushSubscriptionControllerTests : ControllerTestBase
             P256dh = "old-dh",
             Auth = "old-auth"
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var controller = CreateController(db);
         var dto = new CreatePushSubscriptionDto
@@ -122,7 +122,7 @@ public class PushSubscriptionControllerTests : ControllerTestBase
             P256dh = "dh",
             Auth = "auth"
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var controller = CreateController(db);
         var dto = new DeletePushSubscriptionDto { Endpoint = "https://push.example.com/sub/1" };
@@ -156,7 +156,7 @@ public class PushSubscriptionControllerTests : ControllerTestBase
             P256dh = "dh",
             Auth = "auth"
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var controller = CreateController(db, userId: "u1");
         var dto = new CreatePushSubscriptionDto
