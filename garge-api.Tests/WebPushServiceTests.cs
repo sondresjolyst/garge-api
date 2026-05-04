@@ -60,7 +60,7 @@ public class WebPushServiceTests : ControllerTestBase
         var svc = new WebPushService(db, factory.Object, MakeConfig(), NullLogger<WebPushService>.Instance);
 
         // Should not throw, and should not attempt any HTTP call
-        await svc.SendAsync("u1", "title", "body");
+        await svc.SendAsync("u1", "title", "body", TestContext.Current.CancellationToken);
 
         factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Never);
     }
@@ -74,7 +74,7 @@ public class WebPushServiceTests : ControllerTestBase
             MakeConfig("fake-pub-key", "fake-priv-key"),
             NullLogger<WebPushService>.Instance);
 
-        await svc.SendAsync("u1", "title", "body");
+        await svc.SendAsync("u1", "title", "body", TestContext.Current.CancellationToken);
 
         factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Never);
     }
@@ -94,14 +94,14 @@ public class WebPushServiceTests : ControllerTestBase
             P256dh = FakeP256dhKey(),
             Auth = FakeAuthSecret()
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var factory = MakeFactoryThrowing(HttpStatusCode.Gone);
         var svc = new WebPushService(db, factory.Object,
             MakeConfig(publicKey, privateKey),
             NullLogger<WebPushService>.Instance);
 
-        await svc.SendAsync("u1", "title", "body");
+        await svc.SendAsync("u1", "title", "body", TestContext.Current.CancellationToken);
 
         Assert.Empty(db.PushSubscriptions);
     }
@@ -119,14 +119,14 @@ public class WebPushServiceTests : ControllerTestBase
             P256dh = FakeP256dhKey(),
             Auth = FakeAuthSecret()
         });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var factory = MakeFactoryThrowing(HttpStatusCode.NotFound);
         var svc = new WebPushService(db, factory.Object,
             MakeConfig(publicKey, privateKey),
             NullLogger<WebPushService>.Instance);
 
-        await svc.SendAsync("u1", "title", "body");
+        await svc.SendAsync("u1", "title", "body", TestContext.Current.CancellationToken);
 
         Assert.Empty(db.PushSubscriptions);
     }

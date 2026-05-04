@@ -66,7 +66,7 @@ public class AdminControllerTests : ControllerTestBase
     {
         var db = CreateDbContext();
         db.AppSettings.Add(new AppSettings { Id = 1, CookieBannerEnabled = false });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAdminController(db).GetAppSettings();
 
@@ -86,7 +86,7 @@ public class AdminControllerTests : ControllerTestBase
         var ok = Assert.IsType<OkObjectResult>(result);
         var returned = Assert.IsType<AppSettingsDto>(ok.Value);
         Assert.False(returned.CookieBannerEnabled);
-        Assert.Equal(1, await db.AppSettings.CountAsync());
+        Assert.Equal(1, await db.AppSettings.CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -94,13 +94,13 @@ public class AdminControllerTests : ControllerTestBase
     {
         var db = CreateDbContext();
         db.AppSettings.Add(new AppSettings { Id = 1, CookieBannerEnabled = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await CreateAdminController(db).UpdateAppSettings(
             new UpdateAppSettingsDto { CookieBannerEnabled = false });
 
-        var settings = await db.AppSettings.FindAsync(1);
+        var settings = await db.AppSettings.FindAsync([1], TestContext.Current.CancellationToken);
         Assert.False(settings!.CookieBannerEnabled);
-        Assert.Equal(1, await db.AppSettings.CountAsync());
+        Assert.Equal(1, await db.AppSettings.CountAsync(TestContext.Current.CancellationToken));
     }
 }
