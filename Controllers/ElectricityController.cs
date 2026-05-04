@@ -17,6 +17,7 @@ namespace garge_api.Controllers
     [Route("api/electricity")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class ElectricityController : ControllerBase
     {
         private readonly NordPoolService _nordPoolService;

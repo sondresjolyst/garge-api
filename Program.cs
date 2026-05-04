@@ -14,6 +14,8 @@ using garge_api.Models.Admin;
 using Serilog;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
+using garge_api.Authorization;
+using Microsoft.AspNetCore.Authorization;
 
 namespace garge_api
 {
@@ -97,7 +99,15 @@ namespace garge_api
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+                options.AddPolicy("ActiveSubscription", policy =>
+                    policy.AddRequirements(new ActiveSubscriptionRequirement()));
             });
+            builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
+            builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
+            builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
+            builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddHttpClient<IVippsService, VippsService>();
+            builder.Services.AddHostedService<VippsWebhookRegistrationService>();
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")

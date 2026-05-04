@@ -15,6 +15,7 @@ namespace garge_api.Controllers
     [Route("api/switches")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class SwitchesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

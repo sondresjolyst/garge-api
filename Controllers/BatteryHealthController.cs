@@ -16,6 +16,7 @@ namespace garge_api.Controllers
     [Route("api/battery-health")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class BatteryHealthController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

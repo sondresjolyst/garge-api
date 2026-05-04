@@ -18,6 +18,7 @@ namespace garge_api.Controllers
     [Route("api/sensors")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class SensorController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

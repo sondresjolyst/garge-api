@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260504155920_AddSubscriptionsAndShop")]
+    partial class AddSubscriptionsAndShop
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -287,48 +290,8 @@ namespace garge_api.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("integer");
 
-                    b.Property<string>("CompanyAddress")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("CompanyEmail")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("CompanyLegalName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("CompanyName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("CompanyOrgNumber")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<bool>("CookieBannerEnabled")
                         .HasColumnType("boolean");
-
-                    b.Property<bool>("VatEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("VippsShopWebhookId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("VippsShopWebhookSecret")
-                        .HasColumnType("text");
-
-                    b.Property<string>("VippsSubscriptionWebhookId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("VippsSubscriptionWebhookSecret")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -341,13 +304,7 @@ namespace garge_api.Migrations
                         new
                         {
                             Id = 1,
-                            CompanyAddress = "Mårvegen 21a, 4347 Lye",
-                            CompanyEmail = "sondresjoelyst@gmail.com",
-                            CompanyLegalName = "Sjølyst Innovations",
-                            CompanyName = "Garge",
-                            CompanyOrgNumber = "934 531 035",
-                            CookieBannerEnabled = true,
-                            VatEnabled = false
+                            CookieBannerEnabled = true
                         });
                 });
 
@@ -975,32 +932,6 @@ namespace garge_api.Migrations
                     b.ToTable("UserSensorCustomNames");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Shop.Invoice", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("IssuedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("OrderId")
-                        .HasColumnType("integer");
-
-                    b.Property<byte[]>("PdfData")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrderId")
-                        .IsUnique();
-
-                    b.ToTable("Invoices");
-                });
-
             modelBuilder.Entity("garge_api.Models.Shop.Order", b =>
                 {
                     b.Property<int>("Id")
@@ -1011,13 +942,6 @@ namespace garge_api.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("ShippedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ShippingAddress")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -1065,12 +989,6 @@ namespace garge_api.Migrations
                         .HasColumnType("integer");
 
                     b.Property<int>("ShopItemId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("UnitPriceExclVatInOre")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("VatPercentage")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -1161,13 +1079,6 @@ namespace garge_api.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime?>("ConsentAcceptedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ConsentIp")
-                        .HasMaxLength(45)
-                        .HasColumnType("character varying(45)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1549,17 +1460,6 @@ namespace garge_api.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Shop.Invoice", b =>
-                {
-                    b.HasOne("garge_api.Models.Shop.Order", "Order")
-                        .WithOne("Invoice")
-                        .HasForeignKey("garge_api.Models.Shop.Invoice", "OrderId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Order");
-                });
-
             modelBuilder.Entity("garge_api.Models.Shop.Order", b =>
                 {
                     b.HasOne("User", "User")
@@ -1667,8 +1567,6 @@ namespace garge_api.Migrations
 
             modelBuilder.Entity("garge_api.Models.Shop.Order", b =>
                 {
-                    b.Navigation("Invoice");
-
                     b.Navigation("OrderItems");
                 });
 #pragma warning restore 612, 618

@@ -20,6 +20,7 @@ namespace garge_api.Controllers
     [Route("api/users")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class UserController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

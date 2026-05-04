@@ -10,6 +10,7 @@ namespace garge_api.Controllers
 {
     [ApiController]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     [Route("api/webhooks")]
     public class WebhookController : ControllerBase
     {

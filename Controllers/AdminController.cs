@@ -412,8 +412,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Settings retrieved.", typeof(AppSettingsDto))]
         public async Task<IActionResult> GetAppSettings()
         {
-            var settings = await _context.AppSettings.FindAsync(1)
-                ?? new AppSettings { Id = 1, CookieBannerEnabled = true };
+            var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
             return Ok(_mapper.Map<AppSettingsDto>(settings));
         }
 
