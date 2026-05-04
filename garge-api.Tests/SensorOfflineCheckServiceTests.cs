@@ -21,6 +21,8 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
     private static (TestableService service, Mock<IWebPushService> push) BuildService(ApplicationDbContext db)
     {
         var push = new Mock<IWebPushService>();
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         var sp = new Mock<IServiceProvider>();
         sp.Setup(x => x.GetService(typeof(ApplicationDbContext))).Returns(db);
