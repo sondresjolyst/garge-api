@@ -22,6 +22,7 @@ namespace garge_api.Services
         private readonly string _systemName;
         private readonly string _systemVersion;
 
+        private const string TestModeCacheKey = "vipps_test_mode";
         private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNameCaseInsensitive = true };
 
         private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn);
@@ -48,15 +49,22 @@ namespace garge_api.Services
                              ?? "1.0.0";
         }
 
+        private async Task<bool> IsTestModeAsync()
+        {
+            if (_cache.TryGetValue(TestModeCacheKey, out bool cached))
+                return cached;
+
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var settings = await db.AppSettings.FindAsync(1);
+            var isTest = settings?.VippsTestMode ?? false;
+            _cache.Set(TestModeCacheKey, isTest, TimeSpan.FromSeconds(30));
+            return isTest;
+        }
+
         private async Task<VippsEffective> GetEffectiveAsync()
         {
-            bool isTest;
-            using (var scope = _scopeFactory.CreateScope())
-            {
-                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                var settings = await db.AppSettings.FindAsync(1);
-                isTest = settings?.VippsTestMode ?? false;
-            }
+            var isTest = await IsTestModeAsync();
 
             string baseUrl, clientId, clientSecret, msn, subKey, cacheKey;
             if (isTest)

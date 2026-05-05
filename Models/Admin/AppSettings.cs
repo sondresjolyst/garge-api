@@ -23,6 +23,6 @@ namespace garge_api.Models.Admin
         [MaxLength(200)]
         public string CompanyEmail { get; set; } = "sondresjoelyst@gmail.com";
 
-        public bool VippsTestMode { get; set; } = false;
+        public bool VippsTestMode { get; set; }
     }
 }

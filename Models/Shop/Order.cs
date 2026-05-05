@@ -39,7 +39,7 @@ namespace garge_api.Models.Shop
 
         public DateTime? ShippedAt { get; set; }
 
-        public bool IsTest { get; set; } = false;
+        public bool IsTest { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

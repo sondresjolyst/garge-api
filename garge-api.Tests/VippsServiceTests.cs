@@ -1,5 +1,6 @@
 using garge_api.Services;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -28,7 +29,8 @@ public class VippsServiceTests
         });
         var http = new HttpClient();
         var cache = new MemoryCache(new MemoryCacheOptions());
-        return new VippsService(http, opts, appOpts, cache, NullLogger<VippsService>.Instance);
+        var scopeFactory = new Mock<IServiceScopeFactory>().Object;
+        return new VippsService(http, opts, appOpts, cache, NullLogger<VippsService>.Instance, scopeFactory);
     }
 
     private static string BuildSignature(string body, string secret)
