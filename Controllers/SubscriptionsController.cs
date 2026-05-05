@@ -81,6 +81,7 @@ namespace garge_api.Controllers
                 ProductId = dto.ProductId,
                 VippsAgreementId = vippsResponse.AgreementId,
                 Status = SubscriptionStatus.Pending,
+                IsTest = settings?.VippsTestMode ?? false,
                 ConsentAcceptedAt = DateTime.UtcNow,
                 ConsentIp = HttpContext.Connection.RemoteIpAddress?.ToString()
             };

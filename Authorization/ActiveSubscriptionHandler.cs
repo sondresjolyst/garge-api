@@ -32,9 +32,13 @@ namespace garge_api.Authorization
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
+            var settings = await db.AppSettings.FindAsync(1);
+            var isTestMode = settings?.VippsTestMode ?? false;
+
             var hasActive = await db.Subscriptions.AnyAsync(s =>
                 s.UserId == userId &&
-                s.Status == SubscriptionStatus.Active);
+                s.Status == SubscriptionStatus.Active &&
+                (!s.IsTest || isTestMode));
 
             if (hasActive)
                 context.Succeed(requirement);

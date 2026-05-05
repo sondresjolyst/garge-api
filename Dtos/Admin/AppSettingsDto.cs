@@ -4,6 +4,7 @@ namespace garge_api.Dtos.Admin
     {
         public bool CookieBannerEnabled { get; set; }
         public bool VatEnabled { get; set; }
+        public bool VippsTestMode { get; set; }
         public string CompanyName { get; set; } = string.Empty;
         public string CompanyLegalName { get; set; } = string.Empty;
         public string CompanyOrgNumber { get; set; } = string.Empty;
@@ -15,6 +16,7 @@ namespace garge_api.Dtos.Admin
     {
         public bool CookieBannerEnabled { get; set; }
         public bool VatEnabled { get; set; }
+        public bool VippsTestMode { get; set; }
         public string CompanyName { get; set; } = string.Empty;
         public string CompanyLegalName { get; set; } = string.Empty;
         public string CompanyOrgNumber { get; set; } = string.Empty;

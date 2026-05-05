@@ -137,7 +137,8 @@ namespace garge_api.Controllers
                 UserId = userId,
                 TotalInOre = total,
                 Status = OrderStatus.Pending,
-                ShippingAddress = dto.ShippingAddress
+                ShippingAddress = dto.ShippingAddress,
+                IsTest = settings?.VippsTestMode ?? false
             };
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();

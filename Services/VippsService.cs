@@ -1,3 +1,4 @@
+using garge_api.Models;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using Microsoft.Extensions.Caching.Memory;
@@ -17,24 +18,28 @@ namespace garge_api.Services
         private readonly AppOptions _appOpts;
         private readonly IMemoryCache _cache;
         private readonly ILogger<VippsService> _logger;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly string _systemName;
         private readonly string _systemVersion;
 
-        private const string TokenCacheKey = "vipps_access_token";
         private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+        private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn);
 
         public VippsService(
             HttpClient http,
             IOptions<VippsOptions> opts,
             IOptions<AppOptions> appOpts,
             IMemoryCache cache,
-            ILogger<VippsService> logger)
+            ILogger<VippsService> logger,
+            IServiceScopeFactory scopeFactory)
         {
             _http = http;
             _opts = opts.Value;
             _appOpts = appOpts.Value;
             _cache = cache;
             _logger = logger;
+            _scopeFactory = scopeFactory;
 
             var assembly = Assembly.GetExecutingAssembly();
             _systemName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "garge";
@@ -43,15 +48,49 @@ namespace garge_api.Services
                              ?? "1.0.0";
         }
 
-        public async Task<string> GetAccessTokenAsync()
+        private async Task<VippsEffective> GetEffectiveAsync()
         {
-            if (_cache.TryGetValue(TokenCacheKey, out string? cached) && cached != null)
-                return cached;
+            bool isTest;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var settings = await db.AppSettings.FindAsync(1);
+                isTest = settings?.VippsTestMode ?? false;
+            }
 
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl}/accesstoken/get");
-            request.Headers.Add("client_id", _opts.ClientId);
-            request.Headers.Add("client_secret", _opts.ClientSecret);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", _opts.SubscriptionKey);
+            string baseUrl, clientId, clientSecret, msn, subKey, cacheKey;
+            if (isTest)
+            {
+                baseUrl      = _opts.TestBaseUrl;
+                clientId     = _opts.TestClientId;
+                clientSecret = _opts.TestClientSecret;
+                msn          = _opts.TestMerchantSerialNumber;
+                subKey       = _opts.TestSubscriptionKey;
+                cacheKey     = "vipps_token_test";
+            }
+            else
+            {
+                baseUrl      = _opts.BaseUrl;
+                clientId     = _opts.ClientId;
+                clientSecret = _opts.ClientSecret;
+                msn          = _opts.MerchantSerialNumber;
+                subKey       = _opts.SubscriptionKey;
+                cacheKey     = "vipps_token_live";
+            }
+
+            if (!_cache.TryGetValue(cacheKey, out string? token) || token == null)
+                token = await FetchTokenAsync(baseUrl, clientId, clientSecret, subKey, cacheKey);
+
+            return new VippsEffective(baseUrl, token, subKey, msn);
+        }
+
+        private async Task<string> FetchTokenAsync(
+            string baseUrl, string clientId, string clientSecret, string subscriptionKey, string cacheKey)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/accesstoken/get");
+            request.Headers.Add("client_id", clientId);
+            request.Headers.Add("client_secret", clientSecret);
+            request.Headers.Add("Ocp-Apim-Subscription-Key", subscriptionKey);
             request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
             var response = await _http.SendAsync(request);
@@ -60,19 +99,23 @@ namespace garge_api.Services
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
             var token = doc.RootElement.GetProperty("access_token").GetString()!;
-            // expires_in is returned as a string by Vipps, not an int
             var expiresInStr = doc.RootElement.GetProperty("expires_in").GetString() ?? "3600";
             var expiresIn = int.Parse(expiresInStr);
 
-            _cache.Set(TokenCacheKey, token, TimeSpan.FromSeconds(expiresIn - 60));
-            _logger.LogInformation("Vipps access token refreshed, expires in {ExpiresIn}s", expiresIn);
+            _cache.Set(cacheKey, token, TimeSpan.FromSeconds(expiresIn - 60));
+            _logger.LogInformation("Vipps access token refreshed ({CacheKey}), expires in {ExpiresIn}s", cacheKey, expiresIn);
             return token;
+        }
+
+        public async Task<string> GetAccessTokenAsync()
+        {
+            return (await GetEffectiveAsync()).Token;
         }
 
         public async Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber, int effectivePriceInOre)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
 
             var body = new
             {
@@ -94,41 +137,39 @@ namespace garge_api.Services
                 phoneNumber
             };
 
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl}/recurring/v3/agreements");
-            AddCommonHeaders(request, token, idempotency: true);
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/recurring/v3/agreements");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json,
-                _jsonOpts)!;
+            return JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
         }
 
         public async Task<VippsAgreementResponse> GetAgreementAsync(string agreementId)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Get,
-                $"{_opts.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, token);
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
+            AddCommonHeaders(request, e);
 
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<VippsAgreementResponse>(json,
-                _jsonOpts)!;
+            return JsonSerializer.Deserialize<VippsAgreementResponse>(json, _jsonOpts)!;
         }
 
         public async Task CancelAgreementAsync(string agreementId)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Patch,
-                $"{_opts.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, token, idempotency: true);
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(new { status = "STOPPED" });
 
             var response = await _http.SendAsync(request);
@@ -138,7 +179,7 @@ namespace garge_api.Services
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl, string phoneNumber)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
 
             var body = new
             {
@@ -181,41 +222,39 @@ namespace garge_api.Services
                 }
             };
 
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl}/epayment/v1/payments");
-            AddCommonHeaders(request, token, idempotency: true);
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/epayment/v1/payments");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json,
-                _jsonOpts)!;
+            return JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json, _jsonOpts)!;
         }
 
         public async Task<VippsPaymentResponse> GetPaymentAsync(string reference)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Get,
-                $"{_opts.BaseUrl}/epayment/v1/payments/{reference}");
-            AddCommonHeaders(request, token);
+                $"{e.BaseUrl}/epayment/v1/payments/{reference}");
+            AddCommonHeaders(request, e);
 
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
 
             var json = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<VippsPaymentResponse>(json,
-                _jsonOpts)!;
+            return JsonSerializer.Deserialize<VippsPaymentResponse>(json, _jsonOpts)!;
         }
 
         public async Task CapturePaymentAsync(string reference, int amountInOre)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
             var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{_opts.BaseUrl}/epayment/v1/payments/{reference}/capture");
-            AddCommonHeaders(request, token, idempotency: true);
+                $"{e.BaseUrl}/epayment/v1/payments/{reference}/capture");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(body);
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
@@ -223,10 +262,10 @@ namespace garge_api.Services
 
         public async Task CancelPaymentAsync(string reference)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
             var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{_opts.BaseUrl}/epayment/v1/payments/{reference}/cancel");
-            AddCommonHeaders(request, token, idempotency: true);
+                $"{e.BaseUrl}/epayment/v1/payments/{reference}/cancel");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(new { });
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
@@ -234,10 +273,10 @@ namespace garge_api.Services
 
         public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events)
         {
-            var token = await GetAccessTokenAsync();
+            var e = await GetEffectiveAsync();
             var body = new { url, events };
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{_opts.BaseUrl}/webhooks/v1/webhooks");
-            AddCommonHeaders(request, token, idempotency: true);
+            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/webhooks/v1/webhooks");
+            AddCommonHeaders(request, e, idempotency: true);
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
@@ -263,11 +302,11 @@ namespace garge_api.Services
                 Encoding.ASCII.GetBytes(receivedHex.ToLowerInvariant()));
         }
 
-        private void AddCommonHeaders(HttpRequestMessage request, string token, bool idempotency = false)
+        private void AddCommonHeaders(HttpRequestMessage request, VippsEffective e, bool idempotency = false)
         {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", _opts.SubscriptionKey);
-            request.Headers.Add("Merchant-Serial-Number", _opts.MerchantSerialNumber);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", e.Token);
+            request.Headers.Add("Ocp-Apim-Subscription-Key", e.SubscriptionKey);
+            request.Headers.Add("Merchant-Serial-Number", e.Msn);
             request.Headers.Add("Vipps-System-Name", _systemName);
             request.Headers.Add("Vipps-System-Version", _systemVersion);
             if (idempotency)

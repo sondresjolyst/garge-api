@@ -45,6 +45,8 @@ namespace garge_api.Models.Subscription
         [MaxLength(45)]
         public string? ConsentIp { get; set; }
 
+        public bool IsTest { get; set; } = false;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

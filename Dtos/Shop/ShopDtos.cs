@@ -95,6 +95,7 @@ namespace garge_api.Dtos.Shop
         public string? ShippingAddress { get; set; }
         public DateTime? ShippedAt { get; set; }
         public bool HasInvoice { get; set; }
+        public bool IsTest { get; set; }
         public List<OrderItemResponseDto> Items { get; set; } = [];
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
@@ -125,6 +126,7 @@ namespace garge_api.Dtos.Shop
         public string? ShippingAddress { get; set; }
         public DateTime? ShippedAt { get; set; }
         public bool HasInvoice { get; set; }
+        public bool IsTest { get; set; }
         public List<OrderItemResponseDto> Items { get; set; } = [];
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }

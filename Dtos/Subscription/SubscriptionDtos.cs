@@ -12,6 +12,7 @@ namespace garge_api.Dtos.Subscription
         public string Interval { get; set; } = string.Empty;
         public string VippsAgreementId { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+        public bool IsTest { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? NextChargeDate { get; set; }
         public DateTime CreatedAt { get; set; }

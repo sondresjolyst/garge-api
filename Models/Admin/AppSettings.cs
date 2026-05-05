@@ -22,5 +22,7 @@ namespace garge_api.Models.Admin
         public string CompanyAddress { get; set; } = "Mårvegen 21a, 4347 Lye";
         [MaxLength(200)]
         public string CompanyEmail { get; set; } = "sondresjoelyst@gmail.com";
+
+        public bool VippsTestMode { get; set; } = false;
     }
 }

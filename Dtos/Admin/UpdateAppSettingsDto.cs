@@ -6,6 +6,7 @@ namespace garge_api.Dtos.Admin
     {
         public bool CookieBannerEnabled { get; set; }
         public bool VatEnabled { get; set; }
+        public bool VippsTestMode { get; set; }
         [MaxLength(100)] public string CompanyName { get; set; } = string.Empty;
         [MaxLength(200)] public string CompanyLegalName { get; set; } = string.Empty;
         [MaxLength(20)]  public string CompanyOrgNumber { get; set; } = string.Empty;
