@@ -107,9 +107,7 @@ namespace garge_api.Services
             request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "accesstoken/get");
             using var doc = JsonDocument.Parse(json);
             var token = doc.RootElement.GetProperty("access_token").GetString()!;
 
@@ -162,9 +160,7 @@ namespace garge_api.Services
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-agreement");
             return JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
         }
 
@@ -177,9 +173,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e);
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-agreement");
             return JsonSerializer.Deserialize<VippsAgreementResponse>(json, _jsonOpts)!;
         }
 
@@ -193,7 +187,7 @@ namespace garge_api.Services
             request.Content = BuildJsonContent(new { status = "STOPPED" });
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
@@ -202,12 +196,13 @@ namespace garge_api.Services
         {
             var e = await GetEffectiveAsync();
 
+            var reference = $"garge-order-{order.Id:D6}";
             var body = new
             {
                 amount = new { value = order.TotalInOre, currency = "NOK" },
                 paymentMethod = new { type = "WALLET" },
                 customer = new { phoneNumber },
-                reference = order.Id.ToString(),
+                reference,
                 returnUrl = $"{redirectUrl}?orderId={order.Id}",
                 userFlow = "WEB_REDIRECT",
                 paymentDescription = $"Garge order #{order.Id}",
@@ -239,7 +234,7 @@ namespace garge_api.Services
                             isShipping = false
                         };
                     }),
-                    bottomLine = new { currency = "NOK", receiptNumber = order.Id.ToString() }
+                    bottomLine = new { currency = "NOK", receiptNumber = reference }
                 }
             };
 
@@ -248,9 +243,7 @@ namespace garge_api.Services
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-payment");
             return JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json, _jsonOpts)!;
         }
 
@@ -263,9 +256,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e);
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-payment");
             return JsonSerializer.Deserialize<VippsPaymentResponse>(json, _jsonOpts)!;
         }
 
@@ -278,7 +269,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            await ReadAsStringAndEnsureSuccessAsync(response, "capture-payment");
         }
 
         public async Task CancelPaymentAsync(string reference, string idempotencyKey)
@@ -289,7 +280,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(new { });
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
+            await ReadAsStringAndEnsureSuccessAsync(response, "cancel-payment");
         }
 
         public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events)
@@ -301,9 +292,7 @@ namespace garge_api.Services
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "register-webhook");
             using var doc = JsonDocument.Parse(json);
             var id = doc.RootElement.GetProperty("id").GetString()!;
             var secret = doc.RootElement.GetProperty("secret").GetString()!;
@@ -372,5 +361,17 @@ namespace garge_api.Services
 
         private static StringContent BuildJsonContent(object body) =>
             new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+        private async Task<string> ReadAsStringAndEnsureSuccessAsync(HttpResponseMessage response, string operation)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Vipps {Operation} failed: {Status} {Body}",
+                    operation, (int)response.StatusCode, body);
+                response.EnsureSuccessStatusCode();
+            }
+            return body;
+        }
     }
 }

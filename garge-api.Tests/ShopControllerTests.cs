@@ -91,7 +91,7 @@ public class ShopControllerTests : ControllerTestBase
         using var db = CreateDbContext();
         var order = new Order
         {
-            UserId = "user-1", VippsOrderId = "vipps-ref",
+            UserId = "user-1", VippsOrderId = "garge-order-000001",
             TotalInOre = 10000, Status = OrderStatus.Pending
         };
         await db.Orders.AddAsync(order);
@@ -99,7 +99,7 @@ public class ShopControllerTests : ControllerTestBase
 
         var payload = new
         {
-            reference = order.Id.ToString(),
+            reference = order.VippsOrderId,
             pspReference = "psp-1",
             name = "AUTHORIZED",
             amount = new { value = 10000, currency = "NOK" },
@@ -144,13 +144,13 @@ public class ShopControllerTests : ControllerTestBase
     public async Task Webhook_EventNames_MapToCorrectStatus(string eventName, OrderStatus expected)
     {
         using var db = CreateDbContext();
-        var order = new Order { UserId = "u", TotalInOre = 100, Status = OrderStatus.Pending };
+        var order = new Order { UserId = "u", VippsOrderId = $"garge-order-evt-{eventName}", TotalInOre = 100, Status = OrderStatus.Pending };
         await db.Orders.AddAsync(order);
         await db.SaveChangesAsync();
 
         var body = JsonSerializer.Serialize(new
         {
-            reference = order.Id.ToString(),
+            reference = order.VippsOrderId,
             pspReference = $"psp-{eventName}",
             name = eventName,
             amount = new { value = 100, currency = "NOK" },
@@ -168,13 +168,13 @@ public class ShopControllerTests : ControllerTestBase
     public async Task Webhook_AmountMismatch_Returns401()
     {
         using var db = CreateDbContext();
-        var order = new Order { UserId = "u", TotalInOre = 10000, Status = OrderStatus.Pending };
+        var order = new Order { UserId = "u", VippsOrderId = "garge-order-amount", TotalInOre = 10000, Status = OrderStatus.Pending };
         await db.Orders.AddAsync(order);
         await db.SaveChangesAsync();
 
         var body = JsonSerializer.Serialize(new
         {
-            reference = order.Id.ToString(),
+            reference = order.VippsOrderId,
             pspReference = "psp-bad",
             name = "AUTHORIZED",
             amount = new { value = 9999, currency = "NOK" },
@@ -191,13 +191,13 @@ public class ShopControllerTests : ControllerTestBase
     public async Task Webhook_DuplicateEvent_Idempotent()
     {
         using var db = CreateDbContext();
-        var order = new Order { UserId = "u", TotalInOre = 100, Status = OrderStatus.Pending };
+        var order = new Order { UserId = "u", VippsOrderId = "garge-order-dup", TotalInOre = 100, Status = OrderStatus.Pending };
         await db.Orders.AddAsync(order);
         await db.SaveChangesAsync();
 
         var body = JsonSerializer.Serialize(new
         {
-            reference = order.Id.ToString(),
+            reference = order.VippsOrderId,
             pspReference = "psp-once",
             name = "AUTHORIZED",
             amount = new { value = 100, currency = "NOK" },

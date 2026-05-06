@@ -356,19 +356,12 @@ namespace garge_api.Controllers
                 return Ok();
             }
 
-            if (!int.TryParse(payload.Reference, out var orderId))
-            {
-                _logger.LogWarning("Shop webhook: non-integer reference {Reference}", payload.Reference);
-                await _context.SaveChangesAsync();
-                return Ok();
-            }
-
             var order = await _context.Orders
                 .Include(o => o.OrderItems)
-                .FirstOrDefaultAsync(o => o.Id == orderId);
+                .FirstOrDefaultAsync(o => o.VippsOrderId == payload.Reference);
             if (order == null)
             {
-                _logger.LogWarning("Shop webhook: unknown order {OrderId}", orderId);
+                _logger.LogWarning("Shop webhook: unknown reference {Reference}", payload.Reference);
                 await _context.SaveChangesAsync();
                 return Ok();
             }
@@ -377,7 +370,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(payload.Msn) && !string.IsNullOrEmpty(expectedMsn) && payload.Msn != expectedMsn)
             {
                 _logger.LogWarning("Shop webhook: MSN mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    payload.Msn, expectedMsn, orderId);
+                    payload.Msn, expectedMsn, order.Id);
                 return Unauthorized();
             }
 
@@ -385,7 +378,7 @@ namespace garge_api.Controllers
                 payload.Name is "AUTHORIZED" or "CAPTURED")
             {
                 _logger.LogWarning("Shop webhook: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    payload.Amount.Value, order.TotalInOre, orderId);
+                    payload.Amount.Value, order.TotalInOre, order.Id);
                 return Unauthorized();
             }
 
@@ -415,7 +408,7 @@ namespace garge_api.Controllers
                     break;
                 default:
                     _logger.LogWarning("Shop webhook: unknown event {Name} for order {OrderId}",
-                        payload.Name, orderId);
+                        payload.Name, order.Id);
                     break;
             }
 
@@ -443,7 +436,7 @@ namespace garge_api.Controllers
                     $"Order #{order.Id} is reserved. We'll capture payment when it ships.");
             }
 
-            _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", orderId, payload.Name);
+            _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", order.Id, payload.Name);
             return Ok();
         }
 
