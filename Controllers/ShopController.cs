@@ -1,11 +1,14 @@
 using AutoMapper;
+using garge_api.Constants;
 using garge_api.Dtos.Shop;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Shop;
 using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -18,6 +21,11 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IVippsService _vipps;
         private readonly IInvoiceService _invoice;
+        private readonly IAppSettingsCache _settingsCache;
+        private readonly IWebhookSecretProtector _protector;
+        private readonly IWebPushService _push;
+        private readonly VippsOptions _vippsOpts;
+        private readonly AppOptions _appOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<ShopController> _logger;
 
@@ -25,17 +33,26 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             IVippsService vipps,
             IInvoiceService invoice,
+            IAppSettingsCache settingsCache,
+            IWebhookSecretProtector protector,
+            IWebPushService push,
+            IOptions<VippsOptions> vippsOpts,
+            IOptions<AppOptions> appOpts,
             IMapper mapper,
             ILogger<ShopController> logger)
         {
             _context = context;
             _vipps = vipps;
             _invoice = invoice;
+            _settingsCache = settingsCache;
+            _protector = protector;
+            _push = push;
+            _vippsOpts = vippsOpts.Value;
+            _appOpts = appOpts.Value;
             _mapper = mapper;
             _logger = logger;
         }
 
-        /// <summary>Lists all active shop items.</summary>
         [HttpGet("items")]
         [AllowAnonymous]
         public async Task<IActionResult> GetItems()
@@ -48,7 +65,6 @@ namespace garge_api.Controllers
             return Ok(_mapper.Map<List<ShopItemResponseDto>>(items));
         }
 
-        /// <summary>Gets a shop item by ID.</summary>
         [HttpGet("items/{id}")]
         [AllowAnonymous]
         public async Task<IActionResult> GetItem(int id)
@@ -58,7 +74,6 @@ namespace garge_api.Controllers
             return Ok(_mapper.Map<ShopItemResponseDto>(item));
         }
 
-        /// <summary>Creates a new shop item.</summary>
         [HttpPost("items")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> CreateItem([FromBody] CreateShopItemDto dto)
@@ -72,7 +87,6 @@ namespace garge_api.Controllers
                 _mapper.Map<ShopItemResponseDto>(item));
         }
 
-        /// <summary>Updates an existing shop item.</summary>
         [HttpPut("items/{id}")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> UpdateItem(int id, [FromBody] UpdateShopItemDto dto)
@@ -87,7 +101,6 @@ namespace garge_api.Controllers
             return Ok(_mapper.Map<ShopItemResponseDto>(item));
         }
 
-        /// <summary>Soft-deletes a shop item (sets IsActive = false).</summary>
         [HttpDelete("items/{id}")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> DeleteItem(int id)
@@ -102,14 +115,19 @@ namespace garge_api.Controllers
             return NoContent();
         }
 
-        /// <summary>Creates a Vipps payment for a sensor purchase.</summary>
         [HttpPost("checkout")]
         [Authorize]
         public async Task<IActionResult> Checkout([FromBody] CreateOrderDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
 
+            if (!PhoneNumber.TryNormalizeNo(dto.PhoneNumber, out var msisdn))
+                return BadRequest("Invalid Norwegian phone number.");
+
             var shopItemIds = dto.Items.Select(i => i.ShopItemId).Distinct().ToList();
+
+            await using var tx = await _context.Database.BeginTransactionAsync();
+
             var shopItems = await _context.ShopItems
                 .Where(i => shopItemIds.Contains(i.Id))
                 .ToDictionaryAsync(i => i.Id);
@@ -123,14 +141,22 @@ namespace garge_api.Controllers
                     return BadRequest($"Insufficient stock for {shopItem.Name}.");
             }
 
-            var settings = await _context.AppSettings.FindAsync(1);
-            var vatMultiplier = (settings?.VatEnabled ?? false) ? 1.25 : 1.0;
+            var settings = await _settingsCache.GetAsync();
+            var vatEnabled = settings.VatEnabled;
+            var taxBp = vatEnabled ? Pricing.VatBasisPoints : 0;
 
-            var taxPct = (settings?.VatEnabled ?? false) ? 25 : 0;
             var itemPrices = dto.Items.ToDictionary(
                 line => line.ShopItemId,
-                line => (int)(shopItems[line.ShopItemId].PriceInOre * vatMultiplier));
+                line => Pricing.EffectiveInOre(shopItems[line.ShopItemId].PriceInOre, vatEnabled));
+
             var total = dto.Items.Sum(line => itemPrices[line.ShopItemId] * line.Quantity);
+
+            foreach (var line in dto.Items)
+            {
+                var item = shopItems[line.ShopItemId];
+                if (item.StockCount != -1)
+                    item.StockCount -= line.Quantity;
+            }
 
             var order = new Order
             {
@@ -138,7 +164,7 @@ namespace garge_api.Controllers
                 TotalInOre = total,
                 Status = OrderStatus.Pending,
                 ShippingAddress = dto.ShippingAddress,
-                IsTest = settings?.VippsTestMode ?? false
+                IsTest = settings.VippsTestMode
             };
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();
@@ -150,8 +176,10 @@ namespace garge_api.Controllers
                 Quantity = line.Quantity,
                 PriceAtPurchaseInOre = itemPrices[line.ShopItemId],
                 UnitPriceExclVatInOre = shopItems[line.ShopItemId].PriceInOre,
-                VatPercentage = taxPct
+                VatPercentage = vatEnabled ? Pricing.VatPercent : 0
             }).ToList();
+            _context.OrderItems.AddRange(orderItems);
+            await _context.SaveChangesAsync();
 
             var receiptLines = dto.Items.Select(line => new VippsOrderLine
             {
@@ -160,26 +188,37 @@ namespace garge_api.Controllers
                 UnitPriceInOre = itemPrices[line.ShopItemId],
                 UnitPriceExclVatInOre = shopItems[line.ShopItemId].PriceInOre,
                 Quantity = line.Quantity,
-                TaxPercentage = taxPct
+                TaxPercentageBasisPoints = taxBp
             }).ToList();
 
-            var vippsResponse = await _vipps.CreatePaymentAsync(order, receiptLines, dto.RedirectUrl, dto.PhoneNumber);
+            var redirectUrl = $"{_appOpts.FrontendBaseUrl}/shop/return";
 
-            order.VippsOrderId = vippsResponse.Reference;
-            _context.OrderItems.AddRange(orderItems);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Order {OrderId} created for user {UserId}, total {Total}øre",
-                order.Id, userId, total);
-
-            return Ok(new CheckoutResponseDto
+            try
             {
-                OrderId = order.Id,
-                RedirectUrl = vippsResponse.RedirectUrl
-            });
+                var vippsResponse = await _vipps.CreatePaymentAsync(
+                    order, receiptLines, redirectUrl, msisdn, $"order-{order.Id}");
+
+                order.VippsOrderId = vippsResponse.Reference;
+                await _context.SaveChangesAsync();
+                await tx.CommitAsync();
+
+                _logger.LogInformation("Order {OrderId} created for user {UserId}, total {Total}øre",
+                    order.Id, userId, total);
+
+                return Ok(new CheckoutResponseDto
+                {
+                    OrderId = order.Id,
+                    RedirectUrl = vippsResponse.RedirectUrl
+                });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "Vipps payment creation failed for user {UserId}", userId);
+                return StatusCode(502, "Payment provider unavailable.");
+            }
         }
 
-        /// <summary>Returns the current user's order history.</summary>
         [HttpGet("orders/my")]
         [Authorize]
         public async Task<IActionResult> GetMyOrders()
@@ -196,7 +235,6 @@ namespace garge_api.Controllers
             return Ok(_mapper.Map<List<OrderResponseDto>>(orders));
         }
 
-        /// <summary>Returns all orders for admin review.</summary>
         [HttpGet("orders")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> GetOrders()
@@ -211,7 +249,6 @@ namespace garge_api.Controllers
             return Ok(_mapper.Map<List<AdminOrderResponseDto>>(orders));
         }
 
-        /// <summary>Captures a reserved Vipps payment after shipping and generates invoice.</summary>
         [HttpPost("orders/{id}/capture")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> CaptureOrder(int id)
@@ -223,7 +260,7 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre);
+            await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}");
 
             order.Status = OrderStatus.Paid;
             order.ShippedAt = DateTime.UtcNow;
@@ -233,11 +270,13 @@ namespace garge_api.Controllers
             try { await _invoice.GenerateAndStoreAsync(id); }
             catch (Exception ex) { _logger.LogError(ex, "Invoice generation failed for order {OrderId}", id); }
 
+            _ = SafePushAsync(order.UserId, "Payment captured",
+                $"Order #{order.Id} is paid. Invoice sent to your email.");
+
             _logger.LogInformation("Order {OrderId} captured by admin", id);
             return Ok();
         }
 
-        /// <summary>Returns PDF invoice for an order (admin or order owner).</summary>
         [HttpGet("orders/{id}/invoice")]
         [Authorize]
         public async Task<IActionResult> GetInvoicePdf(int id)
@@ -256,20 +295,22 @@ namespace garge_api.Controllers
                 $"invoice-{invoice.Id:D4}.pdf");
         }
 
-        /// <summary>Cancels a reserved Vipps payment.</summary>
         [HttpPost("orders/{id}/cancel")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> CancelOrder(int id)
         {
-            var order = await _context.Orders.FindAsync(id);
+            var order = await _context.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == id);
             if (order == null) return NotFound();
             if (order.Status != OrderStatus.Reserved)
                 return BadRequest("Order is not in Reserved state.");
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.CancelPaymentAsync(order.VippsOrderId);
+            await _vipps.CancelPaymentAsync(order.VippsOrderId, $"cancel-{order.Id}");
 
+            await RestoreStockAsync(order);
             order.Status = OrderStatus.Cancelled;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -278,19 +319,18 @@ namespace garge_api.Controllers
             return Ok();
         }
 
-        /// <summary>Webhook endpoint for Vipps ePayment status changes.</summary>
         [HttpPost("webhook")]
         [AllowAnonymous]
         public async Task<IActionResult> Webhook()
         {
             var rawBody = await ReadRawBodyAsync(Request);
+            var settings = await _settingsCache.GetAsync();
+            var secret = _protector.Unprotect(settings.VippsShopWebhookSecret ?? string.Empty);
 
-            var signature = Request.Headers["X-Vipps-Signature"].FirstOrDefault() ?? string.Empty;
-            var settings = await _context.AppSettings.FindAsync(1);
-            var secret = settings?.VippsShopWebhookSecret ?? string.Empty;
-            if (!_vipps.VerifyWebhookSignature(rawBody, signature, secret))
+            var verify = _vipps.VerifyWebhookSignature(Request, rawBody, secret);
+            if (verify != WebhookVerifyResult.Valid)
             {
-                _logger.LogWarning("Shop webhook HMAC verification failed");
+                _logger.LogWarning("Shop webhook verify failed: {Reason}", verify);
                 return Unauthorized();
             }
 
@@ -306,32 +346,123 @@ namespace garge_api.Controllers
 
             if (payload == null) return BadRequest();
 
+            var eventId = !string.IsNullOrEmpty(payload.PspReference)
+                ? payload.PspReference
+                : $"{payload.Reference}:{payload.Name}";
+
+            if (!await TryRecordEventAsync(_context, "shop", eventId))
+            {
+                _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
+                return Ok();
+            }
+
             if (!int.TryParse(payload.Reference, out var orderId))
             {
                 _logger.LogWarning("Shop webhook: non-integer reference {Reference}", payload.Reference);
+                await _context.SaveChangesAsync();
                 return Ok();
             }
 
-            var order = await _context.Orders.FindAsync(orderId);
+            var order = await _context.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null)
             {
                 _logger.LogWarning("Shop webhook: unknown order {OrderId}", orderId);
+                await _context.SaveChangesAsync();
                 return Ok();
             }
 
-            order.Status = payload.Name switch
+            var expectedMsn = order.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
+            if (!string.IsNullOrEmpty(payload.Msn) && !string.IsNullOrEmpty(expectedMsn) && payload.Msn != expectedMsn)
             {
-                "AUTHORIZED" => OrderStatus.Reserved,
-                "TERMINATED" => OrderStatus.Failed,
-                "REFUNDED"   => OrderStatus.Refunded,
-                _            => order.Status
-            };
+                _logger.LogWarning("Shop webhook: MSN mismatch (got {Got}, expected {Expected}) for order {OrderId}",
+                    payload.Msn, expectedMsn, orderId);
+                return Unauthorized();
+            }
+
+            if (payload.Amount != null && payload.Amount.Value != order.TotalInOre &&
+                payload.Name is "AUTHORIZED" or "CAPTURED")
+            {
+                _logger.LogWarning("Shop webhook: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
+                    payload.Amount.Value, order.TotalInOre, orderId);
+                return Unauthorized();
+            }
+
+            var prevStatus = order.Status;
+
+            switch (payload.Name)
+            {
+                case "AUTHORIZED":
+                    order.Status = OrderStatus.Reserved;
+                    break;
+                case "CAPTURED":
+                    order.Status = OrderStatus.Paid;
+                    if (order.ShippedAt == null) order.ShippedAt = DateTime.UtcNow;
+                    break;
+                case "REFUNDED":
+                    order.Status = OrderStatus.Refunded;
+                    break;
+                case "ABORTED":
+                case "EXPIRED":
+                case "TERMINATED":
+                    order.Status = OrderStatus.Failed;
+                    break;
+                case "CANCELLED":
+                    order.Status = OrderStatus.Cancelled;
+                    break;
+                case "CREATED":
+                    break;
+                default:
+                    _logger.LogWarning("Shop webhook: unknown event {Name} for order {OrderId}",
+                        payload.Name, orderId);
+                    break;
+            }
 
             order.UpdatedAt = DateTime.UtcNow;
+
+            if (prevStatus == OrderStatus.Reserved &&
+                order.Status is OrderStatus.Failed or OrderStatus.Cancelled)
+            {
+                await RestoreStockAsync(order);
+            }
+
             await _context.SaveChangesAsync();
+
+            if (prevStatus != OrderStatus.Paid && order.Status == OrderStatus.Paid)
+            {
+                try { await _invoice.GenerateAndStoreAsync(order.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Invoice generation failed for order {OrderId}", order.Id); }
+
+                _ = SafePushAsync(order.UserId, "Payment captured",
+                    $"Order #{order.Id} is paid. Invoice on its way to your email.");
+            }
+            else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
+            {
+                _ = SafePushAsync(order.UserId, "Order reserved",
+                    $"Order #{order.Id} is reserved. We'll capture payment when it ships.");
+            }
 
             _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", orderId, payload.Name);
             return Ok();
+        }
+
+        private async Task SafePushAsync(string userId, string title, string body)
+        {
+            try { await _push.SendAsync(userId, title, body); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Push send failed for user {UserId}", userId); }
+        }
+
+        private async Task RestoreStockAsync(Order order)
+        {
+            var ids = order.OrderItems.Select(oi => oi.ShopItemId).ToList();
+            var items = await _context.ShopItems.Where(i => ids.Contains(i.Id)).ToListAsync();
+            var byId = items.ToDictionary(i => i.Id);
+            foreach (var oi in order.OrderItems)
+            {
+                if (byId.TryGetValue(oi.ShopItemId, out var item) && item.StockCount != -1)
+                    item.StockCount += oi.Quantity;
+            }
         }
     }
 }

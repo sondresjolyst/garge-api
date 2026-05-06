@@ -64,10 +64,8 @@ namespace garge_api.Dtos.Shop
         public required List<OrderItemRequestDto> Items { get; set; }
 
         [Required]
+        [RegularExpression(@"^(?:47)?\d{8}$", ErrorMessage = "Phone number must be 8 Norwegian digits, optionally prefixed with 47.")]
         public required string PhoneNumber { get; set; }
-
-        [Required]
-        public required string RedirectUrl { get; set; }
 
         [Required]
         [MaxLength(500)]
@@ -135,7 +133,15 @@ namespace garge_api.Dtos.Shop
     public class VippsPaymentWebhookDto
     {
         public string Reference { get; set; } = string.Empty;
+        public string PspReference { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
-        public int? Amount { get; set; }
+        public VippsWebhookAmountDto? Amount { get; set; }
+        public string? Msn { get; set; }
+    }
+
+    public class VippsWebhookAmountDto
+    {
+        public int Value { get; set; }
+        public string Currency { get; set; } = string.Empty;
     }
 }

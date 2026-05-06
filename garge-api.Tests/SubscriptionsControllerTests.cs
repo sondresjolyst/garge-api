@@ -8,9 +8,8 @@ using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -22,24 +21,52 @@ public class SubscriptionsControllerTests : ControllerTestBase
     {
         var mock = new Mock<IVippsService>();
         mock.Setup(v => v.VerifyWebhookSignature(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Returns((string body, string sig, string secret) =>
-            {
-                if (string.IsNullOrEmpty(secret) || !sig.StartsWith("sha256=")) return false;
-                var computed = "sha256=" + Convert.ToHexString(
-                    HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(body))
-                ).ToLowerInvariant();
-                return CryptographicOperations.FixedTimeEquals(
-                    Encoding.ASCII.GetBytes(computed),
-                    Encoding.ASCII.GetBytes(sig.ToLowerInvariant()));
-            });
+                It.IsAny<HttpRequest>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns((HttpRequest req, string body, string secret) =>
+                string.IsNullOrEmpty(secret)
+                    ? WebhookVerifyResult.MissingSecret
+                    : (req.Headers["X-Test-Valid"] == "1"
+                        ? WebhookVerifyResult.Valid
+                        : WebhookVerifyResult.BadSignature));
         return mock;
     }
 
-    private SubscriptionsController CreateController(ApplicationDbContext db, string userId = "user-1")
+    private static Mock<IWebhookSecretProtector> MockProtector()
     {
+        var m = new Mock<IWebhookSecretProtector>();
+        m.Setup(p => p.Protect(It.IsAny<string>())).Returns<string>(s => s);
+        m.Setup(p => p.Unprotect(It.IsAny<string>())).Returns<string>(s => s);
+        return m;
+    }
+
+    private static Mock<IAppSettingsCache> MockSettingsCache(AppSettings? settings = null)
+    {
+        var m = new Mock<IAppSettingsCache>();
+        m.Setup(c => c.GetAsync()).ReturnsAsync(settings ?? new AppSettings { Id = 1 });
+        return m;
+    }
+
+    private static IOptions<AppOptions> AppOpts() => Options.Create(new AppOptions
+    {
+        FrontendBaseUrl = "https://www.garge.no",
+        ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
+    });
+
+    private SubscriptionsController CreateController(
+        ApplicationDbContext db, string userId = "user-1",
+        Mock<IVippsService>? vipps = null, AppSettings? settings = null)
+    {
+        var push = new Mock<IWebPushService>();
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         var ctrl = new SubscriptionsController(
-            db, MockVipps().Object, MockMapper.Object,
+            db, (vipps ?? MockVipps()).Object,
+            MockSettingsCache(settings).Object,
+            MockProtector().Object,
+            push.Object,
+            AppOpts(),
+            MockMapper.Object,
             NullLogger<SubscriptionsController>.Instance);
         ctrl.ControllerContext = MakeControllerContext(userId);
         return ctrl;
@@ -69,16 +96,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new VippsAgreementWebhookDto
         {
             AgreementId = "agr_test",
+            EventId = $"evt-{eventType}",
             EventType = eventType,
             Occurred = DateTime.UtcNow
         };
         var body = JsonSerializer.Serialize(payload);
-        var sig = "sha256=" + Convert.ToHexString(
-            HMACSHA256.HashData(Encoding.UTF8.GetBytes("secret"), Encoding.UTF8.GetBytes(body))
-        ).ToLowerInvariant();
 
-        var ctrl = CreateController(db);
-        SetupWebhookRequest(ctrl, body, sig);
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
 
         var result = await ctrl.Webhook();
 
@@ -91,12 +116,11 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task Webhook_InvalidHmac_Returns401()
     {
         using var db = CreateDbContext();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "correct" });
         await db.SaveChangesAsync();
 
         var body = """{"agreementId":"agr_test","eventType":"recurring.agreement-activated.v1"}""";
-        var ctrl = CreateController(db);
-        SetupWebhookRequest(ctrl, body, "sha256=badhash");
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "correct" });
+        SetupInvalidWebhookRequest(ctrl, body);
 
         var result = await ctrl.Webhook();
 
@@ -104,11 +128,43 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_DuplicateEvent_SkipsSecondProcessing()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_dup", Status = SubscriptionStatus.Pending
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var payload = new VippsAgreementWebhookDto
+        {
+            AgreementId = "agr_dup",
+            EventId = "evt-1",
+            EventType = "recurring.agreement-activated.v1",
+            Occurred = DateTime.UtcNow
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var settings = new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" };
+        var ctrl1 = CreateController(db, settings: settings);
+        SetupValidWebhookRequest(ctrl1, body);
+        await ctrl1.Webhook();
+
+        var ctrl2 = CreateController(db, settings: settings);
+        SetupValidWebhookRequest(ctrl2, body);
+        await ctrl2.Webhook();
+
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-1"));
+    }
+
+    [Fact]
     public async Task Webhook_ActivatedEvent_SetsStartDate()
     {
         using var db = CreateDbContext();
         var occurred = new DateTime(2026, 5, 1, 10, 0, 0, DateTimeKind.Utc);
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
@@ -118,25 +174,221 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.Subscriptions.AddAsync(sub);
         await db.SaveChangesAsync();
 
-        var payload = new { agreementId = "agr_start", eventType = "recurring.agreement-activated.v1", occurred };
+        var payload = new
+        {
+            agreementId = "agr_start",
+            eventId = "evt-start",
+            eventType = "recurring.agreement-activated.v1",
+            occurred
+        };
         var body = JsonSerializer.Serialize(payload);
-        var sig = "sha256=" + Convert.ToHexString(
-            HMACSHA256.HashData(Encoding.UTF8.GetBytes("secret"), Encoding.UTF8.GetBytes(body))
-        ).ToLowerInvariant();
 
-        var ctrl = CreateController(db);
-        SetupWebhookRequest(ctrl, body, sig);
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
         await ctrl.Webhook();
 
         var updated = await db.Subscriptions.FirstAsync();
         Assert.Equal(occurred, updated.StartDate);
     }
 
-    private static void SetupWebhookRequest(SubscriptionsController ctrl, string body, string signature)
+    [Fact]
+    public async Task Webhook_ChargeCaptured_SetsNextChargeDateByInterval()
     {
-        var bytes = Encoding.UTF8.GetBytes(body);
+        using var db = CreateDbContext();
+        var occurred = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        await db.Products.AddAsync(MakePrimaryProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_charge", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var payload = new
+        {
+            agreementId = "agr_charge",
+            eventId = "evt-charge",
+            eventType = "recurring.charge-captured.v1",
+            occurred
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal(occurred.AddMonths(1), updated.NextChargeDate);
+    }
+
+    private static void SetupValidWebhookRequest(SubscriptionsController ctrl, string body) =>
+        SetupWebhookRequest(ctrl, body, valid: true);
+
+    private static void SetupInvalidWebhookRequest(SubscriptionsController ctrl, string body) =>
+        SetupWebhookRequest(ctrl, body, valid: false);
+
+    private static void SetupWebhookRequest(SubscriptionsController ctrl, string body, bool valid)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(body);
         ctrl.ControllerContext.HttpContext.Request.Body = new MemoryStream(bytes);
         ctrl.ControllerContext.HttpContext.Request.ContentLength = bytes.Length;
-        ctrl.ControllerContext.HttpContext.Request.Headers["X-Vipps-Signature"] = signature;
+        if (valid)
+            ctrl.ControllerContext.HttpContext.Request.Headers["X-Test-Valid"] = "1";
+    }
+
+    private static Product MakePrimaryProduct(int id = 1) => new()
+    {
+        Id = id, Name = "Garge Basic", PriceInOre = 29900,
+        Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true
+    };
+
+    private static Product MakeAddOnProduct(int id = 2) => new()
+    {
+        Id = id, Name = "Garge Extra Sensor", PriceInOre = 4900,
+        Interval = BillingInterval.Monthly, Type = ProductType.AddOn, IsActive = true
+    };
+
+    [Fact]
+    public async Task InitiatePrimary_NoExisting_Returns200WithConfirmationUrl()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse
+            {
+                AgreementId = "agr_new",
+                VippsConfirmationUrl = "https://vipps.no/confirm/agr_new"
+            });
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "47912345678".Substring(0, 10), ConsentToWaiveWithdrawal = true });
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<InitiateSubscriptionResponseDto>(ok.Value);
+        Assert.Equal("agr_new", dto.VippsAgreementId);
+        Assert.Equal("https://vipps.no/confirm/agr_new", dto.VippsConfirmationUrl);
+    }
+
+    [Fact]
+    public async Task InitiatePrimary_WithoutConsent_Returns400()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+
+        var result = await ctrl.InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = false });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task InitiatePrimary_ExistingActivePrimary_Returns409()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Subscriptions.AddAsync(new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "existing", Status = SubscriptionStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+        var result = await ctrl.InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task InitiateAddOn_WithActivePrimary_Returns200()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        await db.Subscriptions.AddAsync(new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/confirm/addon" });
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(2, await db.Subscriptions.CountAsync(s => s.UserId == "user-1"));
+    }
+
+    [Fact]
+    public async Task InitiateAddOn_WithoutPrimary_Returns400()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakeAddOnProduct());
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+        var result = await ctrl.InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task CancelById_OwnActiveSubscription_Returns200()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_cancel", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.CancelSubscription(sub.Id);
+
+        Assert.IsType<OkResult>(result);
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal(SubscriptionStatus.Stopped, updated.Status);
+    }
+
+    [Fact]
+    public async Task CancelById_OtherUsersSubscription_Returns404()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "other-user", ProductId = 1,
+            VippsAgreementId = "agr_other", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db, userId: "user-1");
+        var result = await ctrl.CancelSubscription(sub.Id);
+
+        Assert.IsType<NotFoundObjectResult>(result);
     }
 }

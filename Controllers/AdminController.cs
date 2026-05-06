@@ -22,6 +22,7 @@ namespace garge_api.Controllers
         private readonly ILogger<AdminController> _logger;
         private readonly IMapper _mapper;
         private readonly IEmailService _emailService;
+        private readonly Services.IAppSettingsCache? _settingsCache;
 
         public AdminController(
             RoleManager<IdentityRole> roleManager,
@@ -29,7 +30,8 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             ILogger<AdminController> logger,
             IMapper mapper,
-            IEmailService emailService)
+            IEmailService emailService,
+            Services.IAppSettingsCache? settingsCache = null)
         {
             _roleManager = roleManager;
             _userManager = userManager;
@@ -37,6 +39,7 @@ namespace garge_api.Controllers
             _logger = logger;
             _mapper = mapper;
             _emailService = emailService;
+            _settingsCache = settingsCache;
         }
 
         /// <summary>
@@ -435,6 +438,7 @@ namespace garge_api.Controllers
 
             _mapper.Map(dto, settings);
             await _context.SaveChangesAsync();
+            _settingsCache?.Invalidate();
 
             _logger.LogInformation("AppSettings updated: {@LogData}", new { dto.CookieBannerEnabled, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(_mapper.Map<AppSettingsDto>(settings));

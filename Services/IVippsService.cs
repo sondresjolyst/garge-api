@@ -3,6 +3,17 @@ using garge_api.Models.Subscription;
 
 namespace garge_api.Services
 {
+    public enum WebhookVerifyResult
+    {
+        Valid,
+        MissingSecret,
+        MissingHeader,
+        BadDate,
+        Stale,
+        BadContentHash,
+        BadSignature
+    }
+
     public class VippsCreateAgreementResponse
     {
         public string AgreementId { get; set; } = string.Empty;
@@ -37,7 +48,8 @@ namespace garge_api.Services
         public int UnitPriceInOre { get; set; }
         public int UnitPriceExclVatInOre { get; set; }
         public int Quantity { get; set; }
-        public int TaxPercentage { get; set; }
+        /// <summary>VAT in basis points (Vipps spec: 0..10000, where 2500 = 25%).</summary>
+        public int TaxPercentageBasisPoints { get; set; }
     }
 
     public interface IVippsService
@@ -45,17 +57,19 @@ namespace garge_api.Services
         Task<string> GetAccessTokenAsync();
 
         Task<VippsCreateAgreementResponse> CreateAgreementAsync(
-            Product product, string userId, string redirectUrl, string phoneNumber, int effectivePriceInOre);
+            Product product, string userId, string redirectUrl, string phoneNumber,
+            int effectivePriceInOre, string idempotencyKey);
         Task<VippsAgreementResponse> GetAgreementAsync(string agreementId);
-        Task CancelAgreementAsync(string agreementId);
+        Task CancelAgreementAsync(string agreementId, string idempotencyKey);
 
         Task<VippsCreatePaymentResponse> CreatePaymentAsync(
-            Order order, List<VippsOrderLine> receiptLines, string redirectUrl, string phoneNumber);
+            Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
+            string phoneNumber, string idempotencyKey);
         Task<VippsPaymentResponse> GetPaymentAsync(string reference);
-        Task CapturePaymentAsync(string reference, int amountInOre);
-        Task CancelPaymentAsync(string reference);
+        Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey);
+        Task CancelPaymentAsync(string reference, string idempotencyKey);
 
         Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events);
-        bool VerifyWebhookSignature(string rawBody, string signatureHeader, string secret);
+        WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
     }
 }

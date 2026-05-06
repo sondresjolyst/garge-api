@@ -10,6 +10,7 @@ namespace garge_api.Dtos.Subscription
         public string? Description { get; set; }
         public int PriceInOre { get; set; }
         public string Interval { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
     }
@@ -29,6 +30,9 @@ namespace garge_api.Dtos.Subscription
 
         [Required]
         public BillingInterval Interval { get; set; }
+
+        [Required]
+        public ProductType Type { get; set; } = ProductType.Primary;
     }
 
     public class UpdateProductDto
@@ -46,6 +50,9 @@ namespace garge_api.Dtos.Subscription
 
         [Required]
         public BillingInterval Interval { get; set; }
+
+        [Required]
+        public ProductType Type { get; set; }
 
         public bool IsActive { get; set; }
     }

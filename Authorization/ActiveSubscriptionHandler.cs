@@ -1,5 +1,6 @@
 using garge_api.Constants;
 using garge_api.Models;
+using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -44,12 +45,21 @@ namespace garge_api.Authorization
                 _cache.Set(TestModeCacheKey, isTestMode, TimeSpan.FromSeconds(30));
             }
 
-            var hasActive = await db.Subscriptions.AnyAsync(s =>
+            var ownedSensorCount = await db.UserSensors.CountAsync(us => us.UserId == userId && us.IsOwner);
+
+            // Pure viewer (no owned sensors) — shared access only, allow through
+            if (ownedSensorCount == 0)
+            {
+                context.Succeed(requirement);
+                return;
+            }
+
+            var subscriptionCount = await db.Subscriptions.CountAsync(s =>
                 s.UserId == userId &&
                 s.Status == SubscriptionStatus.Active &&
                 (!s.IsTest || isTestMode));
 
-            if (hasActive)
+            if (subscriptionCount >= ownedSensorCount)
                 context.Succeed(requirement);
         }
     }

@@ -44,6 +44,7 @@ public abstract class ControllerTestBase
     protected ApplicationDbContext CreateDbContext() =>
         new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
     protected AuthController CreateAuthController(ApplicationDbContext? db = null) =>

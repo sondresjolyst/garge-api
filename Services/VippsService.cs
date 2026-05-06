@@ -1,13 +1,16 @@
 using garge_api.Models;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace garge_api.Services
 {
@@ -24,6 +27,8 @@ namespace garge_api.Services
 
         private const string TestModeCacheKey = "vipps_test_mode";
         private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNameCaseInsensitive = true };
+        private static readonly TimeSpan ReplayWindow = TimeSpan.FromMinutes(5);
+        private static readonly Regex SigRegex = new(@"Signature=([^,&\s]+)", RegexOptions.Compiled);
 
         private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn);
 
@@ -107,10 +112,16 @@ namespace garge_api.Services
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
             var token = doc.RootElement.GetProperty("access_token").GetString()!;
-            var expiresInStr = doc.RootElement.GetProperty("expires_in").GetString() ?? "3600";
-            var expiresIn = int.Parse(expiresInStr);
 
-            _cache.Set(cacheKey, token, TimeSpan.FromSeconds(expiresIn - 60));
+            var expiresIn = 3600;
+            if (doc.RootElement.TryGetProperty("expires_in", out var exp))
+            {
+                var expStr = exp.ValueKind == JsonValueKind.String ? exp.GetString() : exp.GetRawText();
+                if (!int.TryParse(expStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out expiresIn))
+                    expiresIn = 3600;
+            }
+
+            _cache.Set(cacheKey, token, TimeSpan.FromSeconds(Math.Max(60, expiresIn - 60)));
             _logger.LogInformation("Vipps access token refreshed ({CacheKey}), expires in {ExpiresIn}s", cacheKey, expiresIn);
             return token;
         }
@@ -121,7 +132,8 @@ namespace garge_api.Services
         }
 
         public async Task<VippsCreateAgreementResponse> CreateAgreementAsync(
-            Product product, string userId, string redirectUrl, string phoneNumber, int effectivePriceInOre)
+            Product product, string userId, string redirectUrl, string phoneNumber,
+            int effectivePriceInOre, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
 
@@ -146,7 +158,7 @@ namespace garge_api.Services
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/recurring/v3/agreements");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
@@ -171,13 +183,13 @@ namespace garge_api.Services
             return JsonSerializer.Deserialize<VippsAgreementResponse>(json, _jsonOpts)!;
         }
 
-        public async Task CancelAgreementAsync(string agreementId)
+        public async Task CancelAgreementAsync(string agreementId, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
 
             var request = new HttpRequestMessage(HttpMethod.Patch,
                 $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(new { status = "STOPPED" });
 
             var response = await _http.SendAsync(request);
@@ -185,7 +197,8 @@ namespace garge_api.Services
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
-            Order order, List<VippsOrderLine> receiptLines, string redirectUrl, string phoneNumber)
+            Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
+            string phoneNumber, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
 
@@ -197,14 +210,14 @@ namespace garge_api.Services
                 reference = order.Id.ToString(),
                 returnUrl = $"{redirectUrl}?orderId={order.Id}",
                 userFlow = "WEB_REDIRECT",
-                paymentDescription = "Sensor purchase",
+                paymentDescription = $"Garge order #{order.Id}",
                 captureType = "RESERVE_CAPTURE",
                 receipt = new
                 {
                     orderLines = receiptLines.Select(l =>
                     {
                         var lineTotal = l.UnitPriceInOre * l.Quantity;
-                        var excludingTax = l.TaxPercentage > 0
+                        var excludingTax = l.TaxPercentageBasisPoints > 0
                             ? l.UnitPriceExclVatInOre * l.Quantity
                             : lineTotal;
                         return new
@@ -214,7 +227,7 @@ namespace garge_api.Services
                             totalAmount = lineTotal,
                             totalAmountExcludingTax = excludingTax,
                             totalTaxAmount = lineTotal - excludingTax,
-                            taxPercentage = l.TaxPercentage,
+                            taxPercentage = l.TaxPercentageBasisPoints,
                             unitInfo = new
                             {
                                 unitPrice = l.UnitPriceInOre,
@@ -231,7 +244,7 @@ namespace garge_api.Services
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/epayment/v1/payments");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
@@ -256,24 +269,24 @@ namespace garge_api.Services
             return JsonSerializer.Deserialize<VippsPaymentResponse>(json, _jsonOpts)!;
         }
 
-        public async Task CapturePaymentAsync(string reference, int amountInOre)
+        public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}/capture");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
         }
 
-        public async Task CancelPaymentAsync(string reference)
+        public async Task CancelPaymentAsync(string reference, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}/cancel");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(new { });
             var response = await _http.SendAsync(request);
             response.EnsureSuccessStatusCode();
@@ -284,7 +297,7 @@ namespace garge_api.Services
             var e = await GetEffectiveAsync();
             var body = new { url, events };
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/webhooks/v1/webhooks");
-            AddCommonHeaders(request, e, idempotency: true);
+            AddCommonHeaders(request, e, Guid.NewGuid().ToString());
             request.Content = BuildJsonContent(body);
 
             var response = await _http.SendAsync(request);
@@ -297,28 +310,64 @@ namespace garge_api.Services
             return (id, secret);
         }
 
-        public bool VerifyWebhookSignature(string rawBody, string signatureHeader, string secret)
+        public WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
         {
-            if (!signatureHeader.StartsWith("sha256=")) return false;
-            var receivedHex = signatureHeader["sha256=".Length..];
-            var key = Encoding.UTF8.GetBytes(secret);
-            var payload = Encoding.UTF8.GetBytes(rawBody);
-            var computed = HMACSHA256.HashData(key, payload);
-            var computedHex = Convert.ToHexString(computed).ToLowerInvariant();
+            if (string.IsNullOrEmpty(secret))
+                return WebhookVerifyResult.MissingSecret;
+
+            var auth = request.Headers["Authorization"].ToString();
+            if (string.IsNullOrEmpty(auth) || !auth.StartsWith("HMAC-SHA256 ", StringComparison.Ordinal))
+                return WebhookVerifyResult.MissingHeader;
+
+            var sigMatch = SigRegex.Match(auth);
+            if (!sigMatch.Success) return WebhookVerifyResult.MissingHeader;
+            var receivedSig = sigMatch.Groups[1].Value;
+
+            var dateHeader = request.Headers["x-ms-date"].ToString();
+            var contentHashHeader = request.Headers["x-ms-content-sha256"].ToString();
+            if (string.IsNullOrEmpty(dateHeader) || string.IsNullOrEmpty(contentHashHeader))
+                return WebhookVerifyResult.MissingHeader;
+
+            // Replay protection: x-ms-date must be within 5 min window
+            if (!DateTimeOffset.TryParse(dateHeader, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var sentAt))
+                return WebhookVerifyResult.BadDate;
+            var skew = DateTimeOffset.UtcNow - sentAt;
+            if (skew.Duration() > ReplayWindow)
+                return WebhookVerifyResult.Stale;
+
+            // Content hash check
+            var bodyHashBase64 = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(rawBody)));
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Encoding.ASCII.GetBytes(bodyHashBase64),
+                    Encoding.ASCII.GetBytes(contentHashHeader)))
+                return WebhookVerifyResult.BadContentHash;
+
+            // Canonical: METHOD\n<pathAndQuery>\n<x-ms-date>;<host>;<x-ms-content-sha256>
+            var pathAndQuery = request.Path.Value + request.QueryString.Value;
+            var host = request.Headers["Host"].ToString();
+            if (string.IsNullOrEmpty(host)) host = request.Host.Value ?? string.Empty;
+            var canonical = $"{request.Method}\n{pathAndQuery}\n{dateHeader};{host};{contentHashHeader}";
+
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            var computed = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(canonical)));
+
             return CryptographicOperations.FixedTimeEquals(
-                Encoding.ASCII.GetBytes(computedHex),
-                Encoding.ASCII.GetBytes(receivedHex.ToLowerInvariant()));
+                Encoding.ASCII.GetBytes(computed),
+                Encoding.ASCII.GetBytes(receivedSig))
+                ? WebhookVerifyResult.Valid
+                : WebhookVerifyResult.BadSignature;
         }
 
-        private void AddCommonHeaders(HttpRequestMessage request, VippsEffective e, bool idempotency = false)
+        private void AddCommonHeaders(HttpRequestMessage request, VippsEffective e, string? idempotencyKey = null)
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", e.Token);
             request.Headers.Add("Ocp-Apim-Subscription-Key", e.SubscriptionKey);
             request.Headers.Add("Merchant-Serial-Number", e.Msn);
             request.Headers.Add("Vipps-System-Name", _systemName);
             request.Headers.Add("Vipps-System-Version", _systemVersion);
-            if (idempotency)
-                request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            if (!string.IsNullOrEmpty(idempotencyKey))
+                request.Headers.Add("Idempotency-Key", idempotencyKey);
         }
 
         private static StringContent BuildJsonContent(object body) =>

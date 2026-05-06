@@ -546,7 +546,7 @@ namespace garge_api.Controllers
             var alreadyClaimed = await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensor.Id);
             if (!alreadyClaimed)
             {
-                _context.UserSensors.Add(new UserSensor { UserId = userId!, SensorId = sensor.Id });
+                _context.UserSensors.Add(new UserSensor { UserId = userId!, SensorId = sensor.Id, IsOwner = true });
                 await _context.SaveChangesAsync();
                 _logger.LogInformation("ClaimSensor assigned sensor to user {@LogData}", new { sensor.Id, User = User.Identity?.Name });
             }

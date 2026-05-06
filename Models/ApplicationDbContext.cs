@@ -10,14 +10,17 @@ using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace garge_api.Models
 {
-    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : IdentityDbContext<User, IdentityRole, string>(options)
+    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext
     {
+        public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
         public DbSet<UserProfile> UserProfiles { get; set; }
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<Sensor.Sensor> Sensors { get; set; }
@@ -50,6 +53,7 @@ namespace garge_api.Models
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
+        public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -293,6 +297,12 @@ namespace garge_api.Models
             modelBuilder.Entity<Invoice>()
                 .HasIndex(i => i.OrderId)
                 .IsUnique();
+
+            modelBuilder.Entity<ProcessedWebhookEvent>()
+                .HasIndex(p => new { p.Source, p.Id });
+
+            modelBuilder.Entity<ProcessedWebhookEvent>()
+                .HasIndex(p => p.ProcessedAt);
         }
         public void EnsureTriggers()
         {

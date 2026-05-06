@@ -27,7 +27,8 @@ public class MappingProfile : Profile
         CreateMap<User, UserDto>();
         CreateMap<AppSettings, AppSettingsDto>();
         CreateMap<AppSettings, PublicSettingsDto>();
-        CreateMap<UpdateAppSettingsDto, AppSettings>();
+        CreateMap<UpdateAppSettingsDto, AppSettings>()
+            .ForAllMembers(opt => opt.Condition((_, _, srcMember) => srcMember != null));
 
         // Electricity mappings
         CreateMap<PriceResponse, PriceResponseDto>();
@@ -64,7 +65,8 @@ public class MappingProfile : Profile
 
         // Subscription plan mappings
         CreateMap<Product, ProductResponseDto>()
-            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Interval.ToString()));
+            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Interval.ToString()))
+            .ForMember(d => d.Type, o => o.MapFrom(s => s.Type.ToString()));
         CreateMap<CreateProductDto, Product>();
         CreateMap<UpdateProductDto, Product>();
 
@@ -72,6 +74,7 @@ public class MappingProfile : Profile
             .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
             .ForMember(d => d.Interval, o => o.MapFrom(s => s.Product != null ? s.Product.Interval.ToString() : string.Empty))
             .ForMember(d => d.ProductName, o => o.MapFrom(s => s.Product != null ? s.Product.Name : string.Empty))
+            .ForMember(d => d.ProductType, o => o.MapFrom(s => s.Product != null ? s.Product.Type.ToString() : string.Empty))
             .ForMember(d => d.PriceInOre, o => o.MapFrom(s => s.Product != null ? s.Product.PriceInOre : 0));
 
         // Shop mappings

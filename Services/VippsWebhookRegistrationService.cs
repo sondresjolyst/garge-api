@@ -1,5 +1,5 @@
+using garge_api.Constants;
 using garge_api.Models;
-using garge_api.Models.Admin;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -26,39 +26,59 @@ namespace garge_api.Services
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var vipps = scope.ServiceProvider.GetRequiredService<IVippsService>();
+            var protector = scope.ServiceProvider.GetRequiredService<IWebhookSecretProtector>();
+            var settingsCache = scope.ServiceProvider.GetRequiredService<IAppSettingsCache>();
 
             var settings = await db.AppSettings.FindAsync([1], cancellationToken);
             if (settings == null) return;
 
-            var shopTask = string.IsNullOrEmpty(settings.VippsShopWebhookId)
-                ? TryRegisterAsync(vipps,
-                    $"{_appOpts.ApiBaseUrl}/api/shop/webhook",
-                    ["epayments.payment.authorized.v1", "epayments.payment.terminated.v1", "epayments.payment.refunded.v1"],
-                    (id, secret) => { settings.VippsShopWebhookId = id; settings.VippsShopWebhookSecret = secret; },
-                    "shop")
-                : Task.FromResult(false);
+            var changed = false;
 
-            var subTask = string.IsNullOrEmpty(settings.VippsSubscriptionWebhookId)
-                ? TryRegisterAsync(vipps,
-                    $"{_appOpts.ApiBaseUrl}/api/subscriptions/webhook",
-                    ["recurring.agreement-activated.v1", "recurring.agreement-stopped.v1", "recurring.agreement-expired.v1"],
-                    (id, secret) => { settings.VippsSubscriptionWebhookId = id; settings.VippsSubscriptionWebhookSecret = secret; },
-                    "subscription")
-                : Task.FromResult(false);
+            if (string.IsNullOrEmpty(settings.VippsShopWebhookId))
+            {
+                if (await TryRegisterAsync(vipps, protector,
+                        $"{_appOpts.ApiBaseUrl}/api/shop/webhook",
+                        VippsEvents.ShopEvents,
+                        (id, secret) =>
+                        {
+                            settings.VippsShopWebhookId = id;
+                            settings.VippsShopWebhookSecret = secret;
+                        },
+                        "shop"))
+                    changed = true;
+            }
 
-            var results = await Task.WhenAll(shopTask, subTask);
-            if (results.Any(r => r))
+            if (string.IsNullOrEmpty(settings.VippsSubscriptionWebhookId))
+            {
+                if (await TryRegisterAsync(vipps, protector,
+                        $"{_appOpts.ApiBaseUrl}/api/subscriptions/webhook",
+                        VippsEvents.SubscriptionEvents,
+                        (id, secret) =>
+                        {
+                            settings.VippsSubscriptionWebhookId = id;
+                            settings.VippsSubscriptionWebhookSecret = secret;
+                        },
+                        "subscription"))
+                    changed = true;
+            }
+
+            if (changed)
+            {
                 await db.SaveChangesAsync(cancellationToken);
+                settingsCache.Invalidate();
+            }
         }
 
         private async Task<bool> TryRegisterAsync(
-            IVippsService vipps, string url, string[] events,
+            IVippsService vipps,
+            IWebhookSecretProtector protector,
+            string url, string[] events,
             Action<string, string> persist, string label)
         {
             try
             {
                 var (id, secret) = await vipps.RegisterWebhookAsync(url, events);
-                persist(id, secret);
+                persist(id, protector.Protect(secret));
                 _logger.LogInformation("Registered Vipps {Label} webhook {WebhookId}", label, id);
                 return true;
             }

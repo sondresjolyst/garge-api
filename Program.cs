@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 
 namespace garge_api
 {
@@ -105,9 +106,15 @@ namespace garge_api
             builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
             builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
             builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
+            builder.Services.AddDataProtection()
+                .PersistKeysToDbContext<ApplicationDbContext>()
+                .SetApplicationName("garge-api");
+            builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
+            builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddHttpClient<IVippsService, VippsService>();
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
+            builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")

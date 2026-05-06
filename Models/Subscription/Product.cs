@@ -9,6 +9,12 @@ namespace garge_api.Models.Subscription
         Yearly = 1
     }
 
+    public enum ProductType
+    {
+        Primary = 0,
+        AddOn = 1
+    }
+
     public class Product
     {
         [Key]
@@ -27,6 +33,9 @@ namespace garge_api.Models.Subscription
 
         [Required]
         public BillingInterval Interval { get; set; }
+
+        [Required]
+        public ProductType Type { get; set; } = ProductType.Primary;
 
         public bool IsActive { get; set; } = true;
 
