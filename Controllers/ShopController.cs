@@ -456,7 +456,8 @@ namespace garge_api.Controllers
             }
             else if (payload.Name == "CAPTURED" && order.Status == OrderStatus.Paid)
             {
-                var hasInvoice = await _context.Invoices.AnyAsync(i => i.OrderId == order.Id);
+                var hasInvoice = await _context.Invoices.AnyAsync(i =>
+                    i.OrderId == order.Id && i.PdfData.Length > 0);
                 if (!hasInvoice)
                 {
                     _logger.LogInformation("Order {OrderId} already Paid but no invoice — generating from webhook", order.Id);

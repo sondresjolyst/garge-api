@@ -139,6 +139,7 @@ namespace garge_api
                 .SetApplicationName("garge-api");
             builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
+            builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddHttpClient<IVippsService, VippsService>();
