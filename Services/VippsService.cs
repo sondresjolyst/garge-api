@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace garge_api.Services
@@ -258,19 +259,13 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-payment");
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var result = new VippsPaymentResponse
+            var dto = JsonSerializer.Deserialize<PaymentApiDto>(json, _jsonOpts) ?? new PaymentApiDto();
+            return new VippsPaymentResponse
             {
-                Reference = root.TryGetProperty("reference", out var refEl) ? refEl.GetString() ?? string.Empty : string.Empty,
-                State = root.TryGetProperty("state", out var stateEl) ? stateEl.GetString() ?? string.Empty : string.Empty
+                Reference = dto.Reference ?? string.Empty,
+                State = dto.State ?? string.Empty,
+                ProfileSub = dto.Profile?.Sub
             };
-            if (root.TryGetProperty("profile", out var profileEl) &&
-                profileEl.TryGetProperty("sub", out var subEl))
-            {
-                result.ProfileSub = subEl.GetString();
-            }
-            return result;
         }
 
         public async Task<VippsUserInfo?> GetUserInfoAsync(string sub)
@@ -284,29 +279,59 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-userinfo");
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            var dto = JsonSerializer.Deserialize<UserInfoApiDto>(json, _jsonOpts);
+            if (dto == null) return null;
 
-            var info = new VippsUserInfo
+            return new VippsUserInfo
             {
-                Name = root.TryGetProperty("name", out var n) ? n.GetString() : null,
-                Email = root.TryGetProperty("email", out var em) ? em.GetString() : null,
-                PhoneNumber = root.TryGetProperty("phone_number", out var ph) ? ph.GetString() : null
-            };
-
-            if (root.TryGetProperty("address", out var addr) && addr.ValueKind == JsonValueKind.Object)
-            {
-                info.Address = new VippsAddress
+                Name = dto.Name,
+                Email = dto.Email,
+                PhoneNumber = dto.PhoneNumber,
+                Address = dto.Address == null ? null : new VippsAddress
                 {
-                    StreetAddress = addr.TryGetProperty("street_address", out var sa) ? sa.GetString() : null,
-                    PostalCode = addr.TryGetProperty("postal_code", out var pc) ? pc.GetString() : null,
-                    Region = addr.TryGetProperty("region", out var rg) ? rg.GetString() : null,
-                    Country = addr.TryGetProperty("country", out var co) ? co.GetString() : null,
-                    Formatted = addr.TryGetProperty("formatted", out var fm) ? fm.GetString() : null
-                };
-            }
+                    StreetAddress = dto.Address.StreetAddress,
+                    PostalCode = dto.Address.PostalCode,
+                    Region = dto.Address.Region,
+                    Country = dto.Address.Country,
+                    Formatted = dto.Address.Formatted
+                }
+            };
+        }
 
-            return info;
+        private sealed class PaymentApiDto
+        {
+            public string? Reference { get; set; }
+            public string? State { get; set; }
+            public PaymentProfileApiDto? Profile { get; set; }
+        }
+
+        private sealed class PaymentProfileApiDto
+        {
+            public string? Sub { get; set; }
+        }
+
+        private sealed class UserInfoApiDto
+        {
+            public string? Name { get; set; }
+            public string? Email { get; set; }
+
+            [JsonPropertyName("phone_number")]
+            public string? PhoneNumber { get; set; }
+
+            public AddressApiDto? Address { get; set; }
+        }
+
+        private sealed class AddressApiDto
+        {
+            [JsonPropertyName("street_address")]
+            public string? StreetAddress { get; set; }
+
+            [JsonPropertyName("postal_code")]
+            public string? PostalCode { get; set; }
+
+            public string? Region { get; set; }
+            public string? Country { get; set; }
+            public string? Formatted { get; set; }
         }
 
         public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey)

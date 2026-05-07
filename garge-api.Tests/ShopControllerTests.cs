@@ -118,6 +118,92 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_AuthorizedEvent_PopulatesShippingFromVippsProfile()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-000002",
+            TotalInOre = 10000, Status = OrderStatus.Pending
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
+            .ReturnsAsync(new VippsPaymentResponse
+            {
+                Reference = order.VippsOrderId, State = "AUTHORIZED", ProfileSub = "sub-abc"
+            });
+        vipps.Setup(v => v.GetUserInfoAsync("sub-abc"))
+            .ReturnsAsync(new VippsUserInfo
+            {
+                Address = new VippsAddress
+                {
+                    Formatted = "Mårvegen 21a, 4347 Lye, Norway"
+                }
+            });
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-2",
+            name = "AUTHORIZED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, vipps: vipps,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        var result = await ctrl.Webhook();
+
+        Assert.IsType<OkResult>(result);
+        var updated = await db.Orders.FindAsync(order.Id);
+        Assert.Equal("Mårvegen 21a, 4347 Lye, Norway", updated!.ShippingAddress);
+    }
+
+    [Fact]
+    public async Task Webhook_AuthorizedEvent_KeepsExistingAddress_WhenVippsHasNone()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-000003",
+            TotalInOre = 10000, Status = OrderStatus.Pending,
+            ShippingAddress = "Existing address 1"
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
+            .ReturnsAsync(new VippsPaymentResponse { Reference = order.VippsOrderId, State = "AUTHORIZED" });
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-3",
+            name = "AUTHORIZED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, vipps: vipps,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        await ctrl.Webhook();
+
+        var updated = await db.Orders.FindAsync(order.Id);
+        Assert.Equal("Existing address 1", updated!.ShippingAddress);
+        vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Webhook_InvalidHmac_Returns401()
     {
         using var db = CreateDbContext();

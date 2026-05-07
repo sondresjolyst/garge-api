@@ -453,26 +453,12 @@ namespace garge_api.Controllers
             try
             {
                 var payment = await _vipps.GetPaymentAsync(order.VippsOrderId);
-                if (string.IsNullOrEmpty(payment.ProfileSub)) return;
+                if (string.IsNullOrEmpty(payment?.ProfileSub)) return;
 
                 var info = await _vipps.GetUserInfoAsync(payment.ProfileSub);
-                if (info?.Address == null) return;
-
-                var formatted = !string.IsNullOrEmpty(info.Address.Formatted)
-                    ? info.Address.Formatted
-                    : string.Join(", ", new[]
-                    {
-                        info.Address.StreetAddress,
-                        info.Address.PostalCode,
-                        info.Address.Region,
-                        info.Address.Country
-                    }.Where(s => !string.IsNullOrEmpty(s)));
-
+                var formatted = VippsAddressFormatter.Format(info?.Address);
                 if (!string.IsNullOrEmpty(formatted))
-                {
-                    if (formatted.Length > 500) formatted = formatted[..500];
                     order.ShippingAddress = formatted;
-                }
             }
             catch (Exception ex)
             {
