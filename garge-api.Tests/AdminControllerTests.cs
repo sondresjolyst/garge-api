@@ -202,6 +202,54 @@ public class AdminControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task GetStats_DefaultExcludesTestData()
+    {
+        var db = CreateDbContext();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+
+        db.Orders.AddRange(
+            new Order { UserId = "u1", Status = OrderStatus.Paid, TotalInOre = 1000, CreatedAt = DateTime.UtcNow, IsTest = false },
+            new Order { UserId = "u1", Status = OrderStatus.Paid, TotalInOre = 9999, CreatedAt = DateTime.UtcNow, IsTest = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetStats();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<AdminStatsDto>(ok.Value);
+        Assert.Equal(1, dto.Orders.Today);
+        Assert.Equal(1000L, dto.Orders.TotalRevenueInOre);
+    }
+
+    [Fact]
+    public async Task GetStats_TestTrue_OnlyReturnsTestData()
+    {
+        var db = CreateDbContext();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+
+        db.Orders.AddRange(
+            new Order { UserId = "u1", Status = OrderStatus.Paid, TotalInOre = 1000, CreatedAt = DateTime.UtcNow, IsTest = false },
+            new Order { UserId = "u1", Status = OrderStatus.Paid, TotalInOre = 9999, CreatedAt = DateTime.UtcNow, IsTest = true });
+
+        var product = new Product { Id = 1, Name = "P", PriceInOre = 5000, Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true };
+        db.Products.Add(product);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        db.Subscriptions.AddRange(
+            new Subscription { UserId = "u1", ProductId = 1, VippsAgreementId = "live", Status = SubscriptionStatus.Active, IsTest = false },
+            new Subscription { UserId = "u2", ProductId = 1, VippsAgreementId = "test", Status = SubscriptionStatus.Active, IsTest = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetStats(test: true);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<AdminStatsDto>(ok.Value);
+        Assert.Equal(1, dto.Orders.Today);
+        Assert.Equal(9999L, dto.Orders.TotalRevenueInOre);
+        Assert.Equal(1, dto.Subscriptions.Active);
+        Assert.Equal(5000L, dto.Subscriptions.MonthlyRecurringInOre);
+    }
+
+    [Fact]
     public async Task GetStats_StoppedThisMonth_OnlyCountsCurrentMonth()
     {
         var db = CreateDbContext();
