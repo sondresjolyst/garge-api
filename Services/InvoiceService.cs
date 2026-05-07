@@ -2,7 +2,9 @@ using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
+using garge_api.Models.Subscription;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Text;
 using System.Web;
 
@@ -103,6 +105,154 @@ namespace garge_api.Services
 
             _logger.LogInformation("Invoice {InvoiceId} generated for order {OrderId}", invoice.Id, orderId);
             return invoice.Id;
+        }
+
+        public async Task<int> GenerateForSubscriptionChargeAsync(
+            int subscriptionId, string vippsChargeId, int amountInOre, DateTime occurredAt)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+            var existing = await db.Invoices.FirstOrDefaultAsync(i => i.VippsChargeId == vippsChargeId);
+            if (existing != null)
+            {
+                _logger.LogInformation("Invoice {InvoiceId} already exists for charge {ChargeId} — skip",
+                    existing.Id, vippsChargeId);
+                return existing.Id;
+            }
+
+            var subscription = await db.Subscriptions
+                .Include(s => s.User)
+                .Include(s => s.Product)
+                .FirstOrDefaultAsync(s => s.Id == subscriptionId)
+                ?? throw new InvalidOperationException($"Subscription {subscriptionId} not found");
+
+            var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
+
+            var invoice = new Invoice
+            {
+                SubscriptionId = subscription.Id,
+                VippsChargeId = vippsChargeId,
+                AmountInOre = amountInOre,
+                IssuedAt = occurredAt,
+                PdfData = []
+            };
+            db.Invoices.Add(invoice);
+            await db.SaveChangesAsync();
+
+            var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, occurredAt, amountInOre);
+            try
+            {
+                invoice.PdfData = await _pdfRenderer.RenderAsync(html);
+                await db.SaveChangesAsync();
+            }
+            catch
+            {
+                db.Invoices.Remove(invoice);
+                await db.SaveChangesAsync();
+                throw;
+            }
+
+            try
+            {
+                var buyerEmail = subscription.User?.Email;
+                if (!string.IsNullOrEmpty(buyerEmail))
+                {
+                    var attachment = new EmailAttachment
+                    {
+                        FileName = $"invoice-{invoice.Id:D4}.pdf",
+                        Content = invoice.PdfData,
+                        ContentType = "application/pdf"
+                    };
+                    await _emailService.SendEmailAsync(
+                        buyerEmail,
+                        $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
+                        html,
+                        [attachment]);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to email invoice {InvoiceId} for subscription {SubscriptionId} charge {ChargeId}",
+                    invoice.Id, subscriptionId, vippsChargeId);
+            }
+
+            _logger.LogInformation("Invoice {InvoiceId} generated for subscription {SubscriptionId} charge {ChargeId}",
+                invoice.Id, subscriptionId, vippsChargeId);
+            return invoice.Id;
+        }
+
+        private static string BuildSubscriptionInvoiceHtml(
+            Subscription subscription, AppSettings s, int invoiceId, DateTime issuedAt, int amountInOre)
+        {
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
+            static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
+
+            var product = subscription.Product;
+            var productName = product?.Name ?? "Subscription";
+            var period = product?.Interval == BillingInterval.Yearly ? "year" : "month";
+            var buyerName = subscription.User != null
+                ? $"{subscription.User.FirstName} {subscription.User.LastName}"
+                : "—";
+
+            var body = $$"""
+                <div class="parties">
+                  <div class="party">
+                    <div class="party-label">From</div>
+                    <p>
+                      <strong>{{H(s.CompanyLegalName)}}</strong><br>
+                      {{H(s.CompanyAddress)}}<br>
+                      {{H(s.CompanyEmail)}}
+                    </p>
+                  </div>
+                  <div class="party">
+                    <div class="party-label">Bill to</div>
+                    <p>
+                      <strong>{{H(buyerName)}}</strong><br>
+                      {{H(subscription.User?.Email)}}
+                    </p>
+                  </div>
+                </div>
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th class="r">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{{H(productName)}} — recurring charge ({{period}})</td>
+                      <td class="r">NOK {{Nok(amountInOre)}}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div class="totals-section">
+                  <table>
+                    <tbody>
+                      <tr class="grand">
+                        <td>Total</td>
+                        <td class="r">NOK {{Nok(amountInOre)}}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="footer">
+                  <p>Charged via Vipps recurring agreement.</p>
+                  <p>Charge date: {{issuedAt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}}.</p>
+                </div>
+                """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = $"#{invoiceId:D4}",
+                Subtitle = $"INVOICE  ·  {issuedAt:yyyy-MM-dd}",
+                Badge = "Paid",
+                FootNote = $"Vipps agreement {subscription.VippsAgreementId}"
+            }, body);
         }
 
         private static string BuildInvoiceHtml(Order order, AppSettings s, int invoiceId, DateTime issuedAt)

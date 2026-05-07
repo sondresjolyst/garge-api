@@ -54,7 +54,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
     private SubscriptionsController CreateController(
         ApplicationDbContext db, string userId = "user-1",
-        Mock<IVippsService>? vipps = null, AppSettings? settings = null)
+        Mock<IVippsService>? vipps = null, AppSettings? settings = null,
+        IInvoiceService? invoice = null, ISubscriptionEmailService? subEmail = null)
     {
         var push = new Mock<IWebPushService>();
         push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -62,6 +63,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var ctrl = new SubscriptionsController(
             db, (vipps ?? MockVipps()).Object,
+            invoice ?? new Mock<IInvoiceService>().Object,
+            subEmail ?? new Mock<ISubscriptionEmailService>().Object,
             MockSettingsCache(settings).Object,
             MockProtector().Object,
             push.Object,

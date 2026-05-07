@@ -142,6 +142,7 @@ namespace garge_api
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
+            builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
             builder.Services.AddHttpClient<IVippsService, VippsService>();
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
             builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();

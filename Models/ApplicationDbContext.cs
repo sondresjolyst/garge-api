@@ -294,9 +294,25 @@ namespace garge_api.Models
                 .HasForeignKey<Invoice>(i => i.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // Filtered unique index: one invoice per order when set; multiple rows
+            // with NULL OrderId are allowed (subscription invoices).
             modelBuilder.Entity<Invoice>()
                 .HasIndex(i => i.OrderId)
-                .IsUnique();
+                .IsUnique()
+                .HasFilter("\"OrderId\" IS NOT NULL");
+
+            modelBuilder.Entity<Invoice>()
+                .HasOne(i => i.Subscription)
+                .WithMany()
+                .HasForeignKey(i => i.SubscriptionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique-when-present index so webhook redelivery can't produce duplicate
+            // invoices for the same Vipps charge.
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.VippsChargeId)
+                .IsUnique()
+                .HasFilter("\"VippsChargeId\" IS NOT NULL");
 
             modelBuilder.Entity<ProcessedWebhookEvent>()
                 .HasIndex(p => new { p.Source, p.Id });
