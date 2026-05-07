@@ -149,10 +149,6 @@ namespace garge_api.Services
                   """
                 : string.Empty;
 
-            var vatFootnote = s.VatEnabled
-                ? string.Empty
-                : "<p>Not VAT registered — below the NOK 50,000 registration threshold.</p>";
-
             var deliveryNote = order.ShippedAt.HasValue
                 ? $"Shipped on {order.ShippedAt.Value:yyyy-MM-dd}."
                 : "Estimated delivery: 3–5 business days from shipment.";
@@ -300,7 +296,6 @@ namespace garge_api.Services
                 <div class="footer">
                   <p>Payment received via Vipps.</p>
                   <p>Delivery address: {{H(order.ShippingAddress)}} — {{deliveryNote}}</p>
-                  {{vatFootnote}}
                 </div>
 
                 </body>
