@@ -188,6 +188,125 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_CapturedEvent_NoExistingInvoice_GeneratesInvoice()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-cap-recover",
+            TotalInOre = 10000, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, false))
+            .ReturnsAsync(42);
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-cap-recover",
+            name = "CAPTURED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, invoice: invoice.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        await ctrl.Webhook();
+
+        invoice.Verify(i => i.GenerateAndStoreAsync(order.Id, false), Times.Once);
+    }
+
+    [Fact]
+    public async Task Webhook_CapturedEvent_ExistingInvoice_DoesNotGenerate()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-cap-existing",
+            TotalInOre = 10000, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+        db.Invoices.Add(new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [1, 2, 3] });
+        await db.SaveChangesAsync();
+
+        var invoice = new Mock<IInvoiceService>();
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-cap-existing",
+            name = "CAPTURED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, invoice: invoice.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        await ctrl.Webhook();
+
+        invoice.Verify(i => i.GenerateAndStoreAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RegenerateInvoice_AdminCall_PaidOrder_CallsServiceWithForce()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-regen",
+            TotalInOre = 10000, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, true))
+            .ReturnsAsync(7);
+
+        var ctrl = CreateController(db, invoice: invoice.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+
+        var result = await ctrl.RegenerateInvoice(order.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var json = JsonSerializer.Serialize(ok.Value);
+        Assert.Contains("\"invoiceId\":7", json);
+        invoice.Verify(i => i.GenerateAndStoreAsync(order.Id, true), Times.Once);
+    }
+
+    [Fact]
+    public async Task RegenerateInvoice_NotPaid_ReturnsBadRequest()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-regen-bad",
+            TotalInOre = 10000, Status = OrderStatus.Reserved
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var invoice = new Mock<IInvoiceService>();
+        var ctrl = CreateController(db, invoice: invoice.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+
+        var result = await ctrl.RegenerateInvoice(order.Id);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        invoice.Verify(i => i.GenerateAndStoreAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Webhook_AuthorizedEvent_PopulatesShippingFromVippsProfile()
     {
         using var db = CreateDbContext();
