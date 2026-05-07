@@ -65,12 +65,12 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_SendsEmailWithSubjectAndItemTotal()
+    public async Task SendOrderConfirmedAsync_SendsEmailWithSubjectAndItemTotal()
     {
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db);
 
-        await svc.SendOrderReservedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id);
 
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",
@@ -80,12 +80,12 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_IncludesShippingAddress_WhenPresent()
+    public async Task SendOrderConfirmedAsync_IncludesShippingAddress_WhenPresent()
     {
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, shippingAddress: "Mårvegen 21a, 4347 Lye");
 
-        await svc.SendOrderReservedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -94,12 +94,12 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_OmitsShippingBlock_WhenNull()
+    public async Task SendOrderConfirmedAsync_OmitsShippingBlock_WhenNull()
     {
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, shippingAddress: null);
 
-        await svc.SendOrderReservedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -108,12 +108,12 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_DoesNotSend_WhenUserMissingEmail()
+    public async Task SendOrderConfirmedAsync_DoesNotSend_WhenUserMissingEmail()
     {
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, email: null);
 
-        await svc.SendOrderReservedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -121,13 +121,13 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_DoesNotSend_WhenOrderMissing()
+    public async Task SendOrderConfirmedAsync_DoesNotSend_WhenOrderMissing()
     {
         var (svc, db, email) = Create();
         await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
         await db.SaveChangesAsync();
 
-        await svc.SendOrderReservedAsync(orderId: 99999);
+        await svc.SendOrderConfirmedAsync(orderId: 99999);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -135,7 +135,7 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public async Task SendOrderReservedAsync_SwallowsEmailServiceException()
+    public async Task SendOrderConfirmedAsync_SwallowsEmailServiceException()
     {
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db);
@@ -144,6 +144,6 @@ public class OrderEmailServiceTests
                 It.IsAny<IReadOnlyList<EmailAttachment>?>()))
             .ThrowsAsync(new Exception("brevo down"));
 
-        await svc.SendOrderReservedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id);
     }
 }
