@@ -77,7 +77,7 @@ namespace garge_api
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
             builder.Services.AddHttpClient("webpush");
-            builder.Services.AddScoped<IWebPushService, WebPushService>();
+            builder.Services.AddSingleton<IWebPushService, WebPushService>();
             builder.Services.AddHostedService<SensorOfflineCheckService>();
             builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddEndpointsApiExplorer();

@@ -2,6 +2,7 @@ using garge_api.Models;
 using garge_api.Models.Push;
 using garge_api.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Moq.Protected;
@@ -21,6 +22,19 @@ public class WebPushServiceTests : ControllerTestBase
                 ["Vapid:Subject"] = "https://garge.no"
             })
             .Build();
+
+    private static IServiceScopeFactory MakeScopeFactory(ApplicationDbContext db)
+    {
+        var serviceProvider = new Mock<IServiceProvider>();
+        serviceProvider.Setup(sp => sp.GetService(typeof(ApplicationDbContext))).Returns(db);
+
+        var scope = new Mock<IServiceScope>();
+        scope.SetupGet(s => s.ServiceProvider).Returns(serviceProvider.Object);
+
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+        return scopeFactory.Object;
+    }
 
     private static Mock<IHttpClientFactory> MakeFactory(HttpStatusCode responseCode = HttpStatusCode.Created)
     {
@@ -53,11 +67,37 @@ public class WebPushServiceTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task SendAsync_OpensFreshScopePerCall()
+    {
+        var db = CreateDbContext();
+        var (publicKey, privateKey) = GenerateVapidKeyPair();
+
+        var serviceProvider = new Mock<IServiceProvider>();
+        serviceProvider.Setup(sp => sp.GetService(typeof(ApplicationDbContext))).Returns(db);
+
+        var scope = new Mock<IServiceScope>();
+        scope.SetupGet(s => s.ServiceProvider).Returns(serviceProvider.Object);
+
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+
+        var factory = MakeFactory(HttpStatusCode.Created);
+        var svc = new WebPushService(scopeFactory.Object, factory.Object,
+            MakeConfig(publicKey, privateKey),
+            NullLogger<WebPushService>.Instance);
+
+        await svc.SendAsync("u-1", "title", "body", TestContext.Current.CancellationToken);
+        await svc.SendAsync("u-2", "title", "body", TestContext.Current.CancellationToken);
+
+        scopeFactory.Verify(f => f.CreateScope(), Times.Exactly(2));
+    }
+
+    [Fact]
     public async Task SendAsync_VapidKeysNotConfigured_SkipsWithoutError()
     {
         var db = CreateDbContext();
         var factory = MakeFactory();
-        var svc = new WebPushService(db, factory.Object, MakeConfig(), NullLogger<WebPushService>.Instance);
+        var svc = new WebPushService(MakeScopeFactory(db), factory.Object, MakeConfig(), NullLogger<WebPushService>.Instance);
 
         // Should not throw, and should not attempt any HTTP call
         await svc.SendAsync("u1", "title", "body", TestContext.Current.CancellationToken);
@@ -70,7 +110,7 @@ public class WebPushServiceTests : ControllerTestBase
     {
         var db = CreateDbContext();
         var factory = MakeFactory();
-        var svc = new WebPushService(db, factory.Object,
+        var svc = new WebPushService(MakeScopeFactory(db), factory.Object,
             MakeConfig("fake-pub-key", "fake-priv-key"),
             NullLogger<WebPushService>.Instance);
 
@@ -97,7 +137,7 @@ public class WebPushServiceTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var factory = MakeFactoryThrowing(HttpStatusCode.Gone);
-        var svc = new WebPushService(db, factory.Object,
+        var svc = new WebPushService(MakeScopeFactory(db), factory.Object,
             MakeConfig(publicKey, privateKey),
             NullLogger<WebPushService>.Instance);
 
@@ -122,7 +162,7 @@ public class WebPushServiceTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var factory = MakeFactoryThrowing(HttpStatusCode.NotFound);
-        var svc = new WebPushService(db, factory.Object,
+        var svc = new WebPushService(MakeScopeFactory(db), factory.Object,
             MakeConfig(publicKey, privateKey),
             NullLogger<WebPushService>.Instance);
 
