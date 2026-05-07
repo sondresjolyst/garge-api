@@ -237,9 +237,9 @@ namespace garge_api.Controllers
         [HttpGet("/api/admin/stats")]
         [SwaggerOperation(Summary = "Gets aggregate platform stats.")]
         [SwaggerResponse(200, "Stats retrieved successfully.", typeof(AdminStatsDto))]
-        public async Task<IActionResult> GetStats()
+        public async Task<IActionResult> GetStats([FromQuery] bool test = false)
         {
-            _logger.LogInformation("GetStats called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GetStats called by {@LogData}", new { User = User.Identity?.Name, Test = test });
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -252,31 +252,34 @@ namespace garge_api.Controllers
             var totalSwitches = await _context.Switches.CountAsync();
             var activeAutomations = await _context.AutomationRules.CountAsync(r => r.IsEnabled);
 
+            var orderQuery = _context.Orders.Where(o => o.IsTest == test);
+            var subQuery = _context.Subscriptions.Where(s => s.IsTest == test);
+
             var orders = new AdminOrderStatsDto
             {
-                Today = await _context.Orders.CountAsync(o => o.CreatedAt >= today),
-                ThisWeek = await _context.Orders.CountAsync(o => o.CreatedAt >= weekStart),
-                ThisMonth = await _context.Orders.CountAsync(o => o.CreatedAt >= monthStart),
-                PendingCapture = await _context.Orders.CountAsync(o => o.Status == OrderStatus.Reserved),
-                FailedOrCancelled = await _context.Orders.CountAsync(o =>
+                Today = await orderQuery.CountAsync(o => o.CreatedAt >= today),
+                ThisWeek = await orderQuery.CountAsync(o => o.CreatedAt >= weekStart),
+                ThisMonth = await orderQuery.CountAsync(o => o.CreatedAt >= monthStart),
+                PendingCapture = await orderQuery.CountAsync(o => o.Status == OrderStatus.Reserved),
+                FailedOrCancelled = await orderQuery.CountAsync(o =>
                     o.Status == OrderStatus.Failed || o.Status == OrderStatus.Cancelled),
-                TotalRevenueInOre = await _context.Orders
+                TotalRevenueInOre = await orderQuery
                     .Where(o => o.Status == OrderStatus.Paid)
                     .SumAsync(o => (long)o.TotalInOre),
-                MonthRevenueInOre = await _context.Orders
+                MonthRevenueInOre = await orderQuery
                     .Where(o => o.Status == OrderStatus.Paid && o.CreatedAt >= monthStart)
                     .SumAsync(o => (long)o.TotalInOre),
             };
 
             var subscriptions = new AdminSubscriptionStatsDto
             {
-                Active = await _context.Subscriptions.CountAsync(s => s.Status == SubscriptionStatus.Active),
-                PendingConfirm = await _context.Subscriptions.CountAsync(s => s.Status == SubscriptionStatus.Pending),
-                StoppedThisMonth = await _context.Subscriptions.CountAsync(s =>
+                Active = await subQuery.CountAsync(s => s.Status == SubscriptionStatus.Active),
+                PendingConfirm = await subQuery.CountAsync(s => s.Status == SubscriptionStatus.Pending),
+                StoppedThisMonth = await subQuery.CountAsync(s =>
                     s.Status == SubscriptionStatus.Stopped && s.UpdatedAt >= monthStart),
             };
 
-            var activeWithProduct = await _context.Subscriptions
+            var activeWithProduct = await subQuery
                 .Where(s => s.Status == SubscriptionStatus.Active)
                 .Include(s => s.Product)
                 .Where(s => s.Product != null)
