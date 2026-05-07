@@ -14,6 +14,12 @@ using garge_api.Models.Admin;
 using Serilog;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
+using garge_api.Authorization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Caching.Memory;
+using System.Security.Claims;
 
 namespace garge_api
 {
@@ -92,12 +98,51 @@ namespace garge_api
                     ValidAudience = jwtIssuer,
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
                 };
+                options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+                {
+                    OnTokenValidated = async ctx =>
+                    {
+                        var userId = ctx.Principal?.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+                        if (string.IsNullOrEmpty(userId))
+                        {
+                            ctx.Fail("Missing user id claim.");
+                            return;
+                        }
+
+                        var cache = ctx.HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+                        var cacheKey = $"user_exists:{userId}";
+                        if (cache.TryGetValue(cacheKey, out bool exists))
+                        {
+                            if (!exists) ctx.Fail("User no longer exists.");
+                            return;
+                        }
+
+                        var db = ctx.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                        exists = await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId);
+                        cache.Set(cacheKey, exists, TimeSpan.FromSeconds(60));
+                        if (!exists) ctx.Fail("User no longer exists.");
+                    }
+                };
             });
 
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+                options.AddPolicy("ActiveSubscription", policy =>
+                    policy.AddRequirements(new ActiveSubscriptionRequirement()));
             });
+            builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
+            builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
+            builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
+            builder.Services.AddDataProtection()
+                .PersistKeysToDbContext<ApplicationDbContext>()
+                .SetApplicationName("garge-api");
+            builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
+            builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
+            builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddHttpClient<IVippsService, VippsService>();
+            builder.Services.AddHostedService<VippsWebhookRegistrationService>();
+            builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")
@@ -195,6 +240,15 @@ namespace garge_api
                 }
             }
 
+            var fwd = new ForwardedHeadersOptions
+            {
+                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+                ForwardLimit = 2
+            };
+            fwd.KnownNetworks.Clear();
+            fwd.KnownProxies.Clear();
+            app.UseForwardedHeaders(fwd);
+
             app.UseResponseCompression();
             app.UseSwagger();
             app.UseSwaggerUI(c =>
@@ -202,7 +256,6 @@ namespace garge_api
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Garge API V1");
             });
 
-            app.UseStaticFiles();
             app.UseRouting();
             app.UseMiddleware<RequestLoggingMiddleware>();
             app.UseCors("AllowAllOrigins");

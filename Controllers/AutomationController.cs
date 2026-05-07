@@ -14,6 +14,7 @@ namespace garge_api.Controllers
     [Route("api/automation")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class AutomationController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

@@ -34,7 +34,7 @@ public class AdminControllerTests : ControllerTestBase
                 It.IsAny<UpdateAppSettingsDto>(), It.IsAny<AppSettings>()))
             .Returns<UpdateAppSettingsDto, AppSettings>((src, dst) =>
             {
-                dst.CookieBannerEnabled = src.CookieBannerEnabled;
+                if (src.CookieBannerEnabled.HasValue) dst.CookieBannerEnabled = src.CookieBannerEnabled.Value;
                 return dst;
             });
 
@@ -102,5 +102,44 @@ public class AdminControllerTests : ControllerTestBase
         var settings = await db.AppSettings.FindAsync([1], TestContext.Current.CancellationToken);
         Assert.False(settings!.CookieBannerEnabled);
         Assert.Equal(1, await db.AppSettings.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_PartialUpdate_DoesNotWipeOtherFields()
+    {
+        var db = CreateDbContext();
+        db.AppSettings.Add(new AppSettings
+        {
+            Id = 1,
+            CookieBannerEnabled = true,
+            CompanyName = "Garge AS",
+            CompanyOrgNumber = "934 531 035",
+            CompanyEmail = "hello@garge.no",
+            VippsShopWebhookSecret = "must-not-disappear"
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        MockMapper.Setup(m => m.Map<UpdateAppSettingsDto, AppSettings>(
+                It.IsAny<UpdateAppSettingsDto>(), It.IsAny<AppSettings>()))
+            .Returns<UpdateAppSettingsDto, AppSettings>((src, dst) =>
+            {
+                if (src.CookieBannerEnabled.HasValue) dst.CookieBannerEnabled = src.CookieBannerEnabled.Value;
+                if (src.VatEnabled.HasValue) dst.VatEnabled = src.VatEnabled.Value;
+                if (src.VippsTestMode.HasValue) dst.VippsTestMode = src.VippsTestMode.Value;
+                if (src.CompanyName != null) dst.CompanyName = src.CompanyName;
+                if (src.CompanyOrgNumber != null) dst.CompanyOrgNumber = src.CompanyOrgNumber;
+                if (src.CompanyEmail != null) dst.CompanyEmail = src.CompanyEmail;
+                return dst;
+            });
+
+        await CreateAdminController(db).UpdateAppSettings(
+            new UpdateAppSettingsDto { CookieBannerEnabled = false });
+
+        var settings = await db.AppSettings.FindAsync([1], TestContext.Current.CancellationToken);
+        Assert.False(settings!.CookieBannerEnabled);
+        Assert.Equal("Garge AS", settings.CompanyName);
+        Assert.Equal("934 531 035", settings.CompanyOrgNumber);
+        Assert.Equal("hello@garge.no", settings.CompanyEmail);
+        Assert.Equal("must-not-disappear", settings.VippsShopWebhookSecret);
     }
 }

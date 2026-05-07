@@ -3,12 +3,16 @@ using garge_api.Dtos.Admin;
 using garge_api.Dtos.Auth;
 using garge_api.Dtos.Electricity;
 using garge_api.Dtos.Sensor;
+using garge_api.Dtos.Shop;
+using garge_api.Dtos.Subscription;
 using garge_api.Dtos.Switch;
 using garge_api.Dtos.User;
 using garge_api.Dtos.Webhook;
 using garge_api.Models.Admin;
 using garge_api.Models.Electricity;
 using garge_api.Models.Sensor;
+using garge_api.Models.Shop;
+using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
 using Microsoft.AspNetCore.Identity;
@@ -22,7 +26,9 @@ public class MappingProfile : Profile
         CreateMap<RolePermission, RolePermissionDto>().ReverseMap();
         CreateMap<User, UserDto>();
         CreateMap<AppSettings, AppSettingsDto>();
-        CreateMap<UpdateAppSettingsDto, AppSettings>();
+        CreateMap<AppSettings, PublicSettingsDto>();
+        CreateMap<UpdateAppSettingsDto, AppSettings>()
+            .ForAllMembers(opt => opt.Condition((_, _, srcMember) => srcMember != null));
 
         // Electricity mappings
         CreateMap<PriceResponse, PriceResponseDto>();
@@ -57,5 +63,40 @@ public class MappingProfile : Profile
         CreateMap<WebhookSubscription, WebhookSubscriptionDto>().ReverseMap();
         CreateMap<CreateWebhookSubscriptionDto, WebhookSubscription>();
 
+        // Subscription plan mappings
+        CreateMap<Product, ProductResponseDto>()
+            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Interval.ToString()))
+            .ForMember(d => d.Type, o => o.MapFrom(s => s.Type.ToString()));
+        CreateMap<CreateProductDto, Product>();
+        CreateMap<UpdateProductDto, Product>();
+
+        CreateMap<garge_api.Models.Subscription.Subscription, SubscriptionResponseDto>()
+            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
+            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Product != null ? s.Product.Interval.ToString() : string.Empty))
+            .ForMember(d => d.ProductName, o => o.MapFrom(s => s.Product != null ? s.Product.Name : string.Empty))
+            .ForMember(d => d.ProductType, o => o.MapFrom(s => s.Product != null ? s.Product.Type.ToString() : string.Empty))
+            .ForMember(d => d.PriceInOre, o => o.MapFrom(s => s.Product != null ? s.Product.PriceInOre : 0));
+
+        // Shop mappings
+        CreateMap<ShopItem, ShopItemResponseDto>();
+        CreateMap<CreateShopItemDto, ShopItem>();
+        CreateMap<UpdateShopItemDto, ShopItem>();
+
+        CreateMap<Order, OrderResponseDto>()
+            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
+            .ForMember(d => d.Items, o => o.MapFrom(s => s.OrderItems))
+            .ForMember(d => d.HasInvoice, o => o.MapFrom(s => s.Invoice != null));
+
+        CreateMap<OrderItem, OrderItemResponseDto>()
+            .ForMember(d => d.ShopItemName, o => o.MapFrom(s => s.ShopItem != null ? s.ShopItem.Name : string.Empty));
+
+        CreateMap<Invoice, InvoiceResponseDto>();
+
+        CreateMap<Order, AdminOrderResponseDto>()
+            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
+            .ForMember(d => d.Items, o => o.MapFrom(s => s.OrderItems))
+            .ForMember(d => d.HasInvoice, o => o.MapFrom(s => s.Invoice != null))
+            .ForMember(d => d.UserEmail, o => o.MapFrom(s => s.User != null ? s.User.Email ?? string.Empty : string.Empty))
+            .ForMember(d => d.UserName, o => o.MapFrom(s => s.User != null ? $"{s.User.FirstName} {s.User.LastName}" : string.Empty));
     }
 }
