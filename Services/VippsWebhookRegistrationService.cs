@@ -1,5 +1,6 @@
 using garge_api.Constants;
 using garge_api.Models;
+using garge_api.Models.Admin;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -30,14 +31,21 @@ namespace garge_api.Services
             var settingsCache = scope.ServiceProvider.GetRequiredService<IAppSettingsCache>();
 
             var settings = await db.AppSettings.FindAsync([1], cancellationToken);
-            if (settings == null) return;
+            if (settings == null)
+            {
+                _logger.LogInformation("AppSettings row missing — seeding default row");
+                settings = new AppSettings { Id = 1 };
+                db.AppSettings.Add(settings);
+                await db.SaveChangesAsync(cancellationToken);
+            }
 
             var changed = false;
+            var baseUrl = _appOpts.ApiBaseUrl.TrimEnd('/');
 
             if (string.IsNullOrEmpty(settings.VippsShopWebhookId))
             {
                 if (await TryRegisterAsync(vipps, protector,
-                        $"{_appOpts.ApiBaseUrl}/api/shop/webhook",
+                        $"{baseUrl}/api/shop/webhook",
                         VippsEvents.ShopEvents,
                         (id, secret) =>
                         {
@@ -51,7 +59,7 @@ namespace garge_api.Services
             if (string.IsNullOrEmpty(settings.VippsSubscriptionWebhookId))
             {
                 if (await TryRegisterAsync(vipps, protector,
-                        $"{_appOpts.ApiBaseUrl}/api/subscriptions/webhook",
+                        $"{baseUrl}/api/subscriptions/webhook",
                         VippsEvents.SubscriptionEvents,
                         (id, secret) =>
                         {
