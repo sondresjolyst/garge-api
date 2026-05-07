@@ -68,12 +68,17 @@ namespace garge_api.Services
 
         private static async Task<byte[]> RenderPdfAsync(string html)
         {
-            var browserFetcher = new BrowserFetcher();
-            await browserFetcher.DownloadAsync();
+            var execPath = Environment.GetEnvironmentVariable("PUPPETEER_EXECUTABLE_PATH");
+            if (string.IsNullOrEmpty(execPath))
+            {
+                var browserFetcher = new BrowserFetcher();
+                await browserFetcher.DownloadAsync();
+            }
 
             await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
                 Headless = true,
+                ExecutablePath = execPath,
                 Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
             });
             await using var page = await browser.NewPageAsync();
