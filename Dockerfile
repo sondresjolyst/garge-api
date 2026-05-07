@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgtk-3-0 \
         libxss1 \
         libgbm1 \
-        libasound2 \
+        libasound2t64 \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
