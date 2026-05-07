@@ -465,11 +465,11 @@ namespace garge_api.Controllers
             }
             else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
             {
-                try { await _orderEmail.SendOrderReservedAsync(order.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Reserved email failed for order {OrderId}", order.Id); }
+                try { await _orderEmail.SendOrderConfirmedAsync(order.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Order confirmation email failed for order {OrderId}", order.Id); }
 
-                _ = SafePushAsync(order.UserId, "Order reserved",
-                    $"Order #{order.Id} is reserved. We'll capture payment when it ships.");
+                _ = SafePushAsync(order.UserId, "Order confirmed",
+                    $"Order #{order.Id} confirmed. We'll get it ready to ship.");
             }
 
             _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", order.Id, payload.Name);

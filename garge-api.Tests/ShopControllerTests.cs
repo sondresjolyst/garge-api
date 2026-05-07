@@ -120,7 +120,7 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Webhook_AuthorizedEvent_SendsReservedEmail()
+    public async Task Webhook_AuthorizedEvent_SendsConfirmationEmail()
     {
         using var db = CreateDbContext();
         var order = new Order
@@ -132,7 +132,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync();
 
         var orderEmail = new Mock<IOrderEmailService>();
-        orderEmail.Setup(o => o.SendOrderReservedAsync(order.Id))
+        orderEmail.Setup(o => o.SendOrderConfirmedAsync(order.Id))
             .Returns(Task.CompletedTask).Verifiable();
 
         var payload = new
@@ -151,11 +151,11 @@ public class ShopControllerTests : ControllerTestBase
 
         await ctrl.Webhook();
 
-        orderEmail.Verify(o => o.SendOrderReservedAsync(order.Id), Times.Once);
+        orderEmail.Verify(o => o.SendOrderConfirmedAsync(order.Id), Times.Once);
     }
 
     [Fact]
-    public async Task Webhook_CapturedEvent_DoesNotSendReservedEmail()
+    public async Task Webhook_CapturedEvent_DoesNotSendConfirmationEmail()
     {
         using var db = CreateDbContext();
         var order = new Order
@@ -184,7 +184,7 @@ public class ShopControllerTests : ControllerTestBase
 
         await ctrl.Webhook();
 
-        orderEmail.Verify(o => o.SendOrderReservedAsync(It.IsAny<int>()), Times.Never);
+        orderEmail.Verify(o => o.SendOrderConfirmedAsync(It.IsAny<int>()), Times.Never);
     }
 
     [Fact]

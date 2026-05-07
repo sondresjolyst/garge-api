@@ -24,7 +24,7 @@ namespace garge_api.Services
             _logger = logger;
         }
 
-        public async Task SendOrderReservedAsync(int orderId)
+        public async Task SendOrderConfirmedAsync(int orderId)
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -36,7 +36,7 @@ namespace garge_api.Services
 
             if (order?.User?.Email == null)
             {
-                _logger.LogWarning("Order {OrderId} missing user/email — reserved email skipped", orderId);
+                _logger.LogWarning("Order {OrderId} missing user/email — confirmation email skipped", orderId);
                 return;
             }
 
@@ -47,13 +47,13 @@ namespace garge_api.Services
             {
                 await _emailService.SendEmailAsync(
                     order.User.Email,
-                    $"Order #{order.Id} reserved — {settings.CompanyName}",
+                    $"Order #{order.Id} confirmed — {settings.CompanyName}",
                     html);
-                _logger.LogInformation("Order reserved email sent for order {OrderId}", orderId);
+                _logger.LogInformation("Order confirmation email sent for order {OrderId}", orderId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to send reserved email for order {OrderId}", orderId);
+                _logger.LogError(ex, "Failed to send confirmation email for order {OrderId}", orderId);
             }
         }
 
@@ -83,7 +83,7 @@ namespace garge_api.Services
                 <html><body style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;font-size:14px;">
                 <div style="max-width:560px;margin:0 auto;padding:24px;">
                   <h1 style="font-size:20px;margin:0 0 8px;">Thanks for your order, {{H(order.User?.FirstName)}}!</h1>
-                  <p style="color:#555;margin:0 0 16px;">Order <strong>#{{order.Id}}</strong> is reserved with Vipps. We'll capture payment when it ships.</p>
+                  <p style="color:#555;margin:0 0 16px;">We've received order <strong>#{{order.Id}}</strong> and will get it ready to ship.</p>
                   <table style="width:100%;border-collapse:collapse;margin:16px 0;">{{lines}}
                     <tr><td style="padding:8px;font-weight:700;">Total</td><td style="padding:8px;text-align:right;font-weight:700;">NOK {{Nok(order.TotalInOre)}}</td></tr>
                   </table>
