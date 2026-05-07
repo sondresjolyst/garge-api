@@ -67,9 +67,8 @@ namespace garge_api.Dtos.Shop
         [RegularExpression(@"^(?:47)?\d{8}$", ErrorMessage = "Phone number must be 8 Norwegian digits, optionally prefixed with 47.")]
         public required string PhoneNumber { get; set; }
 
-        [Required]
         [MaxLength(500)]
-        public required string ShippingAddress { get; set; }
+        public string? ShippingAddress { get; set; }
     }
 
     public class OrderItemResponseDto

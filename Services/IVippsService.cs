@@ -39,6 +39,24 @@ namespace garge_api.Services
     {
         public string Reference { get; set; } = string.Empty;
         public string State { get; set; } = string.Empty;
+        public string? ProfileSub { get; set; }
+    }
+
+    public class VippsUserInfo
+    {
+        public string? Name { get; set; }
+        public string? Email { get; set; }
+        public string? PhoneNumber { get; set; }
+        public VippsAddress? Address { get; set; }
+    }
+
+    public class VippsAddress
+    {
+        public string? StreetAddress { get; set; }
+        public string? PostalCode { get; set; }
+        public string? Region { get; set; }
+        public string? Country { get; set; }
+        public string? Formatted { get; set; }
     }
 
     public class VippsOrderLine
@@ -66,6 +84,7 @@ namespace garge_api.Services
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey);
         Task<VippsPaymentResponse> GetPaymentAsync(string reference);
+        Task<VippsUserInfo?> GetUserInfoAsync(string sub);
         Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey);
         Task CancelPaymentAsync(string reference, string idempotencyKey);
 

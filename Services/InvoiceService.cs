@@ -1,10 +1,10 @@
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
-using System.Globalization;
 using System.Text;
 using System.Web;
 
@@ -52,10 +52,19 @@ namespace garge_api.Services
             {
                 var buyerEmail = order.User?.Email;
                 if (!string.IsNullOrEmpty(buyerEmail))
+                {
+                    var attachment = new EmailAttachment
+                    {
+                        FileName = $"invoice-{invoice.Id:D4}.pdf",
+                        Content = invoice.PdfData,
+                        ContentType = "application/pdf"
+                    };
                     await _emailService.SendEmailAsync(
                         buyerEmail,
                         $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html);
+                        html,
+                        [attachment]);
+                }
             }
             catch (Exception ex)
             {
@@ -68,12 +77,17 @@ namespace garge_api.Services
 
         private static async Task<byte[]> RenderPdfAsync(string html)
         {
-            var browserFetcher = new BrowserFetcher();
-            await browserFetcher.DownloadAsync();
+            var execPath = Environment.GetEnvironmentVariable("PUPPETEER_EXECUTABLE_PATH");
+            if (string.IsNullOrEmpty(execPath))
+            {
+                var browserFetcher = new BrowserFetcher();
+                await browserFetcher.DownloadAsync();
+            }
 
             await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
                 Headless = true,
+                ExecutablePath = execPath,
                 Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
             });
             await using var page = await browser.NewPageAsync();
@@ -92,7 +106,7 @@ namespace garge_api.Services
 
         private static string BuildInvoiceHtml(Order order, AppSettings s, int invoiceId, DateTime issuedAt)
         {
-            static string Nok(int ore) => (ore / 100.0).ToString("N2", CultureInfo.InvariantCulture);
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
             var orgLine = s.VatEnabled ? $"{s.CompanyOrgNumber} MVA" : s.CompanyOrgNumber;

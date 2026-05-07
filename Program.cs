@@ -140,6 +140,7 @@ namespace garge_api
             builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddHttpClient<IVippsService, VippsService>();
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
             builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();

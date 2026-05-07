@@ -10,6 +10,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace garge_api.Services
@@ -235,7 +236,8 @@ namespace garge_api.Services
                         };
                     }),
                     bottomLine = new { currency = "NOK", receiptNumber = reference }
-                }
+                },
+                profile = new { scope = "name address email phoneNumber" }
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/epayment/v1/payments");
@@ -257,7 +259,79 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-payment");
-            return JsonSerializer.Deserialize<VippsPaymentResponse>(json, _jsonOpts)!;
+            var dto = JsonSerializer.Deserialize<PaymentApiDto>(json, _jsonOpts) ?? new PaymentApiDto();
+            return new VippsPaymentResponse
+            {
+                Reference = dto.Reference ?? string.Empty,
+                State = dto.State ?? string.Empty,
+                ProfileSub = dto.Profile?.Sub
+            };
+        }
+
+        public async Task<VippsUserInfo?> GetUserInfoAsync(string sub)
+        {
+            if (string.IsNullOrEmpty(sub)) return null;
+
+            var e = await GetEffectiveAsync();
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"{e.BaseUrl}/vipps-userinfo-api/userinfo/{sub}");
+            AddCommonHeaders(request, e);
+
+            var response = await _http.SendAsync(request);
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-userinfo");
+            var dto = JsonSerializer.Deserialize<UserInfoApiDto>(json, _jsonOpts);
+            if (dto == null) return null;
+
+            return new VippsUserInfo
+            {
+                Name = dto.Name,
+                Email = dto.Email,
+                PhoneNumber = dto.PhoneNumber,
+                Address = dto.Address == null ? null : new VippsAddress
+                {
+                    StreetAddress = dto.Address.StreetAddress,
+                    PostalCode = dto.Address.PostalCode,
+                    Region = dto.Address.Region,
+                    Country = dto.Address.Country,
+                    Formatted = dto.Address.Formatted
+                }
+            };
+        }
+
+        private sealed class PaymentApiDto
+        {
+            public string? Reference { get; set; }
+            public string? State { get; set; }
+            public PaymentProfileApiDto? Profile { get; set; }
+        }
+
+        private sealed class PaymentProfileApiDto
+        {
+            public string? Sub { get; set; }
+        }
+
+        private sealed class UserInfoApiDto
+        {
+            public string? Name { get; set; }
+            public string? Email { get; set; }
+
+            [JsonPropertyName("phone_number")]
+            public string? PhoneNumber { get; set; }
+
+            public AddressApiDto? Address { get; set; }
+        }
+
+        private sealed class AddressApiDto
+        {
+            [JsonPropertyName("street_address")]
+            public string? StreetAddress { get; set; }
+
+            [JsonPropertyName("postal_code")]
+            public string? PostalCode { get; set; }
+
+            public string? Region { get; set; }
+            public string? Country { get; set; }
+            public string? Formatted { get; set; }
         }
 
         public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey)
