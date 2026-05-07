@@ -223,8 +223,11 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Webhook_CapturedEvent_ExistingInvoice_DoesNotGenerate()
+    public async Task Webhook_CapturedEvent_ExistingInvoice_DelegatesToIdempotentService()
     {
+        // Webhook now unconditionally calls GenerateAndStoreAsync when an order is
+        // already Paid; the service short-circuits when a complete invoice exists.
+        // Verify the controller delegates rather than duplicating the check.
         using var db = CreateDbContext();
         var order = new Order
         {
@@ -237,6 +240,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync();
 
         var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, false)).ReturnsAsync(1);
 
         var payload = new
         {
@@ -254,7 +258,7 @@ public class ShopControllerTests : ControllerTestBase
 
         await ctrl.Webhook();
 
-        invoice.Verify(i => i.GenerateAndStoreAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Never);
+        invoice.Verify(i => i.GenerateAndStoreAsync(order.Id, false), Times.Once);
     }
 
     [Fact]

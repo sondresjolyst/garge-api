@@ -456,13 +456,12 @@ namespace garge_api.Controllers
             }
             else if (payload.Name == "CAPTURED" && order.Status == OrderStatus.Paid)
             {
-                var hasInvoice = await _context.Invoices.AnyAsync(i =>
-                    i.OrderId == order.Id && i.PdfData.Length > 0);
-                if (!hasInvoice)
-                {
-                    _logger.LogInformation("Order {OrderId} already Paid but no invoice — generating from webhook", order.Id);
-                    await TryGenerateInvoiceAsync(order.Id, "webhook recovery");
-                }
+                // Order already Paid (admin captured first, or this is a webhook
+                // redelivery). Service is idempotent: short-circuits on a complete
+                // existing invoice, otherwise renders. Empty placeholder rows from
+                // a prior failed render are cleaned up inside the service.
+                _logger.LogInformation("Webhook recovery check for order {OrderId}", order.Id);
+                await TryGenerateInvoiceAsync(order.Id, "webhook recovery");
             }
             else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
             {
