@@ -6,8 +6,14 @@ WORKDIR /app
 EXPOSE 7297
 
 USER root
+# The aspnet:10.0 base image is Ubuntu 24.04, where the `chromium` apt package is
+# only a transitional snap stub that does not work in a container. Install Google
+# Chrome stable from Google's apt repo instead — it ships a real binary at a
+# stable path that PuppeteerSharp can launch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        chromium \
+        wget \
+        gnupg \
+        ca-certificates \
         fonts-liberation \
         fonts-noto-color-emoji \
         libnss3 \
@@ -16,10 +22,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxss1 \
         libgbm1 \
         libasound2t64 \
-        ca-certificates \
+    && wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+        | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # This stage is used to build the service project
