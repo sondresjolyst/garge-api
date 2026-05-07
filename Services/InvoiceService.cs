@@ -3,8 +3,6 @@ using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
-using PuppeteerSharp;
-using PuppeteerSharp.Media;
 using System.Text;
 using System.Web;
 
@@ -14,15 +12,18 @@ namespace garge_api.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IEmailService _emailService;
+        private readonly IPdfRenderer _pdfRenderer;
         private readonly ILogger<InvoiceService> _logger;
 
         public InvoiceService(
             IServiceScopeFactory scopeFactory,
             IEmailService emailService,
+            IPdfRenderer pdfRenderer,
             ILogger<InvoiceService> logger)
         {
             _scopeFactory = scopeFactory;
             _emailService = emailService;
+            _pdfRenderer = pdfRenderer;
             _logger = logger;
         }
 
@@ -40,12 +41,13 @@ namespace garge_api.Services
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
 
             var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.OrderId == orderId);
-            if (invoice != null && !force)
+            if (invoice != null && invoice.PdfData.Length > 0 && !force)
             {
                 _logger.LogInformation("Invoice {InvoiceId} already exists for order {OrderId} — skip", invoice.Id, orderId);
                 return invoice.Id;
             }
 
+            var wasNewRow = invoice == null;
             if (invoice == null)
             {
                 invoice = new Invoice { OrderId = orderId, IssuedAt = DateTime.UtcNow, PdfData = [] };
@@ -58,8 +60,23 @@ namespace garge_api.Services
             }
 
             var html = BuildInvoiceHtml(order, settings, invoice.Id, invoice.IssuedAt);
-            invoice.PdfData = await RenderPdfAsync(html);
-            await db.SaveChangesAsync();
+            try
+            {
+                invoice.PdfData = await _pdfRenderer.RenderAsync(html);
+                await db.SaveChangesAsync();
+            }
+            catch
+            {
+                // Keep DB clean: drop the row we just added so retry isn't blocked by an
+                // empty-PDF placeholder. For force-regenerate over an existing complete
+                // invoice we leave the prior row + bytes alone.
+                if (wasNewRow || invoice.PdfData.Length == 0)
+                {
+                    db.Invoices.Remove(invoice);
+                    await db.SaveChangesAsync();
+                }
+                throw;
+            }
 
             try
             {
@@ -86,35 +103,6 @@ namespace garge_api.Services
 
             _logger.LogInformation("Invoice {InvoiceId} generated for order {OrderId}", invoice.Id, orderId);
             return invoice.Id;
-        }
-
-        private static async Task<byte[]> RenderPdfAsync(string html)
-        {
-            var execPath = Environment.GetEnvironmentVariable("PUPPETEER_EXECUTABLE_PATH");
-            if (string.IsNullOrEmpty(execPath))
-            {
-                var browserFetcher = new BrowserFetcher();
-                await browserFetcher.DownloadAsync();
-            }
-
-            await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
-            {
-                Headless = true,
-                ExecutablePath = execPath,
-                Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-            });
-            await using var page = await browser.NewPageAsync();
-            await page.SetContentAsync(html, new NavigationOptions
-            {
-                WaitUntil = [WaitUntilNavigation.Networkidle0]
-            });
-
-            return await page.PdfDataAsync(new PdfOptions
-            {
-                Format = PaperFormat.A4,
-                PrintBackground = true,
-                MarginOptions = new MarginOptions { Top = "0", Bottom = "15mm", Left = "0", Right = "0" }
-            });
         }
 
         private static string BuildInvoiceHtml(Order order, AppSettings s, int invoiceId, DateTime issuedAt)
