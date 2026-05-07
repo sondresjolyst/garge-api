@@ -1,8 +1,8 @@
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
-using System.Globalization;
 using System.Text;
 using System.Web;
 
@@ -59,7 +59,7 @@ namespace garge_api.Services
 
         private static string BuildHtml(Order order, AppSettings s)
         {
-            static string Nok(int ore) => (ore / 100.0).ToString("N2", CultureInfo.InvariantCulture);
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
             var lines = new StringBuilder();

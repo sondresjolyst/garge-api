@@ -1,10 +1,10 @@
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
-using System.Globalization;
 using System.Text;
 using System.Web;
 
@@ -106,7 +106,7 @@ namespace garge_api.Services
 
         private static string BuildInvoiceHtml(Order order, AppSettings s, int invoiceId, DateTime issuedAt)
         {
-            static string Nok(int ore) => (ore / 100.0).ToString("N2", CultureInfo.InvariantCulture);
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
             var orgLine = s.VatEnabled ? $"{s.CompanyOrgNumber} MVA" : s.CompanyOrgNumber;
