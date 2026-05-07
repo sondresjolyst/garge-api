@@ -388,6 +388,7 @@ namespace garge_api.Controllers
             {
                 case "AUTHORIZED":
                     order.Status = OrderStatus.Reserved;
+                    await TryPopulateShippingFromVippsAsync(order);
                     break;
                 case "CAPTURED":
                     order.Status = OrderStatus.Paid;
@@ -444,6 +445,39 @@ namespace garge_api.Controllers
         {
             try { await _push.SendAsync(userId, title, body); }
             catch (Exception ex) { _logger.LogWarning(ex, "Push send failed for user {UserId}", userId); }
+        }
+
+        private async Task TryPopulateShippingFromVippsAsync(Order order)
+        {
+            if (string.IsNullOrEmpty(order.VippsOrderId)) return;
+            try
+            {
+                var payment = await _vipps.GetPaymentAsync(order.VippsOrderId);
+                if (string.IsNullOrEmpty(payment.ProfileSub)) return;
+
+                var info = await _vipps.GetUserInfoAsync(payment.ProfileSub);
+                if (info?.Address == null) return;
+
+                var formatted = !string.IsNullOrEmpty(info.Address.Formatted)
+                    ? info.Address.Formatted
+                    : string.Join(", ", new[]
+                    {
+                        info.Address.StreetAddress,
+                        info.Address.PostalCode,
+                        info.Address.Region,
+                        info.Address.Country
+                    }.Where(s => !string.IsNullOrEmpty(s)));
+
+                if (!string.IsNullOrEmpty(formatted))
+                {
+                    if (formatted.Length > 500) formatted = formatted[..500];
+                    order.ShippingAddress = formatted;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch Vipps user info for order {OrderId}", order.Id);
+            }
         }
 
         private async Task RestoreStockAsync(Order order)

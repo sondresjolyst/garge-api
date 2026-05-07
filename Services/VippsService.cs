@@ -235,7 +235,8 @@ namespace garge_api.Services
                         };
                     }),
                     bottomLine = new { currency = "NOK", receiptNumber = reference }
-                }
+                },
+                profile = new { scope = "name address email phoneNumber" }
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/epayment/v1/payments");
@@ -257,7 +258,55 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-payment");
-            return JsonSerializer.Deserialize<VippsPaymentResponse>(json, _jsonOpts)!;
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var result = new VippsPaymentResponse
+            {
+                Reference = root.TryGetProperty("reference", out var refEl) ? refEl.GetString() ?? string.Empty : string.Empty,
+                State = root.TryGetProperty("state", out var stateEl) ? stateEl.GetString() ?? string.Empty : string.Empty
+            };
+            if (root.TryGetProperty("profile", out var profileEl) &&
+                profileEl.TryGetProperty("sub", out var subEl))
+            {
+                result.ProfileSub = subEl.GetString();
+            }
+            return result;
+        }
+
+        public async Task<VippsUserInfo?> GetUserInfoAsync(string sub)
+        {
+            if (string.IsNullOrEmpty(sub)) return null;
+
+            var e = await GetEffectiveAsync();
+            var request = new HttpRequestMessage(HttpMethod.Get,
+                $"{e.BaseUrl}/vipps-userinfo-api/userinfo/{sub}");
+            AddCommonHeaders(request, e);
+
+            var response = await _http.SendAsync(request);
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-userinfo");
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var info = new VippsUserInfo
+            {
+                Name = root.TryGetProperty("name", out var n) ? n.GetString() : null,
+                Email = root.TryGetProperty("email", out var em) ? em.GetString() : null,
+                PhoneNumber = root.TryGetProperty("phone_number", out var ph) ? ph.GetString() : null
+            };
+
+            if (root.TryGetProperty("address", out var addr) && addr.ValueKind == JsonValueKind.Object)
+            {
+                info.Address = new VippsAddress
+                {
+                    StreetAddress = addr.TryGetProperty("street_address", out var sa) ? sa.GetString() : null,
+                    PostalCode = addr.TryGetProperty("postal_code", out var pc) ? pc.GetString() : null,
+                    Region = addr.TryGetProperty("region", out var rg) ? rg.GetString() : null,
+                    Country = addr.TryGetProperty("country", out var co) ? co.GetString() : null,
+                    Formatted = addr.TryGetProperty("formatted", out var fm) ? fm.GetString() : null
+                };
+            }
+
+            return info;
         }
 
         public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey)
