@@ -122,39 +122,47 @@ public class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task GenerateAndStoreAsync_OrphanEmptyRow_RetriesAndCleansUpOnFailure()
+    public async Task GenerateAndStoreAsync_ExistingEmptyRow_WithoutForce_ShortCircuits()
     {
-        var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
-        var (svc, db, _, _) = Create(pdf);
+        // Race scenario: a concurrent caller has inserted an in-progress placeholder
+        // row but hasn't filled the PDF yet. The second caller must NOT render
+        // again (would double-email). Short-circuit on any existing row.
+        var (svc, db, email, pdf) = Create();
         var order = await SeedPaidOrderAsync(db);
-        db.Invoices.Add(new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddHours(-1), PdfData = [] });
-        await db.SaveChangesAsync();
-
-        await Assert.ThrowsAsync<Exception>(() => svc.GenerateAndStoreAsync(order.Id));
-
-        // Empty orphan row was treated as not-generated, render attempted, render
-        // failed, and the still-empty row was cleaned up so the next retry isn't
-        // blocked.
-        Assert.Empty(db.Invoices);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task GenerateAndStoreAsync_OrphanEmptyRow_ThenRenderSucceeds_FillsRow()
-    {
-        var (svc, db, _, pdf) = Create();
-        var order = await SeedPaidOrderAsync(db);
-        var orphan = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddHours(-1), PdfData = [] };
-        db.Invoices.Add(orphan);
+        var inProgress = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [] };
+        db.Invoices.Add(inProgress);
         await db.SaveChangesAsync();
 
         var id = await svc.GenerateAndStoreAsync(order.Id);
 
-        Assert.Equal(orphan.Id, id);
+        Assert.Equal(inProgress.Id, id);
+        Assert.Single(db.Invoices);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Never);
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GenerateAndStoreAsync_ExistingRow_WithForce_RegeneratesAndEmails()
+    {
+        // Admin retry path: force=true must re-render and re-email, reusing the
+        // same row (and id) so the invoice number stays sequential.
+        var (svc, db, email, pdf) = Create();
+        var order = await SeedPaidOrderAsync(db);
+        var existing = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [9, 9, 9] };
+        db.Invoices.Add(existing);
+        await db.SaveChangesAsync();
+
+        var id = await svc.GenerateAndStoreAsync(order.Id, force: true);
+
+        Assert.Equal(existing.Id, id);
         var saved = await db.Invoices.SingleAsync();
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
         pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }
 
     [Fact]
