@@ -270,8 +270,7 @@ namespace garge_api.Controllers
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            try { await _invoice.GenerateAndStoreAsync(id); }
-            catch (Exception ex) { _logger.LogError(ex, "Invoice generation failed for order {OrderId}", id); }
+            await TryGenerateInvoiceAsync(id, "admin capture");
 
             _ = SafePushAsync(order.UserId, "Payment captured",
                 $"Order #{order.Id} is paid. Invoice sent to your email.");
@@ -450,8 +449,7 @@ namespace garge_api.Controllers
 
             if (prevStatus != OrderStatus.Paid && order.Status == OrderStatus.Paid)
             {
-                try { await _invoice.GenerateAndStoreAsync(order.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Invoice generation failed for order {OrderId}", order.Id); }
+                await TryGenerateInvoiceAsync(order.Id, "webhook capture");
 
                 _ = SafePushAsync(order.UserId, "Payment captured",
                     $"Order #{order.Id} is paid. Invoice on its way to your email.");
@@ -462,8 +460,7 @@ namespace garge_api.Controllers
                 if (!hasInvoice)
                 {
                     _logger.LogInformation("Order {OrderId} already Paid but no invoice — generating from webhook", order.Id);
-                    try { await _invoice.GenerateAndStoreAsync(order.Id); }
-                    catch (Exception ex) { _logger.LogError(ex, "Webhook invoice recovery failed for order {OrderId}", order.Id); }
+                    await TryGenerateInvoiceAsync(order.Id, "webhook recovery");
                 }
             }
             else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
@@ -483,6 +480,16 @@ namespace garge_api.Controllers
         {
             try { await _push.SendAsync(userId, title, body); }
             catch (Exception ex) { _logger.LogWarning(ex, "Push send failed for user {UserId}", userId); }
+        }
+
+        private async Task<int?> TryGenerateInvoiceAsync(int orderId, string context)
+        {
+            try { return await _invoice.GenerateAndStoreAsync(orderId); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invoice generation failed ({Context}) for order {OrderId}", context, orderId);
+                return null;
+            }
         }
 
         private async Task TryPopulateShippingFromVippsAsync(Order order)
