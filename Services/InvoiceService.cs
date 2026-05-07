@@ -52,10 +52,19 @@ namespace garge_api.Services
             {
                 var buyerEmail = order.User?.Email;
                 if (!string.IsNullOrEmpty(buyerEmail))
+                {
+                    var attachment = new EmailAttachment
+                    {
+                        FileName = $"invoice-{invoice.Id:D4}.pdf",
+                        Content = invoice.PdfData,
+                        ContentType = "application/pdf"
+                    };
                     await _emailService.SendEmailAsync(
                         buyerEmail,
                         $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html);
+                        html,
+                        [attachment]);
+                }
             }
             catch (Exception ex)
             {

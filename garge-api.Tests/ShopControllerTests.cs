@@ -65,6 +65,7 @@ public class ShopControllerTests : ControllerTestBase
     private ShopController CreateController(
         ApplicationDbContext db, string userId = "user-1",
         Mock<IVippsService>? vipps = null, IInvoiceService? invoice = null,
+        IOrderEmailService? orderEmail = null,
         AppSettings? settings = null)
     {
         var push = new Mock<IWebPushService>();
@@ -74,6 +75,7 @@ public class ShopControllerTests : ControllerTestBase
         var ctrl = new ShopController(
             db, (vipps ?? MockVipps()).Object,
             invoice ?? MockInvoice().Object,
+            orderEmail ?? new Mock<IOrderEmailService>().Object,
             MockSettingsCache(settings).Object,
             MockProtector().Object,
             push.Object,
@@ -115,6 +117,74 @@ public class ShopControllerTests : ControllerTestBase
         Assert.IsType<OkResult>(result);
         var updated = await db.Orders.FindAsync(order.Id);
         Assert.Equal(OrderStatus.Reserved, updated!.Status);
+    }
+
+    [Fact]
+    public async Task Webhook_AuthorizedEvent_SendsReservedEmail()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-email-1",
+            TotalInOre = 10000, Status = OrderStatus.Pending
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var orderEmail = new Mock<IOrderEmailService>();
+        orderEmail.Setup(o => o.SendOrderReservedAsync(order.Id))
+            .Returns(Task.CompletedTask).Verifiable();
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-email-1",
+            name = "AUTHORIZED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, orderEmail: orderEmail.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        await ctrl.Webhook();
+
+        orderEmail.Verify(o => o.SendOrderReservedAsync(order.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Webhook_CapturedEvent_DoesNotSendReservedEmail()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-email-2",
+            TotalInOre = 10000, Status = OrderStatus.Reserved
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var orderEmail = new Mock<IOrderEmailService>();
+
+        var payload = new
+        {
+            reference = order.VippsOrderId,
+            pspReference = "psp-email-2",
+            name = "CAPTURED",
+            amount = new { value = 10000, currency = "NOK" },
+            msn = "msn-prod"
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var ctrl = CreateController(db, orderEmail: orderEmail.Object,
+            settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        await ctrl.Webhook();
+
+        orderEmail.Verify(o => o.SendOrderReservedAsync(It.IsAny<int>()), Times.Never);
     }
 
     [Fact]

@@ -21,6 +21,7 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IVippsService _vipps;
         private readonly IInvoiceService _invoice;
+        private readonly IOrderEmailService _orderEmail;
         private readonly IAppSettingsCache _settingsCache;
         private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
@@ -33,6 +34,7 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             IVippsService vipps,
             IInvoiceService invoice,
+            IOrderEmailService orderEmail,
             IAppSettingsCache settingsCache,
             IWebhookSecretProtector protector,
             IWebPushService push,
@@ -44,6 +46,7 @@ namespace garge_api.Controllers
             _context = context;
             _vipps = vipps;
             _invoice = invoice;
+            _orderEmail = orderEmail;
             _settingsCache = settingsCache;
             _protector = protector;
             _push = push;
@@ -433,6 +436,9 @@ namespace garge_api.Controllers
             }
             else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
             {
+                try { await _orderEmail.SendOrderReservedAsync(order.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Reserved email failed for order {OrderId}", order.Id); }
+
                 _ = SafePushAsync(order.UserId, "Order reserved",
                     $"Order #{order.Id} is reserved. We'll capture payment when it ships.");
             }
