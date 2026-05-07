@@ -169,7 +169,7 @@ namespace garge_api.Services
                   body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a1a1a; background: #fff; }
 
                   .header-band {
-                    background: #0284c7;
+                    background: #182232;
                     color: #fff;
                     padding: 28px 32px 20px;
                     display: flex;
