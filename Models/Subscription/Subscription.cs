@@ -33,7 +33,7 @@ namespace garge_api.Models.Subscription
         [MaxLength(200)]
         public required string VippsAgreementId { get; set; }
 
-        [MaxLength(2000)]
+        [Column(TypeName = "text")]
         public string? VippsConfirmationUrl { get; set; }
 
         [Required]
