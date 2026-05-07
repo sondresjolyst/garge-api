@@ -1,4 +1,6 @@
 using garge_api.Models;
+using garge_api.Models.Shop;
+using garge_api.Models.Subscription;
 using garge_api.Dtos.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -239,12 +241,58 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetStats called by {@LogData}", new { User = User.Identity?.Name });
 
+            var now = DateTime.UtcNow;
+            var today = now.Date;
+            var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            // Monday-start ISO week.
+            var weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+
+            var totalUsers = await _userManager.Users.CountAsync();
+            var totalSensors = await _context.Sensors.CountAsync();
+            var totalSwitches = await _context.Switches.CountAsync();
+            var activeAutomations = await _context.AutomationRules.CountAsync(r => r.IsEnabled);
+
+            var orders = new AdminOrderStatsDto
+            {
+                Today = await _context.Orders.CountAsync(o => o.CreatedAt >= today),
+                ThisWeek = await _context.Orders.CountAsync(o => o.CreatedAt >= weekStart),
+                ThisMonth = await _context.Orders.CountAsync(o => o.CreatedAt >= monthStart),
+                PendingCapture = await _context.Orders.CountAsync(o => o.Status == OrderStatus.Reserved),
+                FailedOrCancelled = await _context.Orders.CountAsync(o =>
+                    o.Status == OrderStatus.Failed || o.Status == OrderStatus.Cancelled),
+                TotalRevenueInOre = await _context.Orders
+                    .Where(o => o.Status == OrderStatus.Paid)
+                    .SumAsync(o => (long)o.TotalInOre),
+                MonthRevenueInOre = await _context.Orders
+                    .Where(o => o.Status == OrderStatus.Paid && o.CreatedAt >= monthStart)
+                    .SumAsync(o => (long)o.TotalInOre),
+            };
+
+            var subscriptions = new AdminSubscriptionStatsDto
+            {
+                Active = await _context.Subscriptions.CountAsync(s => s.Status == SubscriptionStatus.Active),
+                PendingConfirm = await _context.Subscriptions.CountAsync(s => s.Status == SubscriptionStatus.Pending),
+                StoppedThisMonth = await _context.Subscriptions.CountAsync(s =>
+                    s.Status == SubscriptionStatus.Stopped && s.UpdatedAt >= monthStart),
+            };
+
+            var activeWithProduct = await _context.Subscriptions
+                .Where(s => s.Status == SubscriptionStatus.Active)
+                .Include(s => s.Product)
+                .Where(s => s.Product != null)
+                .Select(s => new { s.Product!.PriceInOre, s.Product.Interval })
+                .ToListAsync();
+            subscriptions.MonthlyRecurringInOre = activeWithProduct.Sum(p =>
+                p.Interval == BillingInterval.Yearly ? (long)(p.PriceInOre / 12) : (long)p.PriceInOre);
+
             var stats = new AdminStatsDto
             {
-                TotalUsers = await _userManager.Users.CountAsync(),
-                TotalSensors = await _context.Sensors.CountAsync(),
-                TotalSwitches = await _context.Switches.CountAsync(),
-                ActiveAutomations = await _context.AutomationRules.CountAsync(r => r.IsEnabled),
+                TotalUsers = totalUsers,
+                TotalSensors = totalSensors,
+                TotalSwitches = totalSwitches,
+                ActiveAutomations = activeAutomations,
+                Orders = orders,
+                Subscriptions = subscriptions,
             };
             return Ok(stats);
         }
