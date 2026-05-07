@@ -68,30 +68,45 @@ namespace garge_api.Services
                 var lineTotal = item.PriceAtPurchaseInOre * item.Quantity;
                 lines.Append($"""
                     <tr>
-                      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;">{H(item.ShopItem?.Name)} × {item.Quantity}</td>
-                      <td style="padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:right;">NOK {Nok(lineTotal)}</td>
+                      <td>{H(item.ShopItem?.Name)} × {item.Quantity}</td>
+                      <td class="r">NOK {Nok(lineTotal)}</td>
                     </tr>
                     """);
             }
 
             var shipBlock = string.IsNullOrEmpty(order.ShippingAddress)
                 ? string.Empty
-                : $"""<p style="margin:12px 0 0;"><strong>Ship to:</strong> {H(order.ShippingAddress)}</p>""";
+                : $"""<p><strong>Ship to:</strong> {H(order.ShippingAddress)}</p>""";
 
-            return $$"""
-                <!DOCTYPE html>
-                <html><body style="font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;font-size:14px;">
-                <div style="max-width:560px;margin:0 auto;padding:24px;">
-                  <h1 style="font-size:20px;margin:0 0 8px;">Thanks for your order, {{H(order.User?.FirstName)}}!</h1>
-                  <p style="color:#555;margin:0 0 16px;">We've received order <strong>#{{order.Id}}</strong> and will get it ready to ship.</p>
-                  <table style="width:100%;border-collapse:collapse;margin:16px 0;">{{lines}}
-                    <tr><td style="padding:8px;font-weight:700;">Total</td><td style="padding:8px;text-align:right;font-weight:700;">NOK {{Nok(order.TotalInOre)}}</td></tr>
+            var body = $$"""
+                <h1>Thanks for your order, {{H(order.User?.FirstName)}}!</h1>
+                <p>We've received order <strong>#{{order.Id}}</strong> and will get it ready to ship.</p>
+
+                <table>
+                  <tbody>
+                    {{lines}}
+                  </tbody>
+                </table>
+
+                <div class="totals-section">
+                  <table>
+                    <tbody>
+                      <tr class="grand">
+                        <td>Total</td>
+                        <td class="r">NOK {{Nok(order.TotalInOre)}}</td>
+                      </tr>
+                    </tbody>
                   </table>
-                  {{shipBlock}}
-                  <p style="color:#888;font-size:12px;margin-top:24px;">{{H(s.CompanyLegalName)}} · Org. no. {{H(s.CompanyOrgNumber)}}</p>
                 </div>
-                </body></html>
+
+                {{shipBlock}}
                 """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = $"#{order.Id}",
+                Subtitle = $"ORDER  ·  {order.CreatedAt:yyyy-MM-dd}"
+            }, body);
         }
     }
 }
