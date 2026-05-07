@@ -26,7 +26,7 @@ namespace garge_api.Services
             _logger = logger;
         }
 
-        public async Task<int> GenerateAndStoreAsync(int orderId)
+        public async Task<int> GenerateAndStoreAsync(int orderId, bool force = false)
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -39,10 +39,23 @@ namespace garge_api.Services
 
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
 
-            // Save first to get the sequential invoice ID, then fill PDF
-            var invoice = new Invoice { OrderId = orderId, IssuedAt = DateTime.UtcNow, PdfData = [] };
-            db.Invoices.Add(invoice);
-            await db.SaveChangesAsync();
+            var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.OrderId == orderId);
+            if (invoice != null && !force)
+            {
+                _logger.LogInformation("Invoice {InvoiceId} already exists for order {OrderId} — skip", invoice.Id, orderId);
+                return invoice.Id;
+            }
+
+            if (invoice == null)
+            {
+                invoice = new Invoice { OrderId = orderId, IssuedAt = DateTime.UtcNow, PdfData = [] };
+                db.Invoices.Add(invoice);
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                invoice.IssuedAt = DateTime.UtcNow;
+            }
 
             var html = BuildInvoiceHtml(order, settings, invoice.Id, invoice.IssuedAt);
             invoice.PdfData = await RenderPdfAsync(html);
