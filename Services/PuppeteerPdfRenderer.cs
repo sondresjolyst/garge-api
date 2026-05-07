@@ -23,7 +23,7 @@ namespace garge_api.Services
             await using var page = await browser.NewPageAsync();
             await page.SetContentAsync(html, new NavigationOptions
             {
-                WaitUntil = [WaitUntilNavigation.Networkidle0]
+                WaitUntil = [WaitUntilNavigation.Load]
             });
 
             return await page.PdfDataAsync(new PdfOptions
