@@ -264,7 +264,7 @@ namespace garge_api
                 ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
                 ForwardLimit = 2
             };
-            fwd.KnownNetworks.Clear();
+            fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
             app.UseForwardedHeaders(fwd);
 
