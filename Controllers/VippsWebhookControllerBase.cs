@@ -24,21 +24,34 @@ namespace garge_api.Controllers
             return body;
         }
 
-        protected async Task<bool> TryRecordEventAsync(
+        protected static async Task<bool> TryRecordEventAsync(
             ApplicationDbContext db, string source, string eventId)
         {
             if (string.IsNullOrEmpty(eventId)) return true;
 
-            var exists = await db.ProcessedWebhookEvents
-                .AnyAsync(e => e.Source == source && e.Id == eventId);
-            if (exists) return false;
-
-            db.ProcessedWebhookEvents.Add(new ProcessedWebhookEvent
+            var entity = new ProcessedWebhookEvent
             {
                 Id = eventId,
                 Source = source
-            });
-            return true;
+            };
+
+            try
+            {
+                db.ProcessedWebhookEvents.Add(entity);
+                await db.SaveChangesAsync();
+                return true;
+            }
+            catch (Exception ex) when (ex is DbUpdateException || ex is InvalidOperationException)
+            {
+                var entry = db.Entry(entity);
+                if (entry.State != EntityState.Detached) entry.State = EntityState.Detached;
+
+                var raceLost = await db.ProcessedWebhookEvents
+                    .AsNoTracking()
+                    .AnyAsync(e => e.Id == eventId);
+                if (raceLost) return false;
+                throw;
+            }
         }
     }
 }

@@ -26,35 +26,81 @@ namespace garge_api.Services
         public Task SendActivatedAsync(int subscriptionId) =>
             SendAsync(subscriptionId, kind: "activated",
                 subjectFormat: "Subscription confirmed — {0}",
-                buildBody: (sub, s) =>
-                {
-                    var productName = sub.Product?.Name ?? "Garge subscription";
-                    var period = sub.Product?.Interval == BillingInterval.Yearly ? "yearly" : "monthly";
-                    var price = sub.Product != null ? MoneyFormat.Nok(sub.Product.PriceInOre) : null;
-                    var nextChargeLine = sub.NextChargeDate.HasValue
-                        ? $"<p>Next charge: <strong>{sub.NextChargeDate.Value:yyyy-MM-dd}</strong>.</p>"
-                        : string.Empty;
-
-                    return $$"""
-                        <h1>Welcome aboard, {{H(sub.User?.FirstName)}}!</h1>
-                        <p>Your <strong>{{H(productName)}}</strong> {{period}} subscription is active. Vipps will charge {{(price != null ? $"NOK {price}" : "the agreed amount")}} per {{(period == "yearly" ? "year" : "month")}}.</p>
-                        {{nextChargeLine}}
-                        <p>Receipts for every charge land here as PDF invoices.</p>
-                        """;
-                });
+                buildBody: (sub, s) => BuildSubscriptionEmailBody(
+                    sub, s,
+                    headline: $"Welcome aboard, {H(sub.User?.FirstName)}!",
+                    intro: "Your subscription is now active.",
+                    footerNote: BuildActivatedFooter(sub)));
 
         public Task SendChargeFailedAsync(int subscriptionId) =>
             SendAsync(subscriptionId, kind: "charge-failed",
                 subjectFormat: "Action needed: subscription payment failed — {0}",
-                buildBody: (sub, s) =>
+                buildBody: (sub, s) => BuildSubscriptionEmailBody(
+                    sub, s,
+                    headline: "We couldn't charge your subscription",
+                    intro: $"Hi {H(sub.User?.FirstName)}, the latest charge failed. We'll retry automatically — update your payment method in the Vipps app to avoid the agreement being stopped.",
+                    footerNote: "If you've already fixed it, you can ignore this email."));
+
+        private static string BuildActivatedFooter(Subscription sub)
+        {
+            var parts = new List<string>();
+            if (sub.NextChargeDate.HasValue)
+                parts.Add($"Next charge on {sub.NextChargeDate.Value:yyyy-MM-dd}.");
+            parts.Add("Cancel anytime under Billing.");
+            if (sub.ConsentAcceptedAt.HasValue)
+                parts.Add($"You waived your 14-day right of withdrawal at signup on {sub.ConsentAcceptedAt.Value:yyyy-MM-dd}, so service is delivered immediately.");
+            return string.Join(" ", parts);
+        }
+
+        private static string BuildSubscriptionEmailBody(
+            Subscription sub, AppSettings s, string headline, string intro, string footerNote)
+        {
+            var productName = sub.Product?.Name ?? "Garge subscription";
+            var period = sub.Product?.Interval == BillingInterval.Yearly ? "year" : "month";
+            var price = sub.Product != null ? MoneyFormat.Nok(sub.Product.PriceInOre) : null;
+            var buyerName = ((sub.User?.FirstName ?? string.Empty) + " " + (sub.User?.LastName ?? string.Empty)).Trim();
+            var amountCell = price != null ? $"NOK {price} / {period}" : "—";
+
+            var partiesHtml = EmailLayout.RenderParties(
+                from: new EmailLayout.Party
                 {
-                    var productName = sub.Product?.Name ?? "Garge subscription";
-                    return $$"""
-                        <h1>We couldn't charge your subscription</h1>
-                        <p>Hi {{H(sub.User?.FirstName)}}, the latest charge for <strong>{{H(productName)}}</strong> failed. Vipps will retry, but please update your payment method in the Vipps app to avoid the agreement being stopped.</p>
-                        <p>If you've already fixed it, you can ignore this email.</p>
-                        """;
+                    Label = "From",
+                    Name = s.CompanyLegalName,
+                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                },
+                to: new EmailLayout.Party
+                {
+                    Label = "Subscriber",
+                    Name = buyerName,
+                    Lines = { sub.User?.Email ?? string.Empty, sub.BillingAddress ?? string.Empty }
                 });
+
+            return $$"""
+                <h1>{{headline}}</h1>
+                <p>{{H(intro)}}</p>
+
+                {{partiesHtml}}
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Subscription</th>
+                      <th class="r">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>{{H(productName)}} — {{period}}ly</td>
+                      <td class="r">{{H(amountCell)}}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div class="footer">
+                  <p>{{H(footerNote)}}</p>
+                </div>
+                """;
+        }
 
         private async Task SendAsync(
             int subscriptionId,

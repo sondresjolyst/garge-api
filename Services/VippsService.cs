@@ -149,11 +149,18 @@ namespace garge_api.Services
                     unit = product.Interval == BillingInterval.Monthly ? "MONTH" : "YEAR",
                     count = 1
                 },
+                initialCharge = new
+                {
+                    amount = effectivePriceInOre,
+                    description = product.Name,
+                    transactionType = "DIRECT_CAPTURE"
+                },
                 merchantRedirectUrl = redirectUrl,
                 merchantAgreementUrl = $"{_appOpts.FrontendBaseUrl}/terms",
                 productName = product.Name,
                 productDescription = product.Description ?? string.Empty,
-                phoneNumber
+                phoneNumber,
+                scope = "name address email phoneNumber"
             };
 
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/recurring/v3/agreements");
@@ -163,6 +170,38 @@ namespace garge_api.Services
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-agreement");
             return JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
+        }
+
+        public async Task<VippsCreateChargeResponse> CreateChargeAsync(
+            string agreementId, int amountInOre, DateTime dueDate,
+            string description, string idempotencyKey)
+        {
+            var e = await GetEffectiveAsync();
+
+            var minDue = DateTime.UtcNow.Date.AddDays(2);
+            if (dueDate.Date < minDue) dueDate = minDue;
+
+            var orderId = idempotencyKey.Length <= 50 ? idempotencyKey : idempotencyKey[..50];
+
+            var body = new
+            {
+                amount = amountInOre,
+                transactionType = "DIRECT_CAPTURE",
+                type = "RECURRING",
+                description,
+                due = dueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                retryDays = 5,
+                orderId
+            };
+
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}/charges");
+            AddCommonHeaders(request, e, idempotencyKey);
+            request.Content = BuildJsonContent(body);
+
+            var response = await _http.SendAsync(request);
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-charge");
+            return JsonSerializer.Deserialize<VippsCreateChargeResponse>(json, _jsonOpts)!;
         }
 
         public async Task<VippsAgreementResponse> GetAgreementAsync(string agreementId)
@@ -355,6 +394,18 @@ namespace garge_api.Services
             request.Content = BuildJsonContent(new { });
             var response = await _http.SendAsync(request);
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-payment");
+        }
+
+        public async Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey)
+        {
+            var e = await GetEffectiveAsync();
+            var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
+            var request = new HttpRequestMessage(HttpMethod.Post,
+                $"{e.BaseUrl}/epayment/v1/payments/{reference}/refund");
+            AddCommonHeaders(request, e, idempotencyKey);
+            request.Content = BuildJsonContent(body);
+            var response = await _http.SendAsync(request);
+            await ReadAsStringAndEnsureSuccessAsync(response, "refund-payment");
         }
 
         public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events)

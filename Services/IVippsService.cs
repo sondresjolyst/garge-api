@@ -20,6 +20,11 @@ namespace garge_api.Services
         public string VippsConfirmationUrl { get; set; } = string.Empty;
     }
 
+    public class VippsCreateChargeResponse
+    {
+        public string ChargeId { get; set; } = string.Empty;
+    }
+
     public class VippsAgreementResponse
     {
         public string Id { get; set; } = string.Empty;
@@ -27,6 +32,7 @@ namespace garge_api.Services
         public string ProductName { get; set; } = string.Empty;
         public DateTime? Start { get; set; }
         public DateTime? Stop { get; set; }
+        public string? Sub { get; set; }
     }
 
     public class VippsCreatePaymentResponse
@@ -80,6 +86,10 @@ namespace garge_api.Services
         Task<VippsAgreementResponse> GetAgreementAsync(string agreementId);
         Task CancelAgreementAsync(string agreementId, string idempotencyKey);
 
+        Task<VippsCreateChargeResponse> CreateChargeAsync(
+            string agreementId, int amountInOre, DateTime dueDate,
+            string description, string idempotencyKey);
+
         Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey);
@@ -87,6 +97,7 @@ namespace garge_api.Services
         Task<VippsUserInfo?> GetUserInfoAsync(string sub);
         Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey);
         Task CancelPaymentAsync(string reference, string idempotencyKey);
+        Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey);
 
         Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events);
         WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);

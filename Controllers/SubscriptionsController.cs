@@ -357,6 +357,8 @@ namespace garge_api.Controllers
                     subscription.Status = SubscriptionStatus.Active;
                     if (subscription.StartDate == null)
                         subscription.StartDate = payload.Occurred ?? DateTime.UtcNow;
+                    if (string.IsNullOrEmpty(subscription.BillingAddress))
+                        await TryPopulateBillingAddressAsync(subscription, payload.AgreementId);
                     break;
                 case VippsEvents.AgreementStopped:
                 case VippsEvents.AgreementRejected:
@@ -431,6 +433,24 @@ namespace garge_api.Controllers
         {
             try { await _push.SendAsync(userId, title, body); }
             catch (Exception ex) { _logger.LogWarning(ex, "Push send failed for user {UserId}", userId); }
+        }
+
+        private async Task TryPopulateBillingAddressAsync(Subscription subscription, string agreementId)
+        {
+            try
+            {
+                var details = await _vipps.GetAgreementAsync(agreementId);
+                if (string.IsNullOrEmpty(details?.Sub)) return;
+
+                var info = await _vipps.GetUserInfoAsync(details.Sub);
+                var formatted = VippsAddressFormatter.Format(info?.Address);
+                if (!string.IsNullOrEmpty(formatted))
+                    subscription.BillingAddress = formatted;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch Vipps user info for subscription {SubscriptionId}", subscription.Id);
+            }
         }
     }
 }

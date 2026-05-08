@@ -131,6 +131,40 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_ConcurrentDuplicates_OnlyOneRecorded()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_race", Status = SubscriptionStatus.Pending
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var payload = new VippsAgreementWebhookDto
+        {
+            AgreementId = "agr_race",
+            EventId = "evt-race",
+            EventType = "recurring.agreement-activated.v1",
+            Occurred = DateTime.UtcNow
+        };
+        var body = JsonSerializer.Serialize(payload);
+
+        var settings = new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" };
+        var ctrl1 = CreateController(db, settings: settings);
+        var ctrl2 = CreateController(db, settings: settings);
+        SetupValidWebhookRequest(ctrl1, body);
+        SetupValidWebhookRequest(ctrl2, body);
+
+        var t1 = ctrl1.Webhook();
+        var t2 = ctrl2.Webhook();
+        await Task.WhenAll(t1, t2);
+
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-race"));
+    }
+
+    [Fact]
     public async Task Webhook_DuplicateEvent_SkipsSecondProcessing()
     {
         using var db = CreateDbContext();
@@ -195,6 +229,150 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_Activated_VippsReturnsAddress_PopulatesBillingAddress()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_addr1", Status = SubscriptionStatus.Pending
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr1"))
+            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr1", Sub = "sub-x" });
+        vipps.Setup(v => v.GetUserInfoAsync("sub-x"))
+            .ReturnsAsync(new VippsUserInfo
+            {
+                Address = new VippsAddress { Formatted = "Mårvegen 21a, 4347 Lye, Norway" }
+            });
+
+        var payload = new
+        {
+            agreementId = "agr_addr1",
+            eventId = "evt-addr1",
+            eventType = "recurring.agreement-activated.v1",
+            occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" },
+            vipps: vipps);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal("Mårvegen 21a, 4347 Lye, Norway", updated.BillingAddress);
+        Assert.Equal(SubscriptionStatus.Active, updated.Status);
+    }
+
+    [Fact]
+    public async Task Webhook_Activated_NoSubReturned_LeavesBillingAddressNull()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_addr2", Status = SubscriptionStatus.Pending
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr2"))
+            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr2", Sub = null });
+
+        var payload = new
+        {
+            agreementId = "agr_addr2",
+            eventId = "evt-addr2",
+            eventType = "recurring.agreement-activated.v1",
+            occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" },
+            vipps: vipps);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Null(updated.BillingAddress);
+        Assert.Equal(SubscriptionStatus.Active, updated.Status);
+        vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Webhook_Activated_GetUserInfoThrows_Swallowed_StatusStillActive()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_addr3", Status = SubscriptionStatus.Pending
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr3"))
+            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr3", Sub = "sub-y" });
+        vipps.Setup(v => v.GetUserInfoAsync("sub-y"))
+            .ThrowsAsync(new HttpRequestException("Vipps userinfo down"));
+
+        var payload = new
+        {
+            agreementId = "agr_addr3",
+            eventId = "evt-addr3",
+            eventType = "recurring.agreement-activated.v1",
+            occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" },
+            vipps: vipps);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        var result = await ctrl.Webhook();
+
+        Assert.IsType<OkResult>(result);
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Null(updated.BillingAddress);
+        Assert.Equal(SubscriptionStatus.Active, updated.Status);
+    }
+
+    [Fact]
+    public async Task Webhook_Activated_BillingAddressAlreadySet_NotOverwritten()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_addr4",
+            Status = SubscriptionStatus.Pending,
+            BillingAddress = "Existing address"
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        var payload = new
+        {
+            agreementId = "agr_addr4",
+            eventId = "evt-addr4",
+            eventType = "recurring.agreement-activated.v1",
+            occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" },
+            vipps: vipps);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal("Existing address", updated.BillingAddress);
+        vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Webhook_ChargeCaptured_SetsNextChargeDateByInterval()
     {
         using var db = CreateDbContext();
@@ -223,6 +401,107 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var updated = await db.Subscriptions.FirstAsync();
         Assert.Equal(occurred.AddMonths(1), updated.NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeCaptured_DoesNotCallCreateChargeAsync_SchedulerIsSoleSource()
+    {
+        using var db = CreateDbContext();
+        var occurred = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        await db.Products.AddAsync(MakePrimaryProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_no_post", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+
+        var payload = new
+        {
+            agreementId = "agr_no_post",
+            eventId = "evt-no-post",
+            eventType = "recurring.charge-captured.v1",
+            chargeId = "chg_p",
+            occurred
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" },
+            vipps: vipps);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        vipps.Verify(v => v.CreateChargeAsync(
+            It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
+            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal(occurred.AddMonths(1), updated.NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeCaptured_NullOccurred_LeavesNextChargeDateNull()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_noocc", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var payload = new
+        {
+            agreementId = "agr_noocc",
+            eventId = "evt-noocc",
+            eventType = "recurring.charge-captured.v1",
+            chargeId = "chg_n"
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Null(updated.NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeCaptured_YearlyProduct_NextChargeDateIsPlusOneYear()
+    {
+        using var db = CreateDbContext();
+        var occurred = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        await db.Products.AddAsync(new Product
+        {
+            Id = 1, Name = "Garge Yearly", PriceInOre = 99900,
+            Interval = BillingInterval.Yearly, Type = ProductType.Primary, IsActive = true
+        });
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_yr", Status = SubscriptionStatus.Active
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var payload = new
+        {
+            agreementId = "agr_yr",
+            eventId = "evt-yr",
+            eventType = "recurring.charge-captured.v1",
+            chargeId = "chg_yr",
+            occurred
+        };
+        var ctrl = CreateController(db,
+            settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        await ctrl.Webhook();
+
+        var updated = await db.Subscriptions.FirstAsync();
+        Assert.Equal(occurred.AddYears(1), updated.NextChargeDate);
     }
 
     private static void SetupValidWebhookRequest(SubscriptionsController ctrl, string body) =>

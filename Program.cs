@@ -146,6 +146,7 @@ namespace garge_api
             builder.Services.AddHttpClient<IVippsService, VippsService>();
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
             builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
+            builder.Services.AddHostedService<SubscriptionChargeSchedulerService>();
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")

@@ -617,6 +617,106 @@ public class ShopControllerTests : ControllerTestBase
         Assert.Equal(1, reloaded.StockCount);
     }
 
+    [Fact]
+    public async Task RefundOrder_PaidOrder_CallsVippsAndSetsStatusToRefunded()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-000007",
+            TotalInOre = 12500, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.RefundOrder(order.Id);
+
+        Assert.IsType<OkResult>(result);
+        vipps.Verify(v => v.RefundPaymentAsync("garge-order-000007", 12500, $"refund-{order.Id}"), Times.Once);
+        var updated = await db.Orders.FindAsync(order.Id);
+        Assert.Equal(OrderStatus.Refunded, updated!.Status);
+    }
+
+    [Fact]
+    public async Task RefundOrder_NonPaidOrder_Returns400AndDoesNotCallVipps()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-000008",
+            TotalInOre = 5000, Status = OrderStatus.Reserved
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.RefundOrder(order.Id);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        vipps.Verify(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        var updated = await db.Orders.FindAsync(order.Id);
+        Assert.Equal(OrderStatus.Reserved, updated!.Status);
+    }
+
+    [Fact]
+    public async Task RefundOrder_PaidOrderMissingVippsOrderId_Returns400()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = null,
+            TotalInOre = 5000, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.RefundOrder(order.Id);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        vipps.Verify(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefundOrder_UnknownOrder_Returns404()
+    {
+        using var db = CreateDbContext();
+        var ctrl = CreateController(db);
+        var result = await ctrl.RefundOrder(9999);
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task RefundOrder_VippsThrows_StatusStaysPaid()
+    {
+        using var db = CreateDbContext();
+        var order = new Order
+        {
+            UserId = "user-1", VippsOrderId = "garge-order-000009",
+            TotalInOre = 7700, Status = OrderStatus.Paid
+        };
+        await db.Orders.AddAsync(order);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ThrowsAsync(new HttpRequestException("Vipps unavailable"));
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => ctrl.RefundOrder(order.Id));
+
+        var updated = await db.Orders.FindAsync(order.Id);
+        Assert.Equal(OrderStatus.Paid, updated!.Status);
+    }
+
     private static void SetupValidWebhookRequest(ShopController ctrl, string body) =>
         SetupWebhookRequest(ctrl, body, valid: true);
 
