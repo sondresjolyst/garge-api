@@ -63,11 +63,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Username already exists.")]
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
-            _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), dto.Username });
+            _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.UserId(), dto.Username });
 
             if (!UserHasRequiredRole())
             {
-                _logger.LogWarning("CreateUser forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+                _logger.LogWarning("CreateUser forbidden for {@LogData}", new { CallerUserId = User.UserId() });
                 return Forbid();
             }
 

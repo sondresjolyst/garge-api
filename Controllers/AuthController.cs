@@ -165,54 +165,8 @@ namespace garge_api.Controllers
             }
 
             var userRoles = await _userManager.GetRolesAsync(user);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id?.ToString() ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
-            };
-
-            claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
-
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddHours(1),
-                NotBefore = DateTime.UtcNow.AddSeconds(-5),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
-                Issuer = _configuration["Jwt:Issuer"],
-                Audience = _configuration["Jwt:Issuer"]
-            };
-
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            var tokenString = tokenHandler.WriteToken(token);
-
-            var rawToken = GenerateRefreshToken();
-            var hashedToken = HashText(rawToken);
-
-            // Limit to 5 active tokens per user
-            var userTokens = _context.RefreshTokens
-                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
-                .OrderBy(t => t.Created)
-                .ToList();
-            if (userTokens.Count >= 5)
-            {
-                var oldest = userTokens.First();
-                _context.RefreshTokens.Remove(oldest);
-                _logger.LogInformation("Login: Oldest refresh token deleted {@LogData}", new { user.Id });
-            }
-
-            var refreshToken = new RefreshToken
-            {
-                Token = hashedToken,
-                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
-                Expires = DateTime.UtcNow.AddMonths(6),
-                Created = DateTime.UtcNow
-            };
-            _context.RefreshTokens.Add(refreshToken);
+            var tokenString = BuildJwt(user, userRoles);
+            var rawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("User logged in successfully {UserId}", user.Id);
@@ -365,17 +319,31 @@ namespace garge_api.Controllers
                 return Unauthorized(new { message = "Invalid or expired refresh token" });
             }
 
-            // Generate new JWT and refresh token
+            // Revoke old refresh token, issue a fresh JWT + refresh token
+            storedToken.Revoked = DateTime.UtcNow;
+
             var userRoles = await _userManager.GetRolesAsync(user);
+            var newTokenString = BuildJwt(user, userRoles);
+            var newRawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
+
+            await _context.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
+            return Ok(new { token = newTokenString, refreshToken = newRawToken });
+        }
+
+        private string BuildJwt(User user, IList<string> roles)
+        {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
             var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString() ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
             };
-            claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
+            claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
@@ -386,40 +354,36 @@ namespace garge_api.Controllers
                 Issuer = _configuration["Jwt:Issuer"],
                 Audience = _configuration["Jwt:Issuer"]
             };
+            return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
+        }
 
-            var newToken = tokenHandler.CreateToken(tokenDescriptor);
-            var newTokenString = tokenHandler.WriteToken(newToken);
+        /// <summary>
+        /// Adds a new refresh token row for the user (capped at 5 active per user).
+        /// Caller must SaveChangesAsync. Returns the raw (un-hashed) token to send to the client.
+        /// </summary>
+        private string IssueRefreshToken(string userId)
+        {
+            var rawToken = GenerateRefreshToken();
+            var hashedToken = HashText(rawToken);
 
-            // Revoke old refresh token and issue a new one
-            storedToken.Revoked = DateTime.UtcNow;
-            var newRawToken = GenerateRefreshToken();
-            var newHashedToken = HashText(newRawToken);
-
-            // Limit to 5 active tokens per user
             var userTokens = _context.RefreshTokens
-                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
+                .Where(t => t.UserId == userId && t.Revoked == null && t.Expires > DateTime.UtcNow)
                 .OrderBy(t => t.Created)
                 .ToList();
             if (userTokens.Count >= 5)
             {
-                var oldest = userTokens.First();
-                _context.RefreshTokens.Remove(oldest);
-                _logger.LogInformation("RefreshToken: Oldest refresh token revoked {@LogData}", new { user.Id });
+                _context.RefreshTokens.Remove(userTokens.First());
+                _logger.LogInformation("Oldest refresh token evicted (cap=5) {@LogData}", new { UserId = userId });
             }
 
-            var newRefreshToken = new RefreshToken
+            _context.RefreshTokens.Add(new RefreshToken
             {
-                Token = newHashedToken,
-                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
+                Token = hashedToken,
+                UserId = userId,
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
-            };
-            _context.RefreshTokens.Add(newRefreshToken);
-            await _context.SaveChangesAsync();
-            await tx.CommitAsync();
-
-            _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
-            return Ok(new { token = newTokenString, refreshToken = newRawToken });
+            });
+            return rawToken;
         }
 
         /// <summary>

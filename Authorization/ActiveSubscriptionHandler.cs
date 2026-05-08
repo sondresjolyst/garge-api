@@ -26,7 +26,7 @@ namespace garge_api.Authorization
             AuthorizationHandlerContext context,
             ActiveSubscriptionRequirement requirement)
         {
-            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = context.User.UserId();
             if (userId == null) return;
 
             if (RoleNames.SubscriptionBypassRoles.Any(r => context.User.IsInRole(r)))

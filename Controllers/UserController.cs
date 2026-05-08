@@ -48,12 +48,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
-            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id.ToString())
+            if (!User.IsCallerOf(id))
             {
-                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id, ClaimId = userIdClaim?.Value });
+                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
                 return Forbid();
             }
 
@@ -92,9 +91,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> DeleteOwnAccount(string id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)
@@ -102,37 +99,9 @@ namespace garge_api.Controllers
 
             // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
             // a valid FK for the 5-year retention window required by the Norwegian
-            // Bookkeeping Act (bokføringsloven §13). Untie the user
-            // from per-account artefacts (custom names, push subs, refresh tokens etc.)
-            // so nothing can re-attach them later.
-            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == id));
-            _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == id));
-            _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == id));
-            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == id));
-            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == id));
-            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == id));
-            _context.WebhookSubscriptions.RemoveRange(_context.WebhookSubscriptions.Where(w => w.UserId == id));
-            _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == id));
-            _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == id));
-
-            user.FirstName = "Deleted";
-            user.LastName = "User";
-            user.Email = null;
-            user.NormalizedEmail = null;
-            user.PhoneNumber = null;
-            user.UserName = $"deleted-{id}";
-            user.NormalizedUserName = $"DELETED-{id}".ToUpperInvariant();
-            user.EmailConfirmed = false;
-            user.EmailVerificationCodeHash = null;
-            user.EmailVerificationCodeExpiration = null;
-            user.PasswordResetCodeHash = null;
-            user.PasswordResetCodeExpiration = null;
-            user.PasswordResetAttempts = 0;
-            user.LockoutEnabled = true;
-            user.LockoutEnd = DateTimeOffset.MaxValue;
-            user.IsDeleted = true;
-            user.DeletedAt = DateTime.UtcNow;
-            await _userManager.UpdateSecurityStampAsync(user);
+            // Bookkeeping Act (bokføringsloven §13).
+            ClearUserOwnedRows(id);
+            await ScrubUserPiiAsync(user);
 
             var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
@@ -148,6 +117,50 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Removes all per-user rows that should not survive soft-delete (custom
+        /// names, refresh tokens, push subs, webhook subs, etc.). Add new
+        /// user-owned tables here when introduced.
+        /// </summary>
+        private void ClearUserOwnedRows(string userId)
+        {
+            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
+            _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
+            _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
+            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
+            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
+            _context.WebhookSubscriptions.RemoveRange(_context.WebhookSubscriptions.Where(w => w.UserId == userId));
+            _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
+            _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == userId));
+        }
+
+        /// <summary>
+        /// Sets the User row's PII fields to safe defaults and locks the account.
+        /// Caller is responsible for committing the row via UpdateAsync + SaveChanges.
+        /// </summary>
+        private async Task ScrubUserPiiAsync(User user)
+        {
+            user.FirstName = "Deleted";
+            user.LastName = "User";
+            user.Email = null;
+            user.NormalizedEmail = null;
+            user.PhoneNumber = null;
+            user.UserName = $"deleted-{user.Id}";
+            user.NormalizedUserName = $"DELETED-{user.Id}".ToUpperInvariant();
+            user.EmailConfirmed = false;
+            user.EmailVerificationCodeHash = null;
+            user.EmailVerificationCodeExpiration = null;
+            user.PasswordResetCodeHash = null;
+            user.PasswordResetCodeExpiration = null;
+            user.PasswordResetAttempts = 0;
+            user.LockoutEnabled = true;
+            user.LockoutEnd = DateTimeOffset.MaxValue;
+            user.IsDeleted = true;
+            user.DeletedAt = DateTime.UtcNow;
+            await _userManager.UpdateSecurityStampAsync(user);
+        }
+
+        /// <summary>
         /// Exports all personal data held for the caller's account (GDPR Article 20).
         /// </summary>
         [HttpGet("{id}/export")]
@@ -157,9 +170,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ExportData(string id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var profile = await _context.UserProfiles.FindAsync(id);
             if (profile == null)
@@ -283,9 +294,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> UpdatePreferences(string id, [FromBody] UpdateUserPreferencesDto dto)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var userProfile = await _context.UserProfiles.SingleOrDefaultAsync(up => up.Id == id);
             if (userProfile == null)
@@ -316,9 +325,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> UpdateProfile(string id, [FromBody] UpdateProfileDto dto)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)

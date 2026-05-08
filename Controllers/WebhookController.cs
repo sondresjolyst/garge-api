@@ -33,7 +33,7 @@ namespace garge_api.Controllers
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] CreateWebhookSubscriptionDto webhookDto)
         {
-            _logger.LogInformation("AddWebhook called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
+            _logger.LogInformation("AddWebhook called by {@LogData}", new { CallerUserId = User.UserId() });
 
             if (!ModelState.IsValid)
             {
@@ -43,7 +43,7 @@ namespace garge_api.Controllers
 
             var webhookSubscription = _mapper.Map<WebhookSubscription>(webhookDto);
             webhookSubscription.CreatedAt = DateTime.UtcNow;
-            webhookSubscription.UserId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+            webhookSubscription.UserId = User.UserId() ?? string.Empty;
 
             _context.WebhookSubscriptions.Add(webhookSubscription);
             await _context.SaveChangesAsync();
@@ -62,7 +62,7 @@ namespace garge_api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetWebhook(int id)
         {
-            _logger.LogInformation("GetWebhook called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+            _logger.LogInformation("GetWebhook called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
             var webhookSubscription = await _context.WebhookSubscriptions.FindAsync(id);
 
@@ -72,7 +72,7 @@ namespace garge_api.Controllers
                 return NotFound();
             }
 
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var currentUserId = User.UserId();
             if (webhookSubscription.UserId != currentUserId)
                 return Forbid();
 
