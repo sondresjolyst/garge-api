@@ -98,7 +98,7 @@ namespace garge_api.Controllers
             var user = _mapper.Map<User>(registerUserDto);
             user.TermsAcceptedAt = DateTime.UtcNow;
             user.TermsVersion = registerUserDto.TermsVersion;
-            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString());
+            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext?.Connection?.RemoteIpAddress?.ToString());
 
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
@@ -343,9 +343,12 @@ namespace garge_api.Controllers
 
             if (anyMatch != null && anyMatch.Revoked != null)
             {
-                var familyTokens = _context.RefreshTokens.Where(t => t.UserId == user.Id && t.Revoked == null);
                 var now = DateTime.UtcNow;
-                await familyTokens.ExecuteUpdateAsync(s => s.SetProperty(t => t.Revoked, _ => now));
+                var familyLive = await _context.RefreshTokens
+                    .Where(t => t.UserId == user.Id && t.Revoked == null)
+                    .ToListAsync();
+                foreach (var t in familyLive) t.Revoked = now;
+                await _context.SaveChangesAsync();
                 await tx.CommitAsync();
                 _logger.LogWarning("RefreshToken reuse detected; family revoked {@LogData}", new { user.Id });
                 return Unauthorized(new { message = "Invalid or expired refresh token" });

@@ -192,6 +192,133 @@ public class AuthControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Login_SoftDeletedUser_ReturnsUnauthorized()
+    {
+        var user = MakeUser();
+        user.IsDeleted = true;
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+
+        var result = await CreateAuthController().Login(new LoginModel { Email = user.Email!, Password = "pass" });
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+        MockSignInManager.Verify(m => m.PasswordSignInAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshToken_SoftDeletedUser_ReturnsUnauthorized()
+    {
+        var user = MakeUser();
+        user.IsDeleted = true;
+        var db = CreateDbContext();
+        var jwt = GenerateTestJwt(user.Id);
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+
+        var result = await CreateAuthController(db).RefreshToken(
+            new RefreshTokenRequestDto { Token = jwt, RefreshToken = "anything" });
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task RefreshToken_RevokedTokenReplay_RevokesEntireFamily()
+    {
+        var user = MakeUser();
+        var db = CreateDbContext();
+        var jwt = GenerateTestJwt(user.Id, expired: true);
+
+        var stolenRaw = "stolen-refresh-token";
+        var stolenHash = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(stolenRaw)));
+
+        // Stolen token already revoked (legitimate user already rotated past it).
+        db.RefreshTokens.Add(new RefreshToken
+        {
+            Token = stolenHash, UserId = user.Id,
+            Revoked = DateTime.UtcNow.AddMinutes(-5),
+            Expires = DateTime.UtcNow.AddMonths(1),
+            Created = DateTime.UtcNow.AddMinutes(-10)
+        });
+        // Other live tokens in the same family that should be revoked on replay.
+        db.RefreshTokens.Add(new RefreshToken
+        {
+            Token = "other-live-1", UserId = user.Id,
+            Expires = DateTime.UtcNow.AddMonths(1),
+            Created = DateTime.UtcNow
+        });
+        db.RefreshTokens.Add(new RefreshToken
+        {
+            Token = "other-live-2", UserId = user.Id,
+            Expires = DateTime.UtcNow.AddMonths(1),
+            Created = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.GetRolesAsync(user)).ReturnsAsync(new List<string>());
+
+        var result = await CreateAuthController(db).RefreshToken(
+            new RefreshTokenRequestDto { Token = jwt, RefreshToken = stolenRaw });
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+        Assert.Equal(0, db.RefreshTokens.Count(t => t.UserId == user.Id && t.Revoked == null));
+    }
+
+    [Fact]
+    public async Task VerifyEmail_UnknownEmail_ReturnsGenericBadRequest()
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+
+        var result = await CreateAuthController().VerifyEmail(
+            new VerifyEmailDto { Email = "ghost@test.com", Code = "ABCDEF" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ResetPassword_UnknownEmail_ReturnsGenericBadRequest()
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+
+        var result = await CreateAuthController().ResetPassword(
+            new ResetPasswordDto { Email = "ghost@test.com", Code = "ABCDEF", NewPassword = "Password1!" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Register_PersistsTermsFields()
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockUserManager.Setup(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.AddToRoleAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        User? captured = null;
+        MockUserManager.Setup(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .Callback<User, string>((u, _) => captured = u)
+            .ReturnsAsync(IdentityResult.Success);
+
+        MockMapper.Setup(m => m.Map<User>(It.IsAny<RegisterUserDto>()))
+            .Returns((RegisterUserDto src) => new User
+            {
+                Id = "new-user", UserName = src.UserName, Email = src.Email,
+                FirstName = src.FirstName, LastName = src.LastName
+            });
+
+        var dto = MakeRegisterDto();
+        dto.TermsVersion = "v1-2026-05";
+        await CreateAuthController(CreateDbContext()).Register(dto);
+
+        Assert.NotNull(captured);
+        Assert.NotNull(captured!.TermsAcceptedAt);
+        Assert.Equal("v1-2026-05", captured.TermsVersion);
+        // RemoteIpAddress is null in the test ControllerContext, so the truncator returns "" -- still set, just empty.
+        Assert.NotNull(captured.TermsAcceptedIp);
+    }
+
+    [Fact]
     public async Task Register_EmailAlreadyExists_ReturnsGenericOkToPreventEnumeration()
     {
         MockUserManager.Setup(m => m.FindByEmailAsync("exists@test.com")).ReturnsAsync(MakeUser());
