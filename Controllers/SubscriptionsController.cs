@@ -414,25 +414,6 @@ namespace garge_api.Controllers
                         _logger.LogError(ex, "Subscription invoice generation failed for subscription {SubscriptionId} charge {ChargeId}",
                             subscription.Id, payload.ChargeId);
                     }
-
-                    if (subscription.NextChargeDate.HasValue && subscription.Status == SubscriptionStatus.Active)
-                    {
-                        var due = subscription.NextChargeDate.Value;
-                        try
-                        {
-                            await _vipps.CreateChargeAsync(
-                                subscription.VippsAgreementId,
-                                product.PriceInOre,
-                                due,
-                                product.Name,
-                                idempotencyKey: $"charge-{subscription.Id}-{due.Ticks}");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Scheduling next charge failed for subscription {SubscriptionId} dueDate {DueDate}",
-                                subscription.Id, due);
-                        }
-                    }
                 }
             }
 
