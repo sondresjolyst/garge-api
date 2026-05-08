@@ -77,7 +77,7 @@ namespace garge_api.Controllers
             var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
             if (existingUser != null)
             {
-                _logger.LogWarning("Register: email already registered (suppressed for enumeration safety)");
+                _logger.LogWarning("Register: email already registered");
                 return Ok(new { message = genericResponse });
             }
 
@@ -254,13 +254,13 @@ namespace garge_api.Controllers
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("VerifyEmail: unknown email (suppressed for enumeration safety)");
+                _logger.LogWarning("VerifyEmail: unknown email");
                 return BadRequest(new { message = genericInvalid });
             }
 
             if (user.EmailConfirmed)
             {
-                _logger.LogWarning("VerifyEmail: already verified (suppressed for enumeration safety)");
+                _logger.LogWarning("VerifyEmail: already verified");
                 return BadRequest(new { message = genericInvalid });
             }
 
@@ -454,7 +454,7 @@ namespace garge_api.Controllers
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("ResetPassword: unknown email (suppressed for enumeration safety)");
+                _logger.LogWarning("ResetPassword: unknown email");
                 return BadRequest(new { message = genericInvalid });
             }
 
