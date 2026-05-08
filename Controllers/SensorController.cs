@@ -55,7 +55,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "A list of all sensors.", typeof(IEnumerable<SensorDto>))]
         public async Task<IActionResult> GetAllSensors()
         {
-            _logger.LogInformation("GetAllSensors called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GetAllSensors called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
@@ -85,7 +85,7 @@ namespace garge_api.Controllers
                 return dto;
             }).ToList();
 
-            _logger.LogInformation("Returning {@LogData}", new { Count = dtos.Count, User = User.Identity?.Name });
+            _logger.LogInformation("Returning {@LogData}", new { Count = dtos.Count, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(dtos);
         }
 
@@ -101,7 +101,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSensor(int id)
         {
-            _logger.LogInformation("GetSensor called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("GetSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
 
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
@@ -112,7 +112,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetSensor forbidden for {@LogData}", new { User = User.Identity?.Name, id });
+                _logger.LogWarning("GetSensor forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
                 return Forbid();
             }
 
@@ -127,7 +127,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(customName))
                 dto.CustomName = customName;
 
-            _logger.LogInformation("Returning sensor {@LogData}", new { id, User = User.Identity?.Name });
+            _logger.LogInformation("Returning sensor {@LogData}", new { id, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(dto);
         }
 
@@ -152,7 +152,7 @@ namespace garge_api.Controllers
             DateTime? endDate, string? groupBy = "5m",
             int pageNumber = 1, int pageSize = 100)
         {
-            _logger.LogInformation("GetSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("GetSensorData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -163,7 +163,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetSensorData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
+                _logger.LogWarning("GetSensorData forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
                 return Forbid();
             }
 
@@ -243,7 +243,7 @@ namespace garge_api.Controllers
             string? groupBy = "5m",
             int pageNumber = 1, int pageSize = 100)
         {
-            _logger.LogInformation("GetMultipleSensorsData called by {@LogData}", new { User = User.Identity?.Name, sensorIds });
+            _logger.LogInformation("GetMultipleSensorsData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorIds });
 
             var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync();
             if (sensors.Count() != sensorIds.Count())
@@ -256,7 +256,7 @@ namespace garge_api.Controllers
             {
                 if (!await UserCanAccessSensorAsync(sensor.Id))
                 {
-                    _logger.LogWarning("GetMultipleSensorsData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId = sensor.Id });
+                    _logger.LogWarning("GetMultipleSensorsData forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId = sensor.Id });
                     return Forbid();
                 }
             }
@@ -444,11 +444,11 @@ namespace garge_api.Controllers
         [HttpPost("generate-missing-codes")]
         public async Task<IActionResult> GenerateMissingRegistrationCodes()
         {
-            _logger.LogInformation("GenerateMissingRegistrationCodes called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GenerateMissingRegistrationCodes called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             if (!IsAdmin())
             {
-                _logger.LogWarning("GenerateMissingRegistrationCodes forbidden for {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("GenerateMissingRegistrationCodes forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Forbid();
             }
 
@@ -484,11 +484,11 @@ namespace garge_api.Controllers
         [HttpPost("generate-missing-parent-names")]
         public async Task<IActionResult> GenerateMissingParentNames()
         {
-            _logger.LogInformation("GenerateMissingParentNames called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GenerateMissingParentNames called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             if (!IsAdmin())
             {
-                _logger.LogWarning("GenerateMissingParentNames forbidden for {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("GenerateMissingParentNames forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Forbid();
             }
 
@@ -519,18 +519,18 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> ClaimSensor([FromBody] ClaimSensorDto dto)
         {
-            _logger.LogInformation("ClaimSensor called by {@LogData}", new { User = User.Identity?.Name, RegistrationCode = dto.RegistrationCode });
+            _logger.LogInformation("ClaimSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), RegistrationCode = dto.RegistrationCode });
 
             if (string.IsNullOrWhiteSpace(dto.RegistrationCode))
             {
-                _logger.LogWarning("ClaimSensor bad request: Registration code is required {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("ClaimSensor bad request: Registration code is required {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return BadRequest(new { message = "Registration code is required." });
             }
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.RegistrationCode == dto.RegistrationCode);
             if (sensor == null)
             {
-                _logger.LogWarning("ClaimSensor not found: Invalid registration code {@LogData}", new { RegistrationCode = dto.RegistrationCode, User = User.Identity?.Name });
+                _logger.LogWarning("ClaimSensor not found: Invalid registration code {@LogData}", new { RegistrationCode = dto.RegistrationCode, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return NotFound(new { message = "Invalid registration code." });
             }
 
@@ -548,14 +548,14 @@ namespace garge_api.Controllers
             {
                 _context.UserSensors.Add(new UserSensor { UserId = userId!, SensorId = sensor.Id, IsOwner = true });
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("ClaimSensor assigned sensor to user {@LogData}", new { sensor.Id, User = User.Identity?.Name });
+                _logger.LogInformation("ClaimSensor assigned sensor to user {@LogData}", new { sensor.Id, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             }
             else
             {
-                _logger.LogInformation("ClaimSensor user already has sensor {@LogData}", new { User = User.Identity?.Name, sensor.Id });
+                _logger.LogInformation("ClaimSensor user already has sensor {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensor.Id });
             }
 
-            _logger.LogInformation("Sensor successfully claimed for user {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("Sensor successfully claimed for user {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(new { message = "Sensor successfully claimed and assigned to your account." });
         }
 
@@ -567,7 +567,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have access to this sensor.")]
         public async Task<IActionResult> UnclaimSensor(int id)
         {
-            _logger.LogInformation("UnclaimSensor called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("UnclaimSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
 
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
@@ -578,7 +578,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("UnclaimSensor forbidden for {@LogData}", new { User = User.Identity?.Name, id });
+                _logger.LogWarning("UnclaimSensor forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
                 return Forbid();
             }
 
@@ -601,7 +601,7 @@ namespace garge_api.Controllers
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
             return Ok(new { message = "Sensor removed from your account." });
         }
 
@@ -623,11 +623,11 @@ namespace garge_api.Controllers
         [HttpPost("generate-missing-default-names")]
         public async Task<IActionResult> GenerateMissingDefaultNames()
         {
-            _logger.LogInformation("GenerateMissingDefaultNames called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GenerateMissingDefaultNames called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             if (!IsAdmin())
             {
-                _logger.LogWarning("GenerateMissingDefaultNames forbidden for {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("GenerateMissingDefaultNames forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Forbid();
             }
 
@@ -660,11 +660,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Sensor name already exists.")]
         public async Task<IActionResult> CreateSensor([FromBody] CreateSensorDto sensorDto)
         {
-            _logger.LogInformation("CreateSensor called by {@LogData}", new { User = User.Identity?.Name, sensorDto.Name, sensorDto.Type });
+            _logger.LogInformation("CreateSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorDto.Name, sensorDto.Type });
 
             if (!IsAdmin())
             {
-                _logger.LogWarning("CreateSensor forbidden for {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("CreateSensor forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Forbid();
             }
 
@@ -707,19 +707,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataById(int sensorId, [FromBody] CreateSensorDataDto sensorDataDto)
         {
-            _logger.LogInformation("CreateSensorDataById called by {@LogData}", new { User = User.Identity?.Name, sensorId, sensorDataDto.Value });
+            _logger.LogInformation("CreateSensorDataById called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId, sensorDataDto.Value });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("CreateSensorDataById forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
             {
                 _logger.LogWarning("CreateSensorDataById not found: {@LogData}", new { sensorId });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("CreateSensorDataById forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
-                return Forbid();
             }
 
             var sensorData = new SensorData
@@ -750,19 +750,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataByName(string sensorName, [FromBody] CreateSensorDataDto sensorDataDto)
         {
-            _logger.LogInformation("CreateSensorDataByName called by {@LogData}", new { User = User.Identity?.Name, sensorName, sensorDataDto.Value });
+            _logger.LogInformation("CreateSensorDataByName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorName, sensorDataDto.Value });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("CreateSensorDataByName forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorName });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
                 _logger.LogWarning("CreateSensorDataByName not found: {@LogData}", new { sensorName });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("CreateSensorDataByName forbidden for {@LogData}", new { User = User.Identity?.Name, sensorName });
-                return Forbid();
             }
 
             if (string.IsNullOrWhiteSpace(sensorDataDto.Value) || !double.TryParse(sensorDataDto.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedValue))
@@ -800,19 +800,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> UpdateSensor(int id, [FromBody] UpdateSensorDto sensorDto)
         {
-            _logger.LogInformation("UpdateSensor called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("UpdateSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("UpdateSensor forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+                return Forbid();
+            }
 
             var existingSensor = await _context.Sensors.FindAsync(id);
             if (existingSensor == null)
             {
                 _logger.LogWarning("UpdateSensor not found: {@LogData}", new { id });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(existingSensor.Id))
-            {
-                _logger.LogWarning("UpdateSensor forbidden for {@LogData}", new { User = User.Identity?.Name, id });
-                return Forbid();
             }
 
             existingSensor.Name = sensorDto.Name;
@@ -838,19 +838,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSensor(int id)
         {
-            _logger.LogInformation("DeleteSensor called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("DeleteSensor called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("DeleteSensor forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
             {
                 _logger.LogWarning("DeleteSensor not found: {@LogData}", new { id });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("DeleteSensor forbidden for {@LogData}", new { User = User.Identity?.Name, id });
-                return Forbid();
             }
 
             _context.Sensors.Remove(sensor);
@@ -873,19 +873,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSensorData(int sensorId, int dataId)
         {
-            _logger.LogInformation("DeleteSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId, dataId });
+            _logger.LogInformation("DeleteSensorData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId, dataId });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("DeleteSensorData forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
             {
                 _logger.LogWarning("DeleteSensorData not found: {@LogData}", new { sensorId });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("DeleteSensorData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
-                return Forbid();
             }
 
             var sensorData = await _context.SensorData.FindAsync(dataId);
@@ -914,19 +914,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteAllSensorData(int sensorId)
         {
-            _logger.LogInformation("DeleteAllSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("DeleteAllSensorData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("DeleteAllSensorData forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
             {
                 _logger.LogWarning("DeleteAllSensorData not found: {@LogData}", new { sensorId });
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("DeleteAllSensorData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
-                return Forbid();
             }
 
             var sensorData = _context.SensorData.Where(sd => sd.SensorId == sensorId);
@@ -954,7 +954,7 @@ namespace garge_api.Controllers
             [FromBody] UpdateCustomNameDto dto,
             [FromQuery] string? userId = null)
         {
-            _logger.LogInformation("UpdateCustomName called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("UpdateCustomName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -965,7 +965,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("UpdateCustomName forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
+                _logger.LogWarning("UpdateCustomName forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
                 return Forbid();
             }
 
@@ -978,19 +978,19 @@ namespace garge_api.Controllers
 
             if (!isSensorAdmin && targetUserId != currentUserId)
             {
-                _logger.LogWarning("UpdateCustomName forbidden: {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("UpdateCustomName forbidden: {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Forbid();
             }
 
             if (string.IsNullOrEmpty(targetUserId))
             {
-                _logger.LogWarning("UpdateCustomName unauthorized: {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("UpdateCustomName unauthorized: {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return Unauthorized();
             }
 
             if (string.IsNullOrWhiteSpace(dto.CustomName) || dto.CustomName.Length > 50)
             {
-                _logger.LogWarning("UpdateCustomName bad request: {@LogData}", new { sensorId, User = User.Identity?.Name });
+                _logger.LogWarning("UpdateCustomName bad request: {@LogData}", new { sensorId, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
                 return BadRequest(new { message = "CustomName is required and must be at most 50 characters." });
             }
 
@@ -1024,7 +1024,7 @@ namespace garge_api.Controllers
                 CreatedAt = entry.CreatedAt
             };
 
-            _logger.LogInformation("Custom name updated for {@LogData}", new { sensorId, User = User.Identity?.Name });
+            _logger.LogInformation("Custom name updated for {@LogData}", new { sensorId, CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             return Ok(resultDto);
         }
 
@@ -1040,7 +1040,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestSensorData(int sensorId)
         {
-            _logger.LogInformation("GetLatestSensorData called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("GetLatestSensorData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -1051,7 +1051,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetLatestSensorData forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
+                _logger.LogWarning("GetLatestSensorData forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
                 return Forbid();
             }
 

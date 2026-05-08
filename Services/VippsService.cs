@@ -487,13 +487,38 @@ namespace garge_api.Services
         private static StringContent BuildJsonContent(object body) =>
             new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
+        private static (string? errorCode, string? errorRef, string? traceId) TryExtractVippsErrorIds(string body)
+        {
+            if (string.IsNullOrEmpty(body)) return (null, null, null);
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                var root = doc.RootElement;
+                string? errorCode = null, errorRef = null, traceId = null;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    if (root.TryGetProperty("errorCode", out var ec) && ec.ValueKind == JsonValueKind.String) errorCode = ec.GetString();
+                    if (root.TryGetProperty("errorRef", out var er) && er.ValueKind == JsonValueKind.String) errorRef = er.GetString();
+                    if (root.TryGetProperty("traceId", out var ti) && ti.ValueKind == JsonValueKind.String) traceId = ti.GetString();
+                }
+                return (errorCode, errorRef, traceId);
+            }
+            catch
+            {
+                return (null, null, null);
+            }
+        }
+
         private async Task<string> ReadAsStringAndEnsureSuccessAsync(HttpResponseMessage response, string operation)
         {
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogError("Vipps {Operation} failed: {Status} {Body}",
-                    operation, (int)response.StatusCode, body);
+                // Body may echo phone, agreementId, name etc. Log only the
+                // Vipps-specific identifiers so PII does not land in log sinks.
+                var (errorCode, errorRef, traceId) = TryExtractVippsErrorIds(body);
+                _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
+                    operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
                 response.EnsureSuccessStatusCode();
             }
             return body;

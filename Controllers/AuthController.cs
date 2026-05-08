@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Swashbuckle.AspNetCore.Annotations;
 using System.IdentityModel.Tokens.Jwt;
@@ -71,11 +72,13 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = "Email is required!" });
             }
 
+            const string genericResponse = "If the email is available, an account has been created. Check your inbox to confirm.";
+
             var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
             if (existingUser != null)
             {
-                _logger.LogWarning("Register failed: Email already registered");
-                return Conflict(new { message = "Email is already registered!" });
+                _logger.LogWarning("Register: email already registered (suppressed for enumeration safety)");
+                return Ok(new { message = genericResponse });
             }
 
             // Use AutoMapper to map DTO to User
@@ -105,7 +108,7 @@ namespace garge_api.Controllers
                 await _emailService.SendEmailAsync(user.Email!, "Confirm your email", $"Your verification code is: {verificationCode}");
 
                 _logger.LogInformation("User registered successfully {UserId}", user.Id);
-                return Ok(new { message = "User registered successfully. Please check your email to confirm your account." });
+                return Ok(new { message = genericResponse });
             }
 
             _logger.LogError("Register failed: {@Errors}", result.Errors);
@@ -164,7 +167,7 @@ namespace garge_api.Controllers
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddDays(7),
+                Expires = DateTime.UtcNow.AddHours(1),
                 NotBefore = DateTime.UtcNow.AddSeconds(-5),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
                 Issuer = _configuration["Jwt:Issuer"],
@@ -246,23 +249,25 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("VerifyEmail called");
 
+            const string genericInvalid = "Invalid or expired verification code!";
+
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("VerifyEmail failed: User not found");
-                return NotFound(new { message = "User not found!" });
+                _logger.LogWarning("VerifyEmail: unknown email (suppressed for enumeration safety)");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.EmailConfirmed)
             {
-                _logger.LogWarning("VerifyEmail failed: Email already verified");
-                return BadRequest(new { message = "Email is already verified!" });
+                _logger.LogWarning("VerifyEmail: already verified (suppressed for enumeration safety)");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.EmailVerificationCodeHash != HashText(model.Code) || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
             {
                 _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
-                return BadRequest(new { message = "Invalid or expired verification code!" });
+                return BadRequest(new { message = genericInvalid });
             }
 
             user.EmailConfirmed = true;
@@ -314,11 +319,32 @@ namespace garge_api.Controllers
             }
 
             var hashedInput = HashText(request.RefreshToken);
-            var storedToken = _context.RefreshTokens
-                .FirstOrDefault(t => t.Token == hashedInput && t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow);
+
+            using var tx = await _context.Database.BeginTransactionAsync();
+
+            // Reuse detection: if the presented token matches a row we have
+            // already revoked, treat it as a stolen-token replay and revoke
+            // every refresh token in the family.
+            var anyMatch = await _context.RefreshTokens
+                .FirstOrDefaultAsync(t => t.Token == hashedInput && t.UserId == user.Id);
+
+            if (anyMatch != null && anyMatch.Revoked != null)
+            {
+                var familyTokens = _context.RefreshTokens.Where(t => t.UserId == user.Id && t.Revoked == null);
+                var now = DateTime.UtcNow;
+                await familyTokens.ExecuteUpdateAsync(s => s.SetProperty(t => t.Revoked, _ => now));
+                await tx.CommitAsync();
+                _logger.LogWarning("RefreshToken reuse detected; family revoked {@LogData}", new { user.Id });
+                return Unauthorized(new { message = "Invalid or expired refresh token" });
+            }
+
+            var storedToken = anyMatch != null && anyMatch.Revoked == null && anyMatch.Expires > DateTime.UtcNow
+                ? anyMatch
+                : null;
 
             if (storedToken == null)
             {
+                await tx.RollbackAsync();
                 _logger.LogWarning("RefreshToken failed: Invalid or expired refresh token {@LogData}", new { user.Id });
                 return Unauthorized(new { message = "Invalid or expired refresh token" });
             }
@@ -338,7 +364,7 @@ namespace garge_api.Controllers
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddDays(7),
+                Expires = DateTime.UtcNow.AddHours(1),
                 NotBefore = DateTime.UtcNow.AddSeconds(-5),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
                 Issuer = _configuration["Jwt:Issuer"],
@@ -374,6 +400,7 @@ namespace garge_api.Controllers
             };
             _context.RefreshTokens.Add(newRefreshToken);
             await _context.SaveChangesAsync();
+            await tx.CommitAsync();
 
             _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
             return Ok(new { token = newTokenString, refreshToken = newRawToken });
@@ -422,11 +449,13 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("ResetPassword called");
 
+            const string genericInvalid = "Invalid or expired reset code!";
+
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("ResetPassword failed: User not found");
-                return NotFound(new { message = "User not found!" });
+                _logger.LogWarning("ResetPassword: unknown email (suppressed for enumeration safety)");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.PasswordResetAttempts >= 5)
@@ -440,7 +469,7 @@ namespace garge_api.Controllers
                 user.PasswordResetAttempts++;
                 await _userManager.UpdateAsync(user);
                 _logger.LogWarning("ResetPassword failed: Invalid or expired code");
-                return BadRequest(new { message = "Invalid or expired reset code!" });
+                return BadRequest(new { message = genericInvalid });
             }
 
             var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);

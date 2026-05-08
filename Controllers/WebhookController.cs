@@ -33,7 +33,7 @@ namespace garge_api.Controllers
         [HttpPost]
         public async Task<IActionResult> AddWebhook([FromBody] CreateWebhookSubscriptionDto webhookDto)
         {
-            _logger.LogInformation("AddWebhook called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("AddWebhook called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             if (!ModelState.IsValid)
             {
@@ -62,7 +62,7 @@ namespace garge_api.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> GetWebhook(int id)
         {
-            _logger.LogInformation("GetWebhook called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("GetWebhook called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
 
             var webhookSubscription = await _context.WebhookSubscriptions.FindAsync(id);
 

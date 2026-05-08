@@ -169,7 +169,7 @@ public class AuthControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Register_EmailAlreadyExists_ReturnsConflict()
+    public async Task Register_EmailAlreadyExists_ReturnsGenericOkToPreventEnumeration()
     {
         MockUserManager.Setup(m => m.FindByEmailAsync("exists@test.com")).ReturnsAsync(MakeUser());
 
@@ -182,6 +182,8 @@ public class AuthControllerTests : ControllerTestBase
             LastName = "Last"
         });
 
-        Assert.IsType<ConflictObjectResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        // Must not invoke CreateAsync for an existing email; CreateAsync sends a verification email.
+        MockUserManager.Verify(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
     }
 }

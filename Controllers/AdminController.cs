@@ -239,7 +239,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Stats retrieved successfully.", typeof(AdminStatsDto))]
         public async Task<IActionResult> GetStats([FromQuery] bool test = false)
         {
-            _logger.LogInformation("GetStats called by {@LogData}", new { User = User.Identity?.Name, Test = test });
+            _logger.LogInformation("GetStats called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), Test = test });
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -307,7 +307,7 @@ namespace garge_api.Controllers
         [SwaggerOperation(Summary = "Gets all discovered MQTT devices.")]
         public async Task<IActionResult> GetDevices()
         {
-            _logger.LogInformation("GetDevices called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GetDevices called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             var devices = await _context.DiscoveredDevices
                 .OrderByDescending(d => d.Timestamp)
@@ -323,7 +323,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
         public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
         {
-            _logger.LogInformation("GetEmailStats called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GetEmailStats called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
             try
             {
                 var stats = await _emailService.GetEmailStatsAsync(days);
@@ -343,7 +343,7 @@ namespace garge_api.Controllers
         [SwaggerOperation(Summary = "Gets cumulative daily stats over time.")]
         public async Task<IActionResult> GetStatsHistory()
         {
-            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { User = User.Identity?.Name });
+            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier) });
 
             var userDates = await _userManager.Users
                 .Select(u => u.CreatedAt.Date)

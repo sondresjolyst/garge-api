@@ -48,12 +48,12 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
-            _logger.LogInformation("GetUserProfile called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id });
 
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || userIdClaim.Value != id.ToString())
             {
-                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { User = User.Identity?.Name, id, ClaimId = userIdClaim?.Value });
+                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), id, ClaimId = userIdClaim?.Value });
                 return Forbid();
             }
 
