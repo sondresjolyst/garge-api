@@ -101,7 +101,8 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "User not found!" });
 
             // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
-            // a valid FK for the 5-year bokføringsloven retention window. Untie the user
+            // a valid FK for the 5-year retention window required by the Norwegian
+            // Bookkeeping Act (bokføringsloven §13). Untie the user
             // from per-account artefacts (custom names, push subs, refresh tokens etc.)
             // so nothing can re-attach them later.
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == id));
