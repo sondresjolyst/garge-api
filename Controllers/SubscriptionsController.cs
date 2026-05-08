@@ -21,6 +21,8 @@ namespace garge_api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IVippsService _vipps;
+        private readonly IInvoiceService _invoice;
+        private readonly ISubscriptionEmailService _subEmail;
         private readonly IAppSettingsCache _settingsCache;
         private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
@@ -31,6 +33,8 @@ namespace garge_api.Controllers
         public SubscriptionsController(
             ApplicationDbContext context,
             IVippsService vipps,
+            IInvoiceService invoice,
+            ISubscriptionEmailService subEmail,
             IAppSettingsCache settingsCache,
             IWebhookSecretProtector protector,
             IWebPushService push,
@@ -40,12 +44,90 @@ namespace garge_api.Controllers
         {
             _context = context;
             _vipps = vipps;
+            _invoice = invoice;
+            _subEmail = subEmail;
             _settingsCache = settingsCache;
             _protector = protector;
             _push = push;
             _appOpts = appOpts.Value;
             _mapper = mapper;
             _logger = logger;
+        }
+
+        /// <summary>Admin: list every subscription with the user's name + email, plus invoice count for the in-app subscriptions admin page.</summary>
+        [HttpGet("all")]
+        [Authorize(Policy = "Admin")]
+        public async Task<IActionResult> GetAllSubscriptions()
+        {
+            var rows = await _context.Subscriptions
+                .Include(s => s.User)
+                .Include(s => s.Product)
+                .OrderByDescending(s => s.CreatedAt)
+                .Select(s => new AdminSubscriptionResponseDto
+                {
+                    Id = s.Id,
+                    UserId = s.UserId,
+                    UserEmail = s.User != null ? s.User.Email ?? string.Empty : string.Empty,
+                    UserName = s.User != null ? (s.User.FirstName + " " + s.User.LastName).Trim() : string.Empty,
+                    ProductName = s.Product != null ? s.Product.Name : string.Empty,
+                    ProductType = s.Product != null ? s.Product.Type.ToString() : string.Empty,
+                    PriceInOre = s.Product != null ? s.Product.PriceInOre : 0,
+                    Interval = s.Product != null ? s.Product.Interval.ToString() : string.Empty,
+                    Status = s.Status.ToString(),
+                    IsTest = s.IsTest,
+                    StartDate = s.StartDate,
+                    NextChargeDate = s.NextChargeDate,
+                    InvoiceCount = _context.Invoices.Count(i => i.SubscriptionId == s.Id),
+                    CreatedAt = s.CreatedAt,
+                    UpdatedAt = s.UpdatedAt,
+                })
+                .ToListAsync();
+
+            return Ok(rows);
+        }
+
+        /// <summary>Lists invoice metadata for a subscription. Owner or admin only.</summary>
+        [HttpGet("{id:int}/invoices")]
+        public async Task<IActionResult> GetSubscriptionInvoices(int id)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var isAdmin = User.IsInRole("Admin");
+
+            var subscription = await _context.Subscriptions
+                .FirstOrDefaultAsync(s => s.Id == id);
+            if (subscription == null) return NotFound();
+            if (!isAdmin && subscription.UserId != userId) return Forbid();
+
+            var invoices = await _context.Invoices
+                .Where(i => i.SubscriptionId == id)
+                .OrderByDescending(i => i.IssuedAt)
+                .Select(i => new
+                {
+                    i.Id,
+                    i.IssuedAt,
+                    i.AmountInOre,
+                    i.VippsChargeId,
+                })
+                .ToListAsync();
+
+            return Ok(invoices);
+        }
+
+        /// <summary>Downloads a single subscription invoice PDF. Owner or admin only.</summary>
+        [HttpGet("invoices/{invoiceId:int}/pdf")]
+        public async Task<IActionResult> GetSubscriptionInvoicePdf(int invoiceId)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var isAdmin = User.IsInRole("Admin");
+
+            var invoice = await _context.Invoices
+                .Include(i => i.Subscription)
+                .FirstOrDefaultAsync(i => i.Id == invoiceId && i.SubscriptionId != null);
+            if (invoice == null) return NotFound("Subscription invoice not found.");
+            if (!isAdmin && invoice.Subscription?.UserId != userId) return Forbid();
+
+            return File(invoice.PdfData, "application/pdf",
+                $"invoice-{invoice.Id:D4}.pdf");
         }
 
         /// <summary>Returns the current user's subscriptions. Stopped/Expired hidden once next-charge date passed (grace period).</summary>
@@ -304,12 +386,43 @@ namespace garge_api.Controllers
                 payload.AgreementId, payload.EventType);
 
             if (!wasActive && subscription.Status == SubscriptionStatus.Active)
+            {
+                try { await _subEmail.SendActivatedAsync(subscription.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Activation email failed for subscription {SubscriptionId}", subscription.Id); }
+
                 _ = SafePushAsync(subscription.UserId, "Subscription active",
                     "Your Garge subscription is confirmed.");
+            }
+
+            if (payload.EventType == VippsEvents.ChargeCaptured && !string.IsNullOrEmpty(payload.ChargeId))
+            {
+                var product = await _context.Products.FindAsync(subscription.ProductId);
+                if (product != null)
+                {
+                    try
+                    {
+                        await _invoice.GenerateForSubscriptionChargeAsync(
+                            subscription.Id,
+                            payload.ChargeId,
+                            product.PriceInOre,
+                            payload.Occurred ?? DateTime.UtcNow);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Subscription invoice generation failed for subscription {SubscriptionId} charge {ChargeId}",
+                            subscription.Id, payload.ChargeId);
+                    }
+                }
+            }
 
             if (payload.EventType is VippsEvents.ChargeFailed or VippsEvents.ChargeCreationFailed)
+            {
+                try { await _subEmail.SendChargeFailedAsync(subscription.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Charge-failed email failed for subscription {SubscriptionId}", subscription.Id); }
+
                 _ = SafePushAsync(subscription.UserId, "Payment failed",
                     "We couldn't charge your Garge subscription. Please update your payment method in Vipps.");
+            }
 
             return Ok();
         }

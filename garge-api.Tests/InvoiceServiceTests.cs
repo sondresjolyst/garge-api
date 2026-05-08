@@ -193,4 +193,89 @@ public class InvoiceServiceTests
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => svc.GenerateAndStoreAsync(orderId: 99999));
     }
+
+    private static async Task<garge_api.Models.Subscription.Subscription> SeedSubscriptionAsync(ApplicationDbContext db)
+    {
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1, CompanyName = "Garge" });
+        await db.Users.AddAsync(new User
+        {
+            Id = "user-sub", Email = "buyer@example.com", UserName = "buyer@example.com",
+            FirstName = "Sondre", LastName = "Sjølyst"
+        });
+        var product = new garge_api.Models.Subscription.Product
+        {
+            Id = 9, Name = "Garge Basic", PriceInOre = 29900,
+            Interval = garge_api.Models.Subscription.BillingInterval.Monthly,
+            Type = garge_api.Models.Subscription.ProductType.Primary,
+            IsActive = true,
+        };
+        await db.Products.AddAsync(product);
+        var subscription = new garge_api.Models.Subscription.Subscription
+        {
+            UserId = "user-sub",
+            ProductId = product.Id,
+            VippsAgreementId = "agr-test",
+            Status = garge_api.Models.Subscription.SubscriptionStatus.Active,
+        };
+        await db.Subscriptions.AddAsync(subscription);
+        await db.SaveChangesAsync();
+        return subscription;
+    }
+
+    [Fact]
+    public async Task GenerateForSubscriptionChargeAsync_HappyPath_RendersAndEmails()
+    {
+        var (svc, db, email, pdf) = Create();
+        var subscription = await SeedSubscriptionAsync(db);
+
+        var id = await svc.GenerateForSubscriptionChargeAsync(
+            subscription.Id, "charge-1", amountInOre: 29900, occurredAt: DateTime.UtcNow);
+
+        var saved = await db.Invoices.SingleAsync();
+        Assert.Equal(id, saved.Id);
+        Assert.Equal(subscription.Id, saved.SubscriptionId);
+        Assert.Equal("charge-1", saved.VippsChargeId);
+        Assert.Equal(29900, saved.AmountInOre);
+        Assert.Null(saved.OrderId);
+        Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        email.Verify(e => e.SendEmailAsync(
+            "buyer@example.com",
+            It.Is<string>(s => s.Contains($"#{id:D4}")),
+            It.IsAny<string>(),
+            It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 1)), Times.Once);
+    }
+
+    [Fact]
+    public async Task GenerateForSubscriptionChargeAsync_DuplicateChargeId_ShortCircuits()
+    {
+        var (svc, db, email, pdf) = Create();
+        var subscription = await SeedSubscriptionAsync(db);
+
+        var first = await svc.GenerateForSubscriptionChargeAsync(
+            subscription.Id, "charge-dup", 29900, DateTime.UtcNow);
+        var second = await svc.GenerateForSubscriptionChargeAsync(
+            subscription.Id, "charge-dup", 29900, DateTime.UtcNow);
+
+        Assert.Equal(first, second);
+        Assert.Single(db.Invoices);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GenerateForSubscriptionChargeAsync_RenderFails_RemovesPlaceholderRow()
+    {
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
+        var (svc, db, _, _) = Create(pdf);
+        var subscription = await SeedSubscriptionAsync(db);
+
+        await Assert.ThrowsAsync<Exception>(() =>
+            svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-fail", 29900, DateTime.UtcNow));
+
+        Assert.Empty(db.Invoices);
+    }
 }

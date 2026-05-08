@@ -9,5 +9,14 @@ namespace garge_api.Services
         /// reusing the same invoice row.
         /// </summary>
         Task<int> GenerateAndStoreAsync(int orderId, bool force = false);
+
+        /// <summary>
+        /// Generate the invoice for a single recurring charge against a Vipps subscription
+        /// agreement and email the buyer. Idempotent on <paramref name="vippsChargeId"/>:
+        /// webhook redelivery for the same charge returns the existing invoice id without
+        /// inserting a duplicate row or re-emailing.
+        /// </summary>
+        Task<int> GenerateForSubscriptionChargeAsync(
+            int subscriptionId, string vippsChargeId, int amountInOre, DateTime occurredAt);
     }
 }
