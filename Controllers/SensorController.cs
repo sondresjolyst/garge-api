@@ -707,7 +707,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataById(int sensorId, [FromBody] CreateSensorDataDto sensorDataDto)
         {
-            _logger.LogInformation("CreateSensorDataById called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId, sensorDataDto.Value });
+            _logger.LogInformation("CreateSensorDataById called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorId });
 
             if (!IsAdmin())
             {
@@ -733,7 +733,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var dto = _mapper.Map<SensorDataDto>(sensorData);
-            _logger.LogInformation("Sensor data created: {@LogData}", new { sensorData.Id, sensorId, sensorData.Value });
+            _logger.LogInformation("Sensor data created: {@LogData}", new { sensorData.Id, sensorId });
             return CreatedAtAction(nameof(GetSensorData), new { sensorId }, dto);
         }
 
@@ -750,7 +750,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataByName(string sensorName, [FromBody] CreateSensorDataDto sensorDataDto)
         {
-            _logger.LogInformation("CreateSensorDataByName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorName, sensorDataDto.Value });
+            _logger.LogInformation("CreateSensorDataByName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), sensorName });
 
             if (!IsAdmin())
             {
@@ -782,7 +782,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             var dto = _mapper.Map<SensorDataDto>(sensorData);
-            _logger.LogInformation("Sensor data created: {@LogData}", new { sensorData.Id, sensorName, sensorData.Value });
+            _logger.LogInformation("Sensor data created: {@LogData}", new { sensorData.Id, sensorName });
             return CreatedAtAction(nameof(GetSensorData), new { sensorId = sensor.Id }, dto);
         }
 

@@ -357,7 +357,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchData(int switchId, [FromBody] CreateSwitchDataDto switchDataDto)
         {
-            _logger.LogInformation("CreateSwitchData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), switchId, switchDataDto.Value });
+            _logger.LogInformation("CreateSwitchData called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), switchId });
 
             if (!IsSwitchAdmin())
             {
@@ -389,7 +389,7 @@ namespace garge_api.Controllers
 
             var dto = _mapper.Map<SwitchDataDto>(switchData);
 
-            _logger.LogInformation("Switch data created: {@LogData}", new { switchData.Id, switchId, switchData.Value });
+            _logger.LogInformation("Switch data created: {@LogData}", new { switchData.Id, switchId });
             return CreatedAtAction(nameof(GetSwitchData), new { switchId = switchId }, dto);
         }
 
@@ -497,7 +497,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchDataByName(string switchName, [FromBody] CreateSwitchDataDto switchDataDto)
         {
-            _logger.LogInformation("CreateSwitchDataByName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), switchName, switchDataDto.Value });
+            _logger.LogInformation("CreateSwitchDataByName called by {@LogData}", new { CallerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier), switchName });
 
             if (!IsSwitchAdmin())
             {
@@ -529,7 +529,7 @@ namespace garge_api.Controllers
 
             var dto = _mapper.Map<SwitchDataDto>(switchData);
 
-            _logger.LogInformation("Switch data created: {@LogData}", new { switchData.Id, switchName, switchData.Value });
+            _logger.LogInformation("Switch data created: {@LogData}", new { switchData.Id, switchName });
             return CreatedAtAction(nameof(GetSwitchData), new { switchId = switchEntity.Id }, dto);
         }
 
