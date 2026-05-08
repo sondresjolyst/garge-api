@@ -28,14 +28,14 @@ public class PostgresNotificationService : BackgroundService
         {
             try
             {
-                _logger.LogWarning($"Notification received: {args.Payload}");
-
                 var switchData = JsonConvert.DeserializeObject<SwitchData>(args.Payload);
                 if (switchData == null)
                 {
                     _logger.LogWarning("Deserialized SwitchData is null.");
                     return;
                 }
+
+                _logger.LogDebug("Notification received for switch {SwitchId}", switchData.SwitchId);
 
                 // Retrieve the related Switch entity
                 using var scope = _scopeFactory.CreateScope();
@@ -44,18 +44,18 @@ public class PostgresNotificationService : BackgroundService
 
                 if (switchData.Switch == null)
                 {
-                    _logger.LogWarning($"Switch with ID {switchData.SwitchId} not found.");
+                    _logger.LogWarning("Switch with ID {SwitchId} not found.", switchData.SwitchId);
                 }
 
                 await NotifySubscribersAsync(switchData);
             }
             catch (JsonException ex)
             {
-                _logger.LogWarning($"Failed to deserialize notification payload: {args.Payload}. Error: {ex.Message}");
+                _logger.LogWarning(ex, "Failed to deserialize switchdata_channel notification payload.");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Error processing notification: {ex.Message}");
+                _logger.LogWarning(ex, "Error processing switchdata_channel notification.");
             }
         };
 

@@ -15,7 +15,7 @@ namespace garge_api.Controllers
 {
     [ApiController]
     [Route("api/roles")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = "Admin")]
     public class AdminController : ControllerBase
     {
         private readonly RoleManager<IdentityRole> _roleManager;

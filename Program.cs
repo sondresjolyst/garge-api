@@ -101,6 +101,7 @@ namespace garge_api
                 options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
             }).AddJwtBearer(options =>
             {
+                options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -109,7 +110,8 @@ namespace garge_api
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtIssuer,
                     ValidAudience = jwtIssuer,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                    ClockSkew = TimeSpan.FromSeconds(30)
                 };
                 options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
                 {
@@ -265,6 +267,12 @@ namespace garge_api
             fwd.KnownNetworks.Clear();
             fwd.KnownProxies.Clear();
             app.UseForwardedHeaders(fwd);
+
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHsts();
+                app.UseHttpsRedirection();
+            }
 
             app.UseResponseCompression();
             app.UseSwagger();
