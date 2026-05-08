@@ -19,5 +19,8 @@ namespace garge_api.Constants
         {
             { "Default", new string[] { "Electricity" } },
         };
+
+        public static readonly HashSet<string> KnownPermissions =
+            RolePermissions.Values.SelectMany(p => p).ToHashSet(StringComparer.Ordinal);
     }
 }

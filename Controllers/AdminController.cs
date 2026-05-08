@@ -444,6 +444,12 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Role not found!" });
             }
 
+            if (!Constants.RoleNames.KnownPermissions.Contains(permission))
+            {
+                _logger.LogWarning("AssignPermission failed: Unknown permission {@LogData}", new { permission });
+                return BadRequest(new { message = $"Unknown permission. Allowed: {string.Join(", ", Constants.RoleNames.KnownPermissions)}." });
+            }
+
             var rolePermission = new RolePermission
             {
                 RoleName = roleName,
