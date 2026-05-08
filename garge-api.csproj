@@ -15,6 +15,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="garge-api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="AspNetCoreRateLimit" Version="5.0.0" />
     <PackageReference Include="AutoMapper" Version="16.1.1" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />

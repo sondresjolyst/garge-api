@@ -19,6 +19,41 @@ namespace garge_api.Services
             public string? FootNote { get; set; }    // e.g. "Vipps order #7"
         }
 
+        public sealed class Party
+        {
+            public string Label { get; set; } = string.Empty;
+            public string Name { get; set; } = string.Empty;
+            public List<string> Lines { get; set; } = new();
+        }
+
+        public static string RenderParties(Party from, Party to)
+        {
+            static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
+            static string LinesHtml(IEnumerable<string> lines) =>
+                string.Join("<br>", lines.Where(l => !string.IsNullOrEmpty(l)).Select(H));
+
+            return $$"""
+                <table role="presentation" class="parties" cellpadding="0" cellspacing="0" border="0">
+                  <tr>
+                    <td>
+                      <div class="party-label">{{H(from.Label)}}</div>
+                      <p>
+                        <strong>{{H(from.Name)}}</strong><br>
+                        {{LinesHtml(from.Lines)}}
+                      </p>
+                    </td>
+                    <td class="r">
+                      <div class="party-label">{{H(to.Label)}}</div>
+                      <p>
+                        <strong>{{H(to.Name)}}</strong><br>
+                        {{LinesHtml(to.Lines)}}
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+                """;
+        }
+
         public static string Render(AppSettings s, Meta? meta, string bodyHtml)
         {
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
@@ -36,7 +71,7 @@ namespace garge_api.Services
                     : $"""<span class="badge">{H(meta.Badge)}</span>""";
                 var foot = string.IsNullOrEmpty(meta.FootNote) ? string.Empty
                     : $"""<div class="meta-foot">{H(meta.FootNote)}</div>""";
-                metaBlock = $"""<div class="meta">{number}{subtitle}{badge}{foot}</div>""";
+                metaBlock = $"{number}{subtitle}{badge}{foot}";
             }
 
             return $$"""
@@ -52,13 +87,12 @@ namespace garge_api.Services
                     background: #182232;
                     color: #fff;
                     padding: 28px 32px 20px;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: flex-start;
                   }
+                  .header-band table { width: 100%; }
+                  .header-band td { padding: 0; border: none; background: transparent; vertical-align: top; }
+                  .header-band td.r { text-align: right; }
                   .brand { font-size: 22px; font-weight: 700; letter-spacing: .04em; margin-bottom: 4px; }
                   .brand-sub { font-size: 11px; opacity: .85; line-height: 1.5; }
-                  .meta { text-align: right; }
                   .meta-number { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
                   .meta-subtitle { font-size: 11px; opacity: .85; margin-bottom: 6px; }
                   .meta-foot { margin-top: 6px; font-size: 10px; opacity: .75; }
@@ -80,8 +114,9 @@ namespace garge_api.Services
                   .body h1, .body h2 { color: #1a1a1a; margin-bottom: 8px; }
                   .body h1 { font-size: 18px; }
 
-                  .parties { display: flex; gap: 40px; margin-bottom: 24px; }
-                  .party { flex: 1; }
+                  table.parties { width: 100%; margin-bottom: 24px; border-collapse: separate; border-spacing: 0; }
+                  table.parties td { width: 50%; padding: 0 20px 0 0; vertical-align: top; border: none; background: transparent; }
+                  table.parties td.r { padding: 0 0 0 20px; text-align: right; }
                   .party-label {
                     font-size: 9px; font-weight: 700; text-transform: uppercase;
                     letter-spacing: .1em; color: #0284c7; margin-bottom: 6px;
@@ -120,16 +155,22 @@ namespace garge_api.Services
                 <body>
 
                 <div class="header-band">
-                  <div>
-                    <div class="brand">{{H(s.CompanyName)}}</div>
-                    <div class="brand-sub">
-                      {{H(s.CompanyLegalName)}}<br>
-                      Org. no. {{H(orgLine)}}<br>
-                      {{H(s.CompanyAddress)}}<br>
-                      {{H(s.CompanyEmail)}}
-                    </div>
-                  </div>
-                  {{metaBlock}}
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td>
+                        <div class="brand">{{H(s.CompanyName)}}</div>
+                        <div class="brand-sub">
+                          {{H(s.CompanyLegalName)}}<br>
+                          Org. no. {{H(orgLine)}}<br>
+                          {{H(s.CompanyAddress)}}<br>
+                          {{H(s.CompanyEmail)}}
+                        </div>
+                      </td>
+                      <td class="r">
+                        {{metaBlock}}
+                      </td>
+                    </tr>
+                  </table>
                 </div>
 
                 <div class="body">

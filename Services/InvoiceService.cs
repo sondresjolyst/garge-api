@@ -195,24 +195,30 @@ namespace garge_api.Services
                 ? $"{subscription.User.FirstName} {subscription.User.LastName}"
                 : "—";
 
+            int net = amountInOre, vatAmount = 0;
+            if (s.VatEnabled)
+            {
+                net = (int)Math.Round(amountInOre / 1.25);
+                vatAmount = amountInOre - net;
+            }
+            var subRows = BuildVatSubRows(s.VatEnabled, net, vatAmount);
+
+            var partiesHtml = EmailLayout.RenderParties(
+                from: new EmailLayout.Party
+                {
+                    Label = "From",
+                    Name = s.CompanyLegalName,
+                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                },
+                to: new EmailLayout.Party
+                {
+                    Label = "Bill to",
+                    Name = buyerName,
+                    Lines = { subscription.User?.Email ?? string.Empty, subscription.BillingAddress ?? string.Empty }
+                });
+
             var body = $$"""
-                <div class="parties">
-                  <div class="party">
-                    <div class="party-label">From</div>
-                    <p>
-                      <strong>{{H(s.CompanyLegalName)}}</strong><br>
-                      {{H(s.CompanyAddress)}}<br>
-                      {{H(s.CompanyEmail)}}
-                    </p>
-                  </div>
-                  <div class="party">
-                    <div class="party-label">Bill to</div>
-                    <p>
-                      <strong>{{H(buyerName)}}</strong><br>
-                      {{H(subscription.User?.Email)}}
-                    </p>
-                  </div>
-                </div>
+                {{partiesHtml}}
 
                 <table>
                   <thead>
@@ -231,6 +237,7 @@ namespace garge_api.Services
 
                 <div class="totals-section">
                   <table>
+                    <tbody>{{subRows}}</tbody>
                     <tbody>
                       <tr class="grand">
                         <td>Total</td>
@@ -290,12 +297,7 @@ namespace garge_api.Services
                     """);
             }
 
-            var subRows = s.VatEnabled
-                ? $"""
-                    <tr class="sub"><td class="r">Subtotal excl. VAT</td><td class="r">NOK {Nok(totalExcl)}</td></tr>
-                    <tr class="sub"><td class="r">VAT</td><td class="r">NOK {Nok(totalVat)}</td></tr>
-                  """
-                : string.Empty;
+            var subRows = BuildVatSubRows(s.VatEnabled, totalExcl, totalVat);
 
             var deliveryNote = order.ShippedAt.HasValue
                 ? $"Shipped on {order.ShippedAt.Value:yyyy-MM-dd}."
@@ -303,25 +305,22 @@ namespace garge_api.Services
 
             var buyerName = order.User != null ? $"{order.User.FirstName} {order.User.LastName}" : "—";
 
+            var partiesHtml = EmailLayout.RenderParties(
+                from: new EmailLayout.Party
+                {
+                    Label = "From",
+                    Name = s.CompanyLegalName,
+                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                },
+                to: new EmailLayout.Party
+                {
+                    Label = "Bill to",
+                    Name = buyerName,
+                    Lines = { order.User?.Email ?? string.Empty, order.ShippingAddress ?? string.Empty }
+                });
+
             var body = $$"""
-                <div class="parties">
-                  <div class="party">
-                    <div class="party-label">From</div>
-                    <p>
-                      <strong>{{H(s.CompanyLegalName)}}</strong><br>
-                      {{H(s.CompanyAddress)}}<br>
-                      {{H(s.CompanyEmail)}}
-                    </p>
-                  </div>
-                  <div class="party">
-                    <div class="party-label">Bill to</div>
-                    <p>
-                      <strong>{{H(buyerName)}}</strong><br>
-                      {{H(order.User?.Email)}}<br>
-                      {{H(order.ShippingAddress)}}
-                    </p>
-                  </div>
-                </div>
+                {{partiesHtml}}
 
                 <table>
                   <thead>
@@ -351,7 +350,7 @@ namespace garge_api.Services
                 </div>
 
                 <div class="footer">
-                  <p>Payment received via Vipps.</p>
+                  <p>Paid via Vipps.</p>
                   <p>Delivery address: {{H(order.ShippingAddress)}} — {{deliveryNote}}</p>
                 </div>
                 """;
@@ -363,6 +362,15 @@ namespace garge_api.Services
                 Badge = "Paid",
                 FootNote = $"Vipps order #{order.Id}"
             }, body);
+        }
+
+        private static string BuildVatSubRows(bool vatEnabled, int netInOre, int vatInOre)
+        {
+            if (!vatEnabled) return string.Empty;
+            return $"""
+                    <tr class="sub"><td class="r">Subtotal excl. VAT</td><td class="r">NOK {MoneyFormat.Nok(netInOre)}</td></tr>
+                    <tr class="sub"><td class="r">VAT 25%</td><td class="r">NOK {MoneyFormat.Nok(vatInOre)}</td></tr>
+                """;
         }
     }
 }

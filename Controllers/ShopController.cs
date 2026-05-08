@@ -297,6 +297,27 @@ namespace garge_api.Controllers
                 $"invoice-{invoice.Id:D4}.pdf");
         }
 
+        [HttpPost("orders/{id}/refund")]
+        [Authorize(Policy = "Admin")]
+        public async Task<IActionResult> RefundOrder(int id)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null) return NotFound();
+            if (order.Status != OrderStatus.Paid)
+                return BadRequest("Order is not in Paid state.");
+            if (string.IsNullOrEmpty(order.VippsOrderId))
+                return BadRequest("No Vipps reference found.");
+
+            await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}");
+
+            order.Status = OrderStatus.Refunded;
+            order.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Order {OrderId} refunded by admin", id);
+            return Ok();
+        }
+
         [HttpPost("orders/{id}/cancel")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> CancelOrder(int id)
