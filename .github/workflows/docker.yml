@@ -1,18 +1,21 @@
 name: 🔨 Build and Push Docker Image
 
 on:
+  pull_request:
+  push:
+    branches: [development]
   workflow_dispatch:
     inputs:
       tag:
         description: 'Tag for the Docker image'
+        type: string
         required: true
-  release:
-    types:
-      - published
-  push:
-    branches:
-      - development
-  pull_request:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag for the Docker image'
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -52,7 +55,7 @@ jobs:
 
   prod:
     needs: test
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    if: inputs.tag != ''
     uses: equinor/ops-actions/.github/workflows/docker.yml@e925ef9959a37d43073b77efa2f73c64253fbd55 # v9.37.2
     secrets:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
@@ -61,4 +64,14 @@ jobs:
       registry: registry.hub.docker.com
       username: sondresjo
       repository: sondresjo/garge-api
-      tag: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+      tag: ${{ inputs.tag }}
+
+  update-chart:
+    needs: prod
+    if: inputs.tag != ''
+    uses: sondresjolyst/garge/.github/workflows/update-chart.yml@main
+    secrets:
+      GARGE_PAT: ${{ secrets.GARGE_PAT }}
+    with:
+      chart_name: garge-api
+      tag: ${{ inputs.tag }}
