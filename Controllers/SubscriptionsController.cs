@@ -216,7 +216,7 @@ namespace garge_api.Controllers
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
                 ConsentAcceptedAt = DateTime.UtcNow,
-                ConsentIp = HttpContext.Connection.RemoteIpAddress?.ToString()
+                ConsentIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString())
             };
 
             _context.Subscriptions.Add(subscription);

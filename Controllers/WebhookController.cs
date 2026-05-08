@@ -37,7 +37,7 @@ namespace garge_api.Controllers
 
             if (!ModelState.IsValid)
             {
-                _logger.LogWarning("AddWebhook failed: Invalid model state for {@LogData}", new { webhookDto.WebhookUrl });
+                _logger.LogWarning("AddWebhook failed: Invalid model state");
                 return BadRequest(ModelState);
             }
 
@@ -50,7 +50,7 @@ namespace garge_api.Controllers
 
             var resultDto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription created: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
+            _logger.LogInformation("Webhook subscription created: {@LogData}", new { webhookSubscription.Id });
             return CreatedAtAction(nameof(GetWebhook), new { id = webhookSubscription.Id }, resultDto);
         }
 
@@ -78,7 +78,7 @@ namespace garge_api.Controllers
 
             var dto = _mapper.Map<WebhookSubscriptionDto>(webhookSubscription);
 
-            _logger.LogInformation("Webhook subscription returned: {@LogData}", new { webhookSubscription.Id, webhookSubscription.WebhookUrl });
+            _logger.LogInformation("Webhook subscription returned: {@LogData}", new { webhookSubscription.Id });
             return Ok(dto);
         }
     }

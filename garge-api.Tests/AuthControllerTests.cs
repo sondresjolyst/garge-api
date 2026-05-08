@@ -153,18 +153,41 @@ public class AuthControllerTests : ControllerTestBase
         Assert.Equal(1, db.RefreshTokens.Count(t => t.Revoked == null));
     }
 
+    private static RegisterUserDto MakeRegisterDto(string email = "user@test.com") => new()
+    {
+        Email = email,
+        UserName = "user",
+        Password = "pass",
+        FirstName = "First",
+        LastName = "Last",
+        ConfirmAge16Plus = true,
+        AcceptTerms = true,
+        TermsVersion = "v1-test"
+    };
+
     [Fact]
     public async Task Register_MissingEmail_ReturnsBadRequest()
     {
-        var result = await CreateAuthController().Register(new RegisterUserDto
-        {
-            Email = "",
-            UserName = "user",
-            Password = "pass",
-            FirstName = "First",
-            LastName = "Last"
-        });
+        var dto = MakeRegisterDto(email: "");
+        var result = await CreateAuthController().Register(dto);
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
 
+    [Fact]
+    public async Task Register_AgeNotConfirmed_ReturnsBadRequest()
+    {
+        var dto = MakeRegisterDto();
+        dto.ConfirmAge16Plus = false;
+        var result = await CreateAuthController().Register(dto);
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Register_TermsNotAccepted_ReturnsBadRequest()
+    {
+        var dto = MakeRegisterDto();
+        dto.AcceptTerms = false;
+        var result = await CreateAuthController().Register(dto);
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
@@ -173,17 +196,9 @@ public class AuthControllerTests : ControllerTestBase
     {
         MockUserManager.Setup(m => m.FindByEmailAsync("exists@test.com")).ReturnsAsync(MakeUser());
 
-        var result = await CreateAuthController().Register(new RegisterUserDto
-        {
-            Email = "exists@test.com",
-            UserName = "user",
-            Password = "pass",
-            FirstName = "First",
-            LastName = "Last"
-        });
+        var result = await CreateAuthController().Register(MakeRegisterDto(email: "exists@test.com"));
 
         Assert.IsType<OkObjectResult>(result);
-        // Must not invoke CreateAsync for an existing email; CreateAsync sends a verification email.
         MockUserManager.Verify(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
     }
 }

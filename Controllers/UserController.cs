@@ -97,32 +97,52 @@ namespace garge_api.Controllers
                 return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
-            if (user == null)
+            if (user == null || user.IsDeleted)
                 return NotFound(new { message = "User not found!" });
 
-            // Explicit deletes for tables without cascade configured on the UserId FK
+            // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
+            // a valid FK for the 5-year bokføringsloven retention window. Untie the user
+            // from per-account artefacts (custom names, push subs, refresh tokens etc.)
+            // so nothing can re-attach them later.
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == id));
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == id));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == id));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == id));
             _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == id));
             _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == id));
+            _context.WebhookSubscriptions.RemoveRange(_context.WebhookSubscriptions.Where(w => w.UserId == id));
+            _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == id));
+            _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == id));
 
-            var profile = await _context.UserProfiles.FindAsync(id);
-            if (profile != null)
-                _context.UserProfiles.Remove(profile);
+            user.FirstName = "Deleted";
+            user.LastName = "User";
+            user.Email = null;
+            user.NormalizedEmail = null;
+            user.PhoneNumber = null;
+            user.UserName = $"deleted-{id}";
+            user.NormalizedUserName = $"DELETED-{id}".ToUpperInvariant();
+            user.EmailConfirmed = false;
+            user.EmailVerificationCodeHash = null;
+            user.EmailVerificationCodeExpiration = null;
+            user.PasswordResetCodeHash = null;
+            user.PasswordResetCodeExpiration = null;
+            user.PasswordResetAttempts = 0;
+            user.LockoutEnabled = true;
+            user.LockoutEnd = DateTimeOffset.MaxValue;
+            user.IsDeleted = true;
+            user.DeletedAt = DateTime.UtcNow;
+            await _userManager.UpdateSecurityStampAsync(user);
 
-            await _context.SaveChangesAsync();
-
-            // Deleting the Identity user cascades: UserSensors, UserSwitches, SensorPhotos (all have OnDelete cascade configured)
-            var result = await _userManager.DeleteAsync(user);
+            var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
             {
                 _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
                 return BadRequest(result.Errors);
             }
 
-            _logger.LogInformation("Account deleted by user {UserId}", LogSanitizer.Sanitize(id));
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Account soft-deleted by user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
         }
 
@@ -213,9 +233,9 @@ namespace garge_api.Controllers
                 ExportedAt = DateTime.UtcNow,
                 Account = new
                 {
-                    profile.FirstName,
-                    profile.LastName,
-                    profile.Email,
+                    FirstName = user?.FirstName,
+                    LastName = user?.LastName,
+                    Email = user?.Email,
                     profile.PriceZone,
                     EmailConfirmed = user?.EmailConfirmed
                 },
@@ -285,5 +305,37 @@ namespace garge_api.Controllers
             return Ok(response);
         }
 
+        /// <summary>
+        /// Updates first name, last name, phone (GDPR Art. 16 rectification).
+        /// </summary>
+        [HttpPut("{id}/profile")]
+        [SwaggerOperation(Summary = "Updates the caller's first name, last name, phone.")]
+        [SwaggerResponse(204, "Profile updated.")]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> UpdateProfile(string id, [FromBody] UpdateProfileDto dto)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || userIdClaim.Value != id)
+                return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            user.FirstName = dto.FirstName;
+            user.LastName = dto.LastName;
+            user.PhoneNumber = dto.PhoneNumber;
+
+            var result = await _userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("UpdateProfile failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
+                return BadRequest(result.Errors);
+            }
+
+            _logger.LogInformation("Profile updated for user {UserId}", LogSanitizer.Sanitize(id));
+            return NoContent();
+        }
     }
 }

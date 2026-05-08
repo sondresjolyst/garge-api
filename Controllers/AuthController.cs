@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using garge_api.Dtos.Auth;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Auth;
 using Microsoft.AspNetCore.Authorization;
@@ -72,6 +73,18 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = "Email is required!" });
             }
 
+            if (!registerUserDto.ConfirmAge16Plus)
+            {
+                _logger.LogWarning("Register failed: age confirmation missing");
+                return BadRequest(new { message = "You must confirm you are 16 or older to register." });
+            }
+
+            if (!registerUserDto.AcceptTerms)
+            {
+                _logger.LogWarning("Register failed: terms not accepted");
+                return BadRequest(new { message = "You must accept the Terms of Service to register." });
+            }
+
             const string genericResponse = "If the email is available, an account has been created. Check your inbox to confirm.";
 
             var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
@@ -83,6 +96,9 @@ namespace garge_api.Controllers
 
             // Use AutoMapper to map DTO to User
             var user = _mapper.Map<User>(registerUserDto);
+            user.TermsAcceptedAt = DateTime.UtcNow;
+            user.TermsVersion = registerUserDto.TermsVersion;
+            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString());
 
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
@@ -92,9 +108,6 @@ namespace garge_api.Controllers
                 var userProfile = new UserProfile
                 {
                     Id = user.Id,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Email = user.Email!,
                     User = user
                 };
                 _context.UserProfiles.Add(userProfile);
@@ -138,7 +151,7 @@ namespace garge_api.Controllers
 
             var email = login.Email ?? string.Empty;
             var user = await _userManager.FindByEmailAsync(email);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("Login failed: Invalid credentials");
                 return Unauthorized(new { message = "Invalid credentials!" });
@@ -312,7 +325,7 @@ namespace garge_api.Controllers
             }
 
             var user = await _userManager.FindByIdAsync(userId);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("RefreshToken failed: User not found {@LogData}", new { userId });
                 return Unauthorized(new { message = "User not found" });

@@ -24,5 +24,15 @@ namespace garge_api.Dtos.Auth
         [Required]
         [StringLength(50, MinimumLength = 1)]
         public required string LastName { get; set; }
+
+        [Required]
+        public bool ConfirmAge16Plus { get; set; }
+
+        [Required]
+        public bool AcceptTerms { get; set; }
+
+        [Required]
+        [StringLength(20)]
+        public required string TermsVersion { get; set; }
     }
 }

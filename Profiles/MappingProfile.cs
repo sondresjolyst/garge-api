@@ -56,7 +56,11 @@ public class MappingProfile : Profile
 
         // User mappings
         CreateMap<UserProfile, UserProfileDto>()
-            .ForMember(dest => dest.EmailConfirmed, opt => opt.MapFrom(src => src.User.EmailConfirmed));
+            .ForMember(d => d.FirstName, o => o.MapFrom(s => s.User.FirstName))
+            .ForMember(d => d.LastName, o => o.MapFrom(s => s.User.LastName))
+            .ForMember(d => d.Email, o => o.MapFrom(s => s.User.Email))
+            .ForMember(d => d.PhoneNumber, o => o.MapFrom(s => s.User.PhoneNumber))
+            .ForMember(d => d.EmailConfirmed, o => o.MapFrom(s => s.User.EmailConfirmed));
         CreateMap<RegisterUserDto, User>();
 
         // Webhook mappings

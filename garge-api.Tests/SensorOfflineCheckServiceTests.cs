@@ -41,9 +41,6 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         new()
         {
             Id = id,
-            FirstName = "Test",
-            LastName = "User",
-            Email = $"{id}@example.com",
             PushNotificationsEnabled = pushEnabled,
             OfflineAlertThresholdHours = thresholdHours,
             User = new User { Id = id, UserName = id, Email = $"{id}@example.com", FirstName = "Test", LastName = "User" }

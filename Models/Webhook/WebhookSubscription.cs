@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace garge_api.Models.Webhook
 {
@@ -14,7 +15,11 @@ namespace garge_api.Models.Webhook
         [Required]
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        [Required]
         public string UserId { get; set; } = string.Empty;
+
+        [ForeignKey(nameof(UserId))]
+        public User? User { get; set; }
 
         [MaxLength(256)]
         public string? WebhookSecret { get; set; }

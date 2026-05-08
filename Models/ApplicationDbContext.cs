@@ -200,6 +200,12 @@ namespace garge_api.Models
                 .HasForeignKey(x => x.SwitchId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            modelBuilder.Entity<garge_api.Models.Webhook.WebhookSubscription>()
+                .HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             modelBuilder.Entity<StoredElectricityPrice>()
                 .HasIndex(p => new { p.Area, p.Resolution, p.DeliveryStart })
                 .IsUnique();
