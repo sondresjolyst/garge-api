@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag for the Docker image'
+        description: "Tag for the Docker image"
         type: string
         required: true
   workflow_call:
     inputs:
       tag:
-        description: 'Tag for the Docker image'
+        description: "Tag for the Docker image"
         type: string
         required: true
     secrets:
