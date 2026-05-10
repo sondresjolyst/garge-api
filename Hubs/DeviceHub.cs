@@ -16,10 +16,12 @@ namespace garge_api.Hubs
         public static string UserGroup(string userId) => $"user-{userId}";
 
         private readonly ILogger<DeviceHub> _logger;
+        private readonly IHubConnectionTracker _tracker;
 
-        public DeviceHub(ILogger<DeviceHub> logger)
+        public DeviceHub(ILogger<DeviceHub> logger, IHubConnectionTracker tracker)
         {
             _logger = logger;
+            _tracker = tracker;
         }
 
         public override async Task OnConnectedAsync()
@@ -39,9 +41,20 @@ namespace garge_api.Hubs
                     return;
                 }
                 await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId));
+                _tracker.Add(userId, Context.ConnectionId);
                 _logger.LogInformation("DeviceHub: connection {Conn} joined {Group}", Context.ConnectionId, UserGroup(userId));
             }
             await base.OnConnectedAsync();
+        }
+
+        public override async Task OnDisconnectedAsync(Exception? exception)
+        {
+            var userId = Context.User?.UserId();
+            if (!string.IsNullOrEmpty(userId))
+            {
+                _tracker.Remove(userId, Context.ConnectionId);
+            }
+            await base.OnDisconnectedAsync(exception);
         }
     }
 }

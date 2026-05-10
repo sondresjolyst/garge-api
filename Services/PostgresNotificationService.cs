@@ -1,9 +1,10 @@
+using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Sensor;
+using garge_api.Models.Switch;
+using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using Npgsql;
-using Microsoft.EntityFrameworkCore;
-using garge_api.Models.Switch;
-using garge_api.Models.Sensor;
 
 namespace garge_api.Services
 {
@@ -85,24 +86,32 @@ namespace garge_api.Services
 
             _logger.LogDebug("Notification received for switch {SwitchId}", switchData.SwitchId);
 
+            // Project to a wire-safe DTO. Never let EF entities (with RegistrationCode etc.) reach the hub.
+            SwitchSummaryDto? summary = null;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                switchData.Switch = await context.Switches.FirstOrDefaultAsync(s => s.Id == switchData.SwitchId, ct);
-
-                if (switchData.Switch == null)
-                {
-                    _logger.LogWarning("Switch with ID {SwitchId} not found.", switchData.SwitchId);
-                }
+                summary = await context.Switches
+                    .AsNoTracking()
+                    .Where(s => s.Id == switchData.SwitchId)
+                    .Select(s => new SwitchSummaryDto(s.Id, s.Name, s.Type))
+                    .FirstOrDefaultAsync(ct);
             }
 
-            // Dispatch to all bridges (e.g., garge-operator) and to each owning user.
-            _dispatcher.EnqueueSwitchForBridges(switchData);
+            if (summary == null)
+            {
+                _logger.LogWarning("Switch with ID {SwitchId} not found.", switchData.SwitchId);
+            }
+
+            var evt = new SwitchEventDto(switchData.Id, switchData.SwitchId, switchData.Value, switchData.Timestamp, summary);
+
+            // Fan out to bridges (e.g., garge-operator publishes MQTT /set) and to each owning user.
+            _dispatcher.EnqueueSwitchForBridges(evt);
 
             var owners = await _ownership.ListSwitchOwnersAsync(switchData.SwitchId, ct);
             foreach (var userId in owners)
             {
-                _dispatcher.EnqueueSwitchForUser(userId, switchData);
+                _dispatcher.EnqueueSwitchForUser(userId, evt);
             }
         }
 
@@ -117,21 +126,28 @@ namespace garge_api.Services
 
             _logger.LogDebug("Notification received for sensor {SensorId}", sensorData.SensorId);
 
+            SensorSummaryDto? summary = null;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                sensorData.Sensor = await context.Sensors.FirstOrDefaultAsync(s => s.Id == sensorData.SensorId, ct);
-
-                if (sensorData.Sensor == null)
-                {
-                    _logger.LogWarning("Sensor with ID {SensorId} not found.", sensorData.SensorId);
-                }
+                summary = await context.Sensors
+                    .AsNoTracking()
+                    .Where(s => s.Id == sensorData.SensorId)
+                    .Select(s => new SensorSummaryDto(s.Id, s.Name, s.Type))
+                    .FirstOrDefaultAsync(ct);
             }
+
+            if (summary == null)
+            {
+                _logger.LogWarning("Sensor with ID {SensorId} not found.", sensorData.SensorId);
+            }
+
+            var evt = new SensorEventDto(sensorData.Id, sensorData.SensorId, sensorData.Value, sensorData.Timestamp, summary);
 
             var owners = await _ownership.ListSensorOwnersAsync(sensorData.SensorId, ct);
             foreach (var userId in owners)
             {
-                _dispatcher.EnqueueSensorForUser(userId, sensorData);
+                _dispatcher.EnqueueSensorForUser(userId, evt);
             }
         }
     }

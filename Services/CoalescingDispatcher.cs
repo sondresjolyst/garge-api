@@ -1,11 +1,20 @@
 using System.Collections.Concurrent;
 using garge_api.Hubs;
-using garge_api.Models.Sensor;
-using garge_api.Models.Switch;
 using Microsoft.AspNetCore.SignalR;
 
 namespace garge_api.Services
 {
+    /// <summary>
+    /// Buffers hub events per (group, kind, entityId) and drains every
+    /// <see cref="DrainInterval"/>. Coalesces by (kind, entityId) so a slow
+    /// client always sees the latest state and never a stale-then-fresh
+    /// sequence: writes to the same entity overwrite the buffered envelope
+    /// instead of queueing behind it.
+    ///
+    /// Edge case: a key added after a drain's snapshot waits one full
+    /// DrainInterval before being delivered. Acceptable as added latency,
+    /// not data loss — no event is dropped, only collapsed.
+    /// </summary>
     public class CoalescingDispatcher : BackgroundService
     {
         public const string SwitchEventName = "switch";
@@ -16,7 +25,7 @@ namespace garge_api.Services
         private readonly IHubContext<DeviceHub> _hub;
         private readonly ILogger<CoalescingDispatcher> _logger;
 
-        // group -> (kind, entityId) -> latest payload
+        // group -> (kind, entityId) -> latest payload envelope
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<EntityKey, EventEnvelope>> _pending = new();
 
         public CoalescingDispatcher(IHubContext<DeviceHub> hub, ILogger<CoalescingDispatcher> logger)
@@ -25,18 +34,20 @@ namespace garge_api.Services
             _logger = logger;
         }
 
-        public void EnqueueSwitchForUser(string userId, SwitchData data) =>
+        public void EnqueueSwitchForUser(string userId, SwitchEventDto data) =>
             Enqueue(DeviceHub.UserGroup(userId), SwitchEventName, data.SwitchId, data);
 
-        public void EnqueueSwitchForBridges(SwitchData data) =>
+        public void EnqueueSwitchForBridges(SwitchEventDto data) =>
             Enqueue(DeviceHub.BridgeGroup, SwitchEventName, data.SwitchId, data);
 
-        public void EnqueueSensorForUser(string userId, SensorData data) =>
+        public void EnqueueSensorForUser(string userId, SensorEventDto data) =>
             Enqueue(DeviceHub.UserGroup(userId), SensorEventName, data.SensorId, data);
 
         private void Enqueue(string group, string kind, int entityId, object payload)
         {
             var bucket = _pending.GetOrAdd(group, _ => new ConcurrentDictionary<EntityKey, EventEnvelope>());
+            // Indexer-set replaces any existing envelope for this key — that's
+            // the coalescing primitive.
             bucket[new EntityKey(kind, entityId)] = new EventEnvelope(kind, payload);
         }
 
@@ -67,16 +78,14 @@ namespace garge_api.Services
             {
                 if (bucket.IsEmpty) continue;
 
-                var snapshot = new Dictionary<EntityKey, EventEnvelope>();
-                foreach (var key in bucket.Keys.ToArray())
+                // ToArray on the bucket returns key/value pairs atomically —
+                // any new write between snapshot and TryRemove that targets
+                // the same key wins (we'd remove the newer one); that's
+                // still latest-wins semantics. New keys added after the
+                // snapshot wait one drain tick.
+                foreach (var pair in bucket.ToArray())
                 {
-                    if (bucket.TryRemove(key, out var env))
-                        snapshot[key] = env;
-                }
-                if (snapshot.Count == 0) continue;
-
-                foreach (var env in snapshot.Values)
-                {
+                    if (!bucket.TryRemove(pair.Key, out var env)) continue;
                     try
                     {
                         await _hub.Clients.Group(group).SendAsync(env.Kind, env.Payload, ct);

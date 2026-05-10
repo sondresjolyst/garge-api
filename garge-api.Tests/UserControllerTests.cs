@@ -1,12 +1,15 @@
 using AutoMapper;
 using garge_api.Controllers;
 using garge_api.Dtos.User;
+using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Auth;
 using garge_api.Models.Push;
 using garge_api.Models.Shop;
+using garge_api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -18,9 +21,19 @@ public class UserControllerTests : ControllerTestBase
 {
     private UserController CreateUserController(ApplicationDbContext db, string callerId = "user-1")
     {
+        var ownership = new Mock<IDeviceOwnershipService>().Object;
+        var tracker = new Mock<IHubConnectionTracker>();
+        tracker.Setup(t => t.GetConnectionIds(It.IsAny<string>())).Returns(Array.Empty<string>());
+
+        var clients = new Mock<IHubClients>();
+        clients.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(Mock.Of<IClientProxy>());
+        var hub = new Mock<IHubContext<DeviceHub>>();
+        hub.SetupGet(h => h.Clients).Returns(clients.Object);
+
         var controller = new UserController(
             db, MockUserManager.Object, MockMapper.Object,
-            NullLogger<UserController>.Instance);
+            NullLogger<UserController>.Instance,
+            ownership, tracker.Object, hub.Object);
         controller.ControllerContext = MakeControllerContext(callerId);
         return controller;
     }

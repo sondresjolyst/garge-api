@@ -18,7 +18,7 @@ public class DeviceHubTests
         ctx.SetupGet(c => c.ConnectionId).Returns(connectionId);
         ctx.SetupGet(c => c.User).Returns(user);
 
-        var hub = new DeviceHub(NullLogger<DeviceHub>.Instance)
+        var hub = new DeviceHub(NullLogger<DeviceHub>.Instance, new HubConnectionTracker())
         {
             Context = ctx.Object,
             Groups = groups.Object,

@@ -1,6 +1,4 @@
 using garge_api.Hubs;
-using garge_api.Models.Sensor;
-using garge_api.Models.Switch;
 using garge_api.Services;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,11 +21,11 @@ public class CoalescingDispatcherTests
         return (dispatcher, hub, proxy, clients);
     }
 
-    private static SwitchData Sw(int id, string value) =>
-        new() { Id = 1, SwitchId = id, Value = value, Timestamp = DateTime.UtcNow };
+    private static SwitchEventDto Sw(int id, string value) =>
+        new(1, id, value, DateTime.UtcNow, new SwitchSummaryDto(id, $"sw-{id}", "SOCKET"));
 
-    private static SensorData Sn(int id, string value) =>
-        new() { Id = 1, SensorId = id, Value = value, Timestamp = DateTime.UtcNow };
+    private static SensorEventDto Sn(int id, string value) =>
+        new(1, id, value, DateTime.UtcNow, new SensorSummaryDto(id, $"sn-{id}", "voltage"));
 
     private static async Task RunDrainAsync(CoalescingDispatcher dispatcher, TimeSpan duration)
     {
@@ -81,6 +79,7 @@ public class CoalescingDispatcherTests
         var (dispatcher, _, _, clients) = Build();
 
         dispatcher.EnqueueSwitchForBridges(Sw(1, "ON"));
+
         dispatcher.EnqueueSwitchForUser("u1", Sw(1, "ON"));
 
         await RunDrainAsync(dispatcher, TimeSpan.FromMilliseconds(300));
