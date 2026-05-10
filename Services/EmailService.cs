@@ -15,7 +15,9 @@ public class EmailService : IEmailService
         _logger = logger;
     }
 
-    public async System.Threading.Tasks.Task SendEmailAsync(string email, string subject, string message)
+    public async System.Threading.Tasks.Task SendEmailAsync(
+        string email, string subject, string message,
+        IReadOnlyList<EmailAttachment>? attachments = null)
     {
         if (string.IsNullOrWhiteSpace(email))
         {
@@ -41,6 +43,13 @@ public class EmailService : IEmailService
                 new SendSmtpEmailTo(email)
             }
         };
+
+        if (attachments != null && attachments.Count > 0)
+        {
+            sendSmtpEmail.Attachment = attachments
+                .Select(a => new SendSmtpEmailAttachment(content: a.Content, name: a.FileName))
+                .ToList();
+        }
 
         try
         {

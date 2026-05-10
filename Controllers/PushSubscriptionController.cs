@@ -16,6 +16,7 @@ namespace garge_api.Controllers
     [ApiController]
     [Route("api/push-subscriptions")]
     [EnableCors("AllowAllOrigins")]
+    [Authorize(Policy = "ActiveSubscription")]
     public class PushSubscriptionController(
         ApplicationDbContext db,
         IConfiguration configuration,

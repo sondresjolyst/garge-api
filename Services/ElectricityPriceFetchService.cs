@@ -51,20 +51,61 @@ namespace garge_api.Services
             var prevYear = now.Year - 1;
             var currYear = now.Year;
 
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
             var tasks = new List<Task>
             {
-                // HOURLY: today + tomorrow
+                // HOURLY: always refresh — intraday prices update throughout the day
                 FetchAndStoreAsync("HOURLY", now, stoppingToken),
                 FetchAndStoreAsync("HOURLY", now.AddDays(1), stoppingToken),
-                // DAILY: previous + current year
-                FetchAndStoreAsync("DAILY", new DateTime(prevYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken),
-                FetchAndStoreAsync("DAILY", new DateTime(currYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken),
-                // MONTHLY: previous + current year
-                FetchAndStoreAsync("MONTHLY", new DateTime(prevYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken),
-                FetchAndStoreAsync("MONTHLY", new DateTime(currYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken),
             };
 
+            if (!await HasDataForYearAsync(db, "DAILY", prevYear, stoppingToken))
+                tasks.Add(FetchAndStoreAsync("DAILY", new DateTime(prevYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken));
+            else
+                _logger.LogInformation("ElectricityPriceFetchService: skipping DAILY {Year} — already in DB", prevYear);
+
+            if (!await HasTodaysDailyAsync(db, stoppingToken))
+                tasks.Add(FetchAndStoreAsync("DAILY", new DateTime(currYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken));
+            else
+                _logger.LogInformation("ElectricityPriceFetchService: skipping DAILY {Year} — already in DB", currYear);
+
+            if (!await HasDataForYearAsync(db, "MONTHLY", prevYear, stoppingToken))
+                tasks.Add(FetchAndStoreAsync("MONTHLY", new DateTime(prevYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken));
+            else
+                _logger.LogInformation("ElectricityPriceFetchService: skipping MONTHLY {Year} — already in DB", prevYear);
+
+            if (!await HasThisMonthMonthlyAsync(db, stoppingToken))
+                tasks.Add(FetchAndStoreAsync("MONTHLY", new DateTime(currYear, 12, 31, 0, 0, 0, DateTimeKind.Utc), stoppingToken));
+            else
+                _logger.LogInformation("ElectricityPriceFetchService: skipping MONTHLY {Year} — already in DB", currYear);
+
             await Task.WhenAll(tasks);
+        }
+
+        private static Task<bool> HasDataForYearAsync(ApplicationDbContext db, string resolution, int year, CancellationToken ct)
+        {
+            var start = new DateTime(year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var end   = new DateTime(year + 1, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            return db.StoredElectricityPrices
+                .AnyAsync(p => p.Resolution == resolution && p.DeliveryStart >= start && p.DeliveryStart < end, ct);
+        }
+
+        private static Task<bool> HasTodaysDailyAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var todayUtc = DateTime.UtcNow.Date;
+            return db.StoredElectricityPrices
+                .AnyAsync(p => p.Resolution == "DAILY" && p.DeliveryStart >= todayUtc && p.DeliveryStart < todayUtc.AddDays(1), ct);
+        }
+
+        private static Task<bool> HasThisMonthMonthlyAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var now        = DateTime.UtcNow;
+            var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            var nextMonth  = monthStart.AddMonths(1);
+            return db.StoredElectricityPrices
+                .AnyAsync(p => p.Resolution == "MONTHLY" && p.DeliveryStart >= monthStart && p.DeliveryStart < nextMonth, ct);
         }
 
         private async Task FetchDailyRefreshAsync(CancellationToken stoppingToken)

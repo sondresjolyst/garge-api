@@ -6,16 +6,21 @@ using garge_api.Models.Group;
 using garge_api.Models.Mqtt;
 using garge_api.Models.Push;
 using garge_api.Models.Sensor;
+using garge_api.Models.Shop;
+using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
 using garge_api.Models.Webhook;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace garge_api.Models
 {
-    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : IdentityDbContext<User, IdentityRole, string>(options)
+    public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext
     {
+        public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
         public DbSet<UserProfile> UserProfiles { get; set; }
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<Sensor.Sensor> Sensors { get; set; }
@@ -23,7 +28,6 @@ namespace garge_api.Models
         public DbSet<BatteryHealth> BatteryHealthData { get; set; }
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
-        public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
         public DbSet<SensorActivity> SensorActivities { get; set; }
@@ -42,6 +46,13 @@ namespace garge_api.Models
         public DbSet<PushSubscription> PushSubscriptions { get; set; }
         public DbSet<SensorOfflineNotification> SensorOfflineNotifications { get; set; }
         public DbSet<AppSettings> AppSettings { get; set; }
+        public DbSet<Product> Products { get; set; }
+        public DbSet<Subscription.Subscription> Subscriptions { get; set; }
+        public DbSet<ShopItem> ShopItems { get; set; }
+        public DbSet<Order> Orders { get; set; }
+        public DbSet<OrderItem> OrderItems { get; set; }
+        public DbSet<Invoice> Invoices { get; set; }
+        public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -223,11 +234,94 @@ namespace garge_api.Models
                 .ToTable(t => t.HasCheckConstraint("CK_AppSettings_SingleRow", "\"Id\" = 1"));
 
             modelBuilder.Entity<AppSettings>()
-                .HasData(new AppSettings { Id = 1, CookieBannerEnabled = true });
+                .HasData(new AppSettings());
+
+            modelBuilder.Entity<Product>()
+                .HasIndex(p => p.IsActive);
+
+            modelBuilder.Entity<Subscription.Subscription>()
+                .HasOne(s => s.User)
+                .WithMany()
+                .HasForeignKey(s => s.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Subscription.Subscription>()
+                .HasOne(s => s.Product)
+                .WithMany()
+                .HasForeignKey(s => s.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Subscription.Subscription>()
+                .HasIndex(s => s.VippsAgreementId)
+                .IsUnique();
+
+            modelBuilder.Entity<Subscription.Subscription>()
+                .HasIndex(s => new { s.UserId, s.Status });
+
+            modelBuilder.Entity<ShopItem>()
+                .HasIndex(si => si.IsActive);
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.User)
+                .WithMany()
+                .HasForeignKey(o => o.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Order>()
+                .HasIndex(o => o.VippsOrderId)
+                .IsUnique()
+                .HasFilter("\"VippsOrderId\" IS NOT NULL");
+
+            modelBuilder.Entity<Order>()
+                .HasIndex(o => o.UserId);
+
+            modelBuilder.Entity<OrderItem>()
+                .HasOne(oi => oi.Order)
+                .WithMany(o => o.OrderItems)
+                .HasForeignKey(oi => oi.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OrderItem>()
+                .HasOne(oi => oi.ShopItem)
+                .WithMany()
+                .HasForeignKey(oi => oi.ShopItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Invoice>()
+                .HasOne(i => i.Order)
+                .WithOne(o => o.Invoice)
+                .HasForeignKey<Invoice>(i => i.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Filtered unique index: one invoice per order when set; multiple rows
+            // with NULL OrderId are allowed (subscription invoices).
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.OrderId)
+                .IsUnique()
+                .HasFilter("\"OrderId\" IS NOT NULL");
+
+            modelBuilder.Entity<Invoice>()
+                .HasOne(i => i.Subscription)
+                .WithMany()
+                .HasForeignKey(i => i.SubscriptionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Unique-when-present index so webhook redelivery can't produce duplicate
+            // invoices for the same Vipps charge.
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.VippsChargeId)
+                .IsUnique()
+                .HasFilter("\"VippsChargeId\" IS NOT NULL");
+
+            modelBuilder.Entity<ProcessedWebhookEvent>()
+                .HasIndex(p => new { p.Source, p.Id });
+
+            modelBuilder.Entity<ProcessedWebhookEvent>()
+                .HasIndex(p => p.ProcessedAt);
         }
         public void EnsureTriggers()
         {
-            var triggerFunctionSql = @"
+            var switchTriggerFunctionSql = @"
         CREATE OR REPLACE FUNCTION notify_switchdata_change()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -236,7 +330,7 @@ namespace garge_api.Models
         END;
         $$ LANGUAGE plpgsql;";
 
-            var triggerSql = @"
+            var switchTriggerSql = @"
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -250,8 +344,33 @@ namespace garge_api.Models
             END IF;
         END $$;";
 
-            Database.ExecuteSqlRaw(triggerFunctionSql);
-            Database.ExecuteSqlRaw(triggerSql);
+            var sensorTriggerFunctionSql = @"
+        CREATE OR REPLACE FUNCTION notify_sensordata_change()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM pg_notify('sensordata_channel', row_to_json(NEW)::text);
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;";
+
+            var sensorTriggerSql = @"
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_trigger
+                WHERE tgname = 'sensordata_change_trigger'
+            ) THEN
+                CREATE TRIGGER sensordata_change_trigger
+                AFTER INSERT ON ""SensorData""
+                FOR EACH ROW EXECUTE FUNCTION notify_sensordata_change();
+            END IF;
+        END $$;";
+
+            Database.ExecuteSqlRaw(switchTriggerFunctionSql);
+            Database.ExecuteSqlRaw(switchTriggerSql);
+            Database.ExecuteSqlRaw(sensorTriggerFunctionSql);
+            Database.ExecuteSqlRaw(sensorTriggerSql);
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

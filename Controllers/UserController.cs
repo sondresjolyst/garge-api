@@ -1,12 +1,15 @@
 using AutoMapper;
 using garge_api.Dtos.User;
 using garge_api.Helpers;
+using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Auth;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
@@ -20,19 +23,33 @@ namespace garge_api.Controllers
     [Route("api/users")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class UserController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
         private readonly ILogger<UserController> _logger;
+        private readonly IDeviceOwnershipService _ownership;
+        private readonly IHubConnectionTracker _hubConnections;
+        private readonly IHubContext<DeviceHub> _hub;
 
-        public UserController(ApplicationDbContext context, UserManager<User> userManager, IMapper mapper, ILogger<UserController> logger)
+        public UserController(
+            ApplicationDbContext context,
+            UserManager<User> userManager,
+            IMapper mapper,
+            ILogger<UserController> logger,
+            IDeviceOwnershipService ownership,
+            IHubConnectionTracker hubConnections,
+            IHubContext<DeviceHub> hub)
         {
             _context = context;
             _userManager = userManager;
             _mapper = mapper;
             _logger = logger;
+            _ownership = ownership;
+            _hubConnections = hubConnections;
+            _hub = hub;
         }
 
         /// <summary>
@@ -47,12 +64,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
-            _logger.LogInformation("GetUserProfile called by {@LogData}", new { User = User.Identity?.Name, id });
+            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id.ToString())
+            if (!User.IsCallerOf(id))
             {
-                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { User = User.Identity?.Name, id, ClaimId = userIdClaim?.Value });
+                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
                 return Forbid();
             }
 
@@ -91,38 +107,103 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> DeleteOwnAccount(string id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
-            if (user == null)
+            if (user == null || user.IsDeleted)
                 return NotFound(new { message = "User not found!" });
 
-            // Explicit deletes for tables without cascade configured on the UserId FK
-            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == id));
-            _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == id));
-            _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == id));
-            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == id));
-            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == id));
-            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == id));
+            // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
+            // a valid FK for the 5-year retention window required by the Norwegian
+            // Bookkeeping Act (bokføringsloven §13).
+            ClearUserOwnedRows(id);
+            await ScrubUserPiiAsync(user);
 
-            var profile = await _context.UserProfiles.FindAsync(id);
-            if (profile != null)
-                _context.UserProfiles.Remove(profile);
-
-            await _context.SaveChangesAsync();
-
-            // Deleting the Identity user cascades: UserSensors, UserSwitches, SensorPhotos (all have OnDelete cascade configured)
-            var result = await _userManager.DeleteAsync(user);
+            var result = await _userManager.UpdateAsync(user);
             if (!result.Succeeded)
             {
                 _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
                 return BadRequest(result.Errors);
             }
 
-            _logger.LogInformation("Account deleted by user {UserId}", LogSanitizer.Sanitize(id));
+            await _context.SaveChangesAsync();
+
+            await ForceDisconnectHubAsync(id);
+
+            _logger.LogInformation("Account soft-deleted by user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
+        }
+
+        /// <summary>
+        /// Removes all per-user rows that should not survive soft-delete (custom
+        /// names, refresh tokens, push subs, etc.). Add new user-owned tables
+        /// here when introduced.
+        /// </summary>
+        private void ClearUserOwnedRows(string userId)
+        {
+            // Capture associated device ids before removing the rows so we
+            // can invalidate the ownership cache once the changes commit.
+            var sensorIds = _context.UserSensors.Where(us => us.UserId == userId).Select(us => us.SensorId).ToList();
+            var switchIds = _context.UserSwitches.Where(us => us.UserId == userId).Select(us => us.SwitchId).ToList();
+
+            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
+            _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
+            _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
+            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
+            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
+            _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
+            _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == userId));
+
+            foreach (var sid in sensorIds) _ownership.InvalidateSensor(sid);
+            foreach (var sid in switchIds) _ownership.InvalidateSwitch(sid);
+        }
+
+        /// <summary>
+        /// Tells any open SignalR connections for this user to disconnect, then
+        /// closes the server-side handles so further events do not fan out.
+        /// Called from soft-delete after PII scrub commits.
+        /// </summary>
+        private async Task ForceDisconnectHubAsync(string userId)
+        {
+            var connectionIds = _hubConnections.GetConnectionIds(userId);
+            if (connectionIds.Count == 0) return;
+
+            try
+            {
+                // Signal the client to stop the connection and sign out.
+                await _hub.Clients.Clients(connectionIds).SendAsync("forceLogout");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ForceDisconnectHubAsync: send forceLogout failed for user {UserId}", LogSanitizer.Sanitize(userId));
+            }
+        }
+
+        /// <summary>
+        /// Sets the User row's PII fields to safe defaults and locks the account.
+        /// Caller is responsible for committing the row via UpdateAsync + SaveChanges.
+        /// </summary>
+        private async Task ScrubUserPiiAsync(User user)
+        {
+            user.FirstName = "Deleted";
+            user.LastName = "User";
+            user.Email = null;
+            user.NormalizedEmail = null;
+            user.PhoneNumber = null;
+            user.UserName = $"deleted-{user.Id}";
+            user.NormalizedUserName = $"DELETED-{user.Id}".ToUpperInvariant();
+            user.EmailConfirmed = false;
+            user.EmailVerificationCodeHash = null;
+            user.EmailVerificationCodeExpiration = null;
+            user.PasswordResetCodeHash = null;
+            user.PasswordResetCodeExpiration = null;
+            user.PasswordResetAttempts = 0;
+            user.LockoutEnabled = true;
+            user.LockoutEnd = DateTimeOffset.MaxValue;
+            user.IsDeleted = true;
+            user.DeletedAt = DateTime.UtcNow;
+            await _userManager.UpdateSecurityStampAsync(user);
         }
 
         /// <summary>
@@ -135,9 +216,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ExportData(string id)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var profile = await _context.UserProfiles.FindAsync(id);
             if (profile == null)
@@ -212,9 +291,9 @@ namespace garge_api.Controllers
                 ExportedAt = DateTime.UtcNow,
                 Account = new
                 {
-                    profile.FirstName,
-                    profile.LastName,
-                    profile.Email,
+                    FirstName = user?.FirstName,
+                    LastName = user?.LastName,
+                    Email = user?.Email,
                     profile.PriceZone,
                     EmailConfirmed = user?.EmailConfirmed
                 },
@@ -261,9 +340,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> UpdatePreferences(string id, [FromBody] UpdateUserPreferencesDto dto)
         {
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || userIdClaim.Value != id)
-                return Forbid();
+            if (!User.IsCallerOf(id)) return Forbid();
 
             var userProfile = await _context.UserProfiles.SingleOrDefaultAsync(up => up.Id == id);
             if (userProfile == null)
@@ -284,5 +361,35 @@ namespace garge_api.Controllers
             return Ok(response);
         }
 
+        /// <summary>
+        /// Updates first name, last name, phone (GDPR Art. 16 rectification).
+        /// </summary>
+        [HttpPut("{id}/profile")]
+        [SwaggerOperation(Summary = "Updates the caller's first name, last name, phone.")]
+        [SwaggerResponse(204, "Profile updated.")]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> UpdateProfile(string id, [FromBody] UpdateProfileDto dto)
+        {
+            if (!User.IsCallerOf(id)) return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            user.FirstName = dto.FirstName;
+            user.LastName = dto.LastName;
+            user.PhoneNumber = dto.PhoneNumber;
+
+            var result = await _userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("UpdateProfile failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
+                return BadRequest(result.Errors);
+            }
+
+            _logger.LogInformation("Profile updated for user {UserId}", LogSanitizer.Sanitize(id));
+            return NoContent();
+        }
     }
 }

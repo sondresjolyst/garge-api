@@ -14,6 +14,12 @@ using garge_api.Models.Admin;
 using Serilog;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
+using garge_api.Authorization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Extensions.Caching.Memory;
+using System.Security.Claims;
 
 namespace garge_api
 {
@@ -55,7 +61,20 @@ namespace garge_api
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-            builder.Services.AddIdentity<User, IdentityRole>()
+            builder.Services.AddIdentity<User, IdentityRole>(options =>
+                {
+                    options.Lockout.MaxFailedAccessAttempts = 5;
+                    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
+                    options.Lockout.AllowedForNewUsers = true;
+
+                    options.Password.RequiredLength = 10;
+                    options.Password.RequireDigit = true;
+                    options.Password.RequireLowercase = true;
+                    options.Password.RequireUppercase = true;
+                    options.Password.RequireNonAlphanumeric = false;
+
+                    options.User.RequireUniqueEmail = true;
+                })
                 .AddEntityFrameworkStores<ApplicationDbContext>()
                 .AddDefaultTokenProviders();
 
@@ -66,12 +85,16 @@ namespace garge_api
                 });
             builder.Services.AddHttpClient<NordPoolService>();
             builder.Services.AddHostedService<ElectricityPriceFetchService>();
-            builder.Services.AddHttpClient<WebhookNotificationService>();
+            builder.Services.AddSignalR();
+            builder.Services.AddSingleton<garge_api.Hubs.IHubConnectionTracker, garge_api.Hubs.HubConnectionTracker>();
+            builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
+            builder.Services.AddSingleton<CoalescingDispatcher>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
             builder.Services.AddHttpClient("webpush");
-            builder.Services.AddScoped<IWebPushService, WebPushService>();
+            builder.Services.AddSingleton<IWebPushService, WebPushService>();
             builder.Services.AddHostedService<SensorOfflineCheckService>();
             builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddEndpointsApiExplorer();
@@ -82,6 +105,7 @@ namespace garge_api
                 options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
             }).AddJwtBearer(options =>
             {
+                options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,
@@ -90,14 +114,74 @@ namespace garge_api
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtIssuer,
                     ValidAudience = jwtIssuer,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+                    ClockSkew = TimeSpan.FromSeconds(30)
+                };
+                options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+                {
+                    // SignalR cannot send Authorization headers during the WebSocket
+                    // upgrade, so the standard convention is ?access_token=<jwt> in the
+                    // negotiate URL. RequestLoggingMiddleware logs Path only (no query),
+                    // so the token does not reach app logs. Operational note: configure
+                    // any reverse proxy / CDN / Kestrel access log to scrub
+                    // ?access_token= for /hubs/* paths before logs are written or shipped.
+                    OnMessageReceived = ctx =>
+                    {
+                        var accessToken = ctx.Request.Query["access_token"];
+                        var path = ctx.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        {
+                            ctx.Token = accessToken;
+                        }
+                        return Task.CompletedTask;
+                    },
+                    OnTokenValidated = async ctx =>
+                    {
+                        var userId = ctx.Principal?.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+                        if (string.IsNullOrEmpty(userId))
+                        {
+                            ctx.Fail("Missing user id claim.");
+                            return;
+                        }
+
+                        var cache = ctx.HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+                        var cacheKey = $"user_exists:{userId}";
+                        if (cache.TryGetValue(cacheKey, out bool exists))
+                        {
+                            if (!exists) ctx.Fail("User no longer exists.");
+                            return;
+                        }
+
+                        var db = ctx.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                        exists = await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId);
+                        cache.Set(cacheKey, exists, TimeSpan.FromSeconds(60));
+                        if (!exists) ctx.Fail("User no longer exists.");
+                    }
                 };
             });
 
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
+                options.AddPolicy("ActiveSubscription", policy =>
+                    policy.AddRequirements(new ActiveSubscriptionRequirement()));
             });
+            builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
+            builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
+            builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
+            builder.Services.AddDataProtection()
+                .PersistKeysToDbContext<ApplicationDbContext>()
+                .SetApplicationName("garge-api");
+            builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
+            builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
+            builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
+            builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
+            builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
+            builder.Services.AddHttpClient<IVippsService, VippsService>();
+            builder.Services.AddHostedService<VippsWebhookRegistrationService>();
+            builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
+            builder.Services.AddHostedService<SubscriptionChargeSchedulerService>();
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")
@@ -110,7 +194,8 @@ namespace garge_api
                     {
                         policy.WithOrigins(allowedOrigins)
                               .AllowAnyMethod()
-                              .AllowAnyHeader();
+                              .AllowAnyHeader()
+                              .AllowCredentials();
                     });
             });
 
@@ -195,6 +280,21 @@ namespace garge_api
                 }
             }
 
+            var fwd = new ForwardedHeadersOptions
+            {
+                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+                ForwardLimit = 2
+            };
+            fwd.KnownIPNetworks.Clear();
+            fwd.KnownProxies.Clear();
+            app.UseForwardedHeaders(fwd);
+
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHsts();
+                app.UseHttpsRedirection();
+            }
+
             app.UseResponseCompression();
             app.UseSwagger();
             app.UseSwaggerUI(c =>
@@ -202,7 +302,6 @@ namespace garge_api
                 c.SwaggerEndpoint("/swagger/v1/swagger.json", "Garge API V1");
             });
 
-            app.UseStaticFiles();
             app.UseRouting();
             app.UseMiddleware<RequestLoggingMiddleware>();
             app.UseCors("AllowAllOrigins");
@@ -210,6 +309,7 @@ namespace garge_api
             app.UseAuthorization();
             app.UseIpRateLimiting();
             app.MapControllers();
+            app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.Run();
         }
     }

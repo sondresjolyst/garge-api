@@ -16,7 +16,7 @@ namespace garge_api.Services
     }
 
     public class WebPushService(
-        ApplicationDbContext db,
+        IServiceScopeFactory scopeFactory,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<WebPushService> logger) : IWebPushService
@@ -32,6 +32,9 @@ namespace garge_api.Services
                 logger.LogWarning("VAPID keys not configured — push skipped");
                 return false;
             }
+
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             var subscriptions = await db.PushSubscriptions
                 .Where(s => s.UserId == userId)

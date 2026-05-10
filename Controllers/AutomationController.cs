@@ -14,6 +14,7 @@ namespace garge_api.Controllers
     [Route("api/automation")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class AutomationController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -35,7 +36,7 @@ namespace garge_api.Controllers
                 return true;
             }
 
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = User.UserId();
 
             // Get accessible parent names from sensors the user owns
             var accessibleParentNames = await _context.UserSensors

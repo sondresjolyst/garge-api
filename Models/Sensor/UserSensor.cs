@@ -11,6 +11,8 @@ namespace garge_api.Models.Sensor
         [Required]
         public int SensorId { get; set; }
 
+        public bool IsOwner { get; set; } = true;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey(nameof(UserId))]

@@ -15,6 +15,7 @@ namespace garge_api.Controllers
     [Route("api/sensors/{sensorId}/activities")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
+    [Authorize(Policy = "ActiveSubscription")]
     public class SensorActivitiesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -41,7 +42,7 @@ namespace garge_api.Controllers
         private async Task<bool> UserCanAccessSensorAsync(int sensorId)
         {
             if (IsAdmin()) return true;
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = User.UserId();
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
@@ -55,7 +56,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have access to this sensor.")]
         public async Task<IActionResult> GetActivities(int sensorId)
         {
-            _logger.LogInformation("GetActivities called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("GetActivities called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
 
             var sensorExists = await _context.Sensors.AnyAsync(s => s.Id == sensorId);
             if (!sensorExists)
@@ -66,7 +67,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensorId))
             {
-                _logger.LogWarning("GetActivities forbidden for {@LogData}", new { User = User.Identity?.Name, sensorId });
+                _logger.LogWarning("GetActivities forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
                 return Forbid();
             }
 
@@ -117,7 +118,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have access to this sensor.")]
         public async Task<IActionResult> CreateActivity(int sensorId, [FromBody] CreateSensorActivityDto dto)
         {
-            _logger.LogInformation("CreateActivity called by {@LogData}", new { User = User.Identity?.Name, sensorId });
+            _logger.LogInformation("CreateActivity called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
 
             var sensorExists = await _context.Sensors.AnyAsync(s => s.Id == sensorId);
             if (!sensorExists)
@@ -126,7 +127,7 @@ namespace garge_api.Controllers
             if (!await UserCanAccessSensorAsync(sensorId))
                 return Forbid();
 
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = User.UserId();
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
@@ -174,7 +175,7 @@ namespace garge_api.Controllers
             if (activity == null)
                 return NotFound(new { message = "Activity not found!" });
 
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var currentUserId = User.UserId();
             if (!IsAdmin() && activity.UserId != currentUserId)
                 return Forbid();
 
@@ -214,7 +215,7 @@ namespace garge_api.Controllers
             if (activity == null)
                 return NotFound(new { message = "Activity not found!" });
 
-            var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var currentUserId = User.UserId();
             if (!IsAdmin() && activity.UserId != currentUserId)
                 return Forbid();
 
