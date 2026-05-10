@@ -92,7 +92,12 @@ namespace garge_api.Services
                     .ToListAsync(ct);
             }
 
-            return directOwners.Concat(indirectOwners).Distinct().ToList();
+            // Mirror SwitchesController.UserHasRequiredRoleAsync admin bypass:
+            // admin / SwitchAdmin can read every switch via REST, so they should
+            // also receive live SignalR events for every switch.
+            var admins = await GetUserIdsInRolesAsync(db, new[] { "Admin", "SwitchAdmin" }, ct);
+
+            return directOwners.Concat(indirectOwners).Concat(admins).Distinct().ToList();
         }
 
         private async Task<IReadOnlyCollection<string>> LoadSensorOwnersAsync(int sensorId, CancellationToken ct)
@@ -100,9 +105,24 @@ namespace garge_api.Services
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            return await db.UserSensors
+            var directOwners = await db.UserSensors
                 .Where(us => us.SensorId == sensorId)
                 .Select(us => us.UserId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            // Same admin bypass as switches: admin / SensorAdmin see every sensor.
+            var admins = await GetUserIdsInRolesAsync(db, new[] { "Admin", "SensorAdmin" }, ct);
+
+            return directOwners.Concat(admins).Distinct().ToList();
+        }
+
+        private static async Task<List<string>> GetUserIdsInRolesAsync(ApplicationDbContext db, string[] roleNames, CancellationToken ct)
+        {
+            return await db.UserRoles
+                .Join(db.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name })
+                .Where(x => x.Name != null && roleNames.Contains(x.Name))
+                .Select(x => x.UserId)
                 .Distinct()
                 .ToListAsync(ct);
         }
