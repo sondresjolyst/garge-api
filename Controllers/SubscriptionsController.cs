@@ -90,7 +90,7 @@ namespace garge_api.Controllers
         [HttpGet("{id:int}/invoices")]
         public async Task<IActionResult> GetSubscriptionInvoices(int id)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
             var isAdmin = User.IsInRole("Admin");
 
             var subscription = await _context.Subscriptions
@@ -117,7 +117,7 @@ namespace garge_api.Controllers
         [HttpGet("invoices/{invoiceId:int}/pdf")]
         public async Task<IActionResult> GetSubscriptionInvoicePdf(int invoiceId)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
             var isAdmin = User.IsInRole("Admin");
 
             var invoice = await _context.Invoices
@@ -134,7 +134,7 @@ namespace garge_api.Controllers
         [HttpGet("my")]
         public async Task<IActionResult> GetMySubscriptions()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
             var now = DateTime.UtcNow;
 
             var subscriptions = await _context.Subscriptions
@@ -153,7 +153,7 @@ namespace garge_api.Controllers
         [HttpGet("{id:int}/confirmation-url")]
         public async Task<IActionResult> GetConfirmationUrl(int id)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
 
             var subscription = await _context.Subscriptions
                 .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
@@ -170,7 +170,7 @@ namespace garge_api.Controllers
         [HttpPost("initiate")]
         public async Task<IActionResult> InitiateSubscription([FromBody] InitiateSubscriptionDto dto)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
 
             if (!dto.ConsentToWaiveWithdrawal)
                 return BadRequest("Consent to waive 14-day withdrawal right is required for immediate access.");
@@ -216,7 +216,7 @@ namespace garge_api.Controllers
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
                 ConsentAcceptedAt = DateTime.UtcNow,
-                ConsentIp = HttpContext.Connection.RemoteIpAddress?.ToString()
+                ConsentIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString())
             };
 
             _context.Subscriptions.Add(subscription);
@@ -257,7 +257,7 @@ namespace garge_api.Controllers
         [HttpPost("cancel/{id:int}")]
         public async Task<IActionResult> CancelSubscription(int id)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
 
             var subscription = await _context.Subscriptions
                 .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId && s.Status == SubscriptionStatus.Active);

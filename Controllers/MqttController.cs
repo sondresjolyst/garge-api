@@ -63,11 +63,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Username already exists.")]
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
-            _logger.LogInformation("CreateUser called by {@LogData}", new { User = User.Identity?.Name, dto.Username, dto.IsSuperuser });
+            _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.UserId(), dto.Username });
 
             if (!UserHasRequiredRole())
             {
-                _logger.LogWarning("CreateUser forbidden for {@LogData}", new { User = User.Identity?.Name });
+                _logger.LogWarning("CreateUser forbidden for {@LogData}", new { CallerUserId = User.UserId() });
                 return Forbid();
             }
 
@@ -80,9 +80,12 @@ namespace garge_api.Controllers
             var salt = GenerateSalt(16);
             var hash = HashPasswordPBKDF2(dto.Password, salt);
 
+            // IsSuperuser intentionally hardcoded to false. Broker superusers
+            // bypass all ACLs; granting that flag must be done out-of-band
+            // (DB migration / seed) by a platform admin, never via API.
             var user = new EMQXMqttUser
             {
-                IsSuperuser = dto.IsSuperuser,
+                IsSuperuser = false,
                 Username = dto.Username,
                 PasswordHash = hash,
                 Salt = salt

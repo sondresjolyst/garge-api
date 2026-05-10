@@ -1,11 +1,13 @@
 ﻿using AutoMapper;
 using garge_api.Dtos.Auth;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Swashbuckle.AspNetCore.Annotations;
 using System.IdentityModel.Tokens.Jwt;
@@ -71,15 +73,32 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = "Email is required!" });
             }
 
+            if (!registerUserDto.ConfirmAge16Plus)
+            {
+                _logger.LogWarning("Register failed: age confirmation missing");
+                return BadRequest(new { message = "You must confirm you are 16 or older to register." });
+            }
+
+            if (!registerUserDto.AcceptTerms)
+            {
+                _logger.LogWarning("Register failed: terms not accepted");
+                return BadRequest(new { message = "You must accept the Terms of Service to register." });
+            }
+
+            const string genericResponse = "If the email is available, an account has been created. Check your inbox to confirm.";
+
             var existingUser = await _userManager.FindByEmailAsync(registerUserDto.Email);
             if (existingUser != null)
             {
-                _logger.LogWarning("Register failed: Email already registered");
-                return Conflict(new { message = "Email is already registered!" });
+                _logger.LogWarning("Register: email already registered");
+                return Ok(new { message = genericResponse });
             }
 
             // Use AutoMapper to map DTO to User
             var user = _mapper.Map<User>(registerUserDto);
+            user.TermsAcceptedAt = DateTime.UtcNow;
+            user.TermsVersion = registerUserDto.TermsVersion;
+            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext?.Connection?.RemoteIpAddress?.ToString());
 
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
@@ -89,9 +108,6 @@ namespace garge_api.Controllers
                 var userProfile = new UserProfile
                 {
                     Id = user.Id,
-                    FirstName = user.FirstName,
-                    LastName = user.LastName,
-                    Email = user.Email!,
                     User = user
                 };
                 _context.UserProfiles.Add(userProfile);
@@ -105,7 +121,7 @@ namespace garge_api.Controllers
                 await _emailService.SendEmailAsync(user.Email!, "Confirm your email", $"Your verification code is: {verificationCode}");
 
                 _logger.LogInformation("User registered successfully {UserId}", user.Id);
-                return Ok(new { message = "User registered successfully. Please check your email to confirm your account." });
+                return Ok(new { message = genericResponse });
             }
 
             _logger.LogError("Register failed: {@Errors}", result.Errors);
@@ -135,7 +151,7 @@ namespace garge_api.Controllers
 
             var email = login.Email ?? string.Empty;
             var user = await _userManager.FindByEmailAsync(email);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("Login failed: Invalid credentials");
                 return Unauthorized(new { message = "Invalid credentials!" });
@@ -149,54 +165,8 @@ namespace garge_api.Controllers
             }
 
             var userRoles = await _userManager.GetRolesAsync(user);
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id?.ToString() ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
-            };
-
-            claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
-
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddDays(7),
-                NotBefore = DateTime.UtcNow.AddSeconds(-5),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
-                Issuer = _configuration["Jwt:Issuer"],
-                Audience = _configuration["Jwt:Issuer"]
-            };
-
-            var token = tokenHandler.CreateToken(tokenDescriptor);
-            var tokenString = tokenHandler.WriteToken(token);
-
-            var rawToken = GenerateRefreshToken();
-            var hashedToken = HashText(rawToken);
-
-            // Limit to 5 active tokens per user
-            var userTokens = _context.RefreshTokens
-                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
-                .OrderBy(t => t.Created)
-                .ToList();
-            if (userTokens.Count >= 5)
-            {
-                var oldest = userTokens.First();
-                _context.RefreshTokens.Remove(oldest);
-                _logger.LogInformation("Login: Oldest refresh token deleted {@LogData}", new { user.Id });
-            }
-
-            var refreshToken = new RefreshToken
-            {
-                Token = hashedToken,
-                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
-                Expires = DateTime.UtcNow.AddMonths(6),
-                Created = DateTime.UtcNow
-            };
-            _context.RefreshTokens.Add(refreshToken);
+            var tokenString = BuildJwt(user, userRoles);
+            var rawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("User logged in successfully {UserId}", user.Id);
@@ -246,23 +216,25 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("VerifyEmail called");
 
+            const string genericInvalid = "Invalid or expired verification code!";
+
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("VerifyEmail failed: User not found");
-                return NotFound(new { message = "User not found!" });
+                _logger.LogWarning("VerifyEmail: unknown email");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.EmailConfirmed)
             {
-                _logger.LogWarning("VerifyEmail failed: Email already verified");
-                return BadRequest(new { message = "Email is already verified!" });
+                _logger.LogWarning("VerifyEmail: already verified");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.EmailVerificationCodeHash != HashText(model.Code) || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
             {
                 _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
-                return BadRequest(new { message = "Invalid or expired verification code!" });
+                return BadRequest(new { message = genericInvalid });
             }
 
             user.EmailConfirmed = true;
@@ -307,76 +279,111 @@ namespace garge_api.Controllers
             }
 
             var user = await _userManager.FindByIdAsync(userId);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("RefreshToken failed: User not found {@LogData}", new { userId });
                 return Unauthorized(new { message = "User not found" });
             }
 
             var hashedInput = HashText(request.RefreshToken);
-            var storedToken = _context.RefreshTokens
-                .FirstOrDefault(t => t.Token == hashedInput && t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow);
+
+            using var tx = await _context.Database.BeginTransactionAsync();
+
+            // Reuse detection: if the presented token matches a row we have
+            // already revoked, treat it as a stolen-token replay and revoke
+            // every refresh token in the family.
+            var anyMatch = await _context.RefreshTokens
+                .FirstOrDefaultAsync(t => t.Token == hashedInput && t.UserId == user.Id);
+
+            if (anyMatch != null && anyMatch.Revoked != null)
+            {
+                var now = DateTime.UtcNow;
+                var familyLive = await _context.RefreshTokens
+                    .Where(t => t.UserId == user.Id && t.Revoked == null)
+                    .ToListAsync();
+                foreach (var t in familyLive) t.Revoked = now;
+                await _context.SaveChangesAsync();
+                await tx.CommitAsync();
+                _logger.LogWarning("RefreshToken reuse detected; family revoked {@LogData}", new { user.Id });
+                return Unauthorized(new { message = "Invalid or expired refresh token" });
+            }
+
+            var storedToken = anyMatch != null && anyMatch.Revoked == null && anyMatch.Expires > DateTime.UtcNow
+                ? anyMatch
+                : null;
 
             if (storedToken == null)
             {
+                await tx.RollbackAsync();
                 _logger.LogWarning("RefreshToken failed: Invalid or expired refresh token {@LogData}", new { user.Id });
                 return Unauthorized(new { message = "Invalid or expired refresh token" });
             }
 
-            // Generate new JWT and refresh token
+            // Revoke old refresh token, issue a fresh JWT + refresh token
+            storedToken.Revoked = DateTime.UtcNow;
+
             var userRoles = await _userManager.GetRolesAsync(user);
+            var newTokenString = BuildJwt(user, userRoles);
+            var newRawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
+
+            await _context.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
+            return Ok(new { token = newTokenString, refreshToken = newRawToken });
+        }
+
+        private string BuildJwt(User user, IList<string> roles)
+        {
             var tokenHandler = new JwtSecurityTokenHandler();
             var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
             var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString() ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
             };
-            claims.AddRange(userRoles.Select(role => new Claim(ClaimTypes.Role, role)));
+            claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddDays(7),
+                Expires = DateTime.UtcNow.AddHours(1),
                 NotBefore = DateTime.UtcNow.AddSeconds(-5),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
                 Issuer = _configuration["Jwt:Issuer"],
                 Audience = _configuration["Jwt:Issuer"]
             };
+            return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
+        }
 
-            var newToken = tokenHandler.CreateToken(tokenDescriptor);
-            var newTokenString = tokenHandler.WriteToken(newToken);
+        /// <summary>
+        /// Adds a new refresh token row for the user (capped at 5 active per user).
+        /// Caller must SaveChangesAsync. Returns the raw (un-hashed) token to send to the client.
+        /// </summary>
+        private string IssueRefreshToken(string userId)
+        {
+            var rawToken = GenerateRefreshToken();
+            var hashedToken = HashText(rawToken);
 
-            // Revoke old refresh token and issue a new one
-            storedToken.Revoked = DateTime.UtcNow;
-            var newRawToken = GenerateRefreshToken();
-            var newHashedToken = HashText(newRawToken);
-
-            // Limit to 5 active tokens per user
             var userTokens = _context.RefreshTokens
-                .Where(t => t.UserId == user.Id && t.Revoked == null && t.Expires > DateTime.UtcNow)
+                .Where(t => t.UserId == userId && t.Revoked == null && t.Expires > DateTime.UtcNow)
                 .OrderBy(t => t.Created)
                 .ToList();
             if (userTokens.Count >= 5)
             {
-                var oldest = userTokens.First();
-                _context.RefreshTokens.Remove(oldest);
-                _logger.LogInformation("RefreshToken: Oldest refresh token revoked {@LogData}", new { user.Id });
+                _context.RefreshTokens.Remove(userTokens.First());
+                _logger.LogInformation("Oldest refresh token evicted (cap=5) {@LogData}", new { UserId = userId });
             }
 
-            var newRefreshToken = new RefreshToken
+            _context.RefreshTokens.Add(new RefreshToken
             {
-                Token = newHashedToken,
-                UserId = user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."),
+                Token = hashedToken,
+                UserId = userId,
                 Expires = DateTime.UtcNow.AddMonths(6),
                 Created = DateTime.UtcNow
-            };
-            _context.RefreshTokens.Add(newRefreshToken);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
-            return Ok(new { token = newTokenString, refreshToken = newRawToken });
+            });
+            return rawToken;
         }
 
         /// <summary>
@@ -422,11 +429,13 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("ResetPassword called");
 
+            const string genericInvalid = "Invalid or expired reset code!";
+
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user == null)
             {
-                _logger.LogWarning("ResetPassword failed: User not found");
-                return NotFound(new { message = "User not found!" });
+                _logger.LogWarning("ResetPassword: unknown email");
+                return BadRequest(new { message = genericInvalid });
             }
 
             if (user.PasswordResetAttempts >= 5)
@@ -440,7 +449,7 @@ namespace garge_api.Controllers
                 user.PasswordResetAttempts++;
                 await _userManager.UpdateAsync(user);
                 _logger.LogWarning("ResetPassword failed: Invalid or expired code");
-                return BadRequest(new { message = "Invalid or expired reset code!" });
+                return BadRequest(new { message = genericInvalid });
             }
 
             var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);

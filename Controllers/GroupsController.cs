@@ -26,7 +26,7 @@ namespace garge_api.Controllers
             _logger = logger;
         }
 
-        private string GetUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        private string GetUserId() => User.UserId()!;
 
         /// <summary>
         /// Get all groups for the current user, including their sensor and switch IDs.

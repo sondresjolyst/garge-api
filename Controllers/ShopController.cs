@@ -122,7 +122,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> Checkout([FromBody] CreateOrderDto dto)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
 
             if (!PhoneNumber.TryNormalizeNo(dto.PhoneNumber, out var msisdn))
                 return BadRequest("Invalid Norwegian phone number.");
@@ -226,7 +226,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> GetMyOrders()
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
 
             var orders = await _context.Orders
                 .Include(o => o.OrderItems).ThenInclude(oi => oi.ShopItem)
@@ -283,7 +283,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> GetInvoicePdf(int id)
         {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+            var userId = User.UserId()!;
             var isAdmin = User.IsInRole("Admin");
 
             var invoice = await _context.Invoices

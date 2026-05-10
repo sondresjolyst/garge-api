@@ -272,4 +272,22 @@ public class AdminControllerTests : ControllerTestBase
         var dto = Assert.IsType<AdminStatsDto>(ok.Value);
         Assert.Equal(1, dto.Subscriptions.StoppedThisMonth);
     }
+
+    [Fact]
+    public async Task AssignPermission_UnknownPermission_Returns400()
+    {
+        var db = CreateDbContext();
+        var roleManager = CreateRoleManagerMock();
+        roleManager.Setup(r => r.RoleExistsAsync("Default")).ReturnsAsync(true);
+
+        var controller = new AdminController(
+            roleManager.Object, MockUserManager.Object, db,
+            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+        controller.ControllerContext = MakeControllerContext(isAdmin: true);
+
+        var result = await controller.AssignPermission("Default", "TotallyMadeUpPermission");
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(db.RolePermissions);
+    }
 }

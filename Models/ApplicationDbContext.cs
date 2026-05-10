@@ -28,7 +28,6 @@ namespace garge_api.Models
         public DbSet<BatteryHealth> BatteryHealthData { get; set; }
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
-        public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
         public DbSet<SensorActivity> SensorActivities { get; set; }
@@ -322,7 +321,7 @@ namespace garge_api.Models
         }
         public void EnsureTriggers()
         {
-            var triggerFunctionSql = @"
+            var switchTriggerFunctionSql = @"
         CREATE OR REPLACE FUNCTION notify_switchdata_change()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -331,7 +330,7 @@ namespace garge_api.Models
         END;
         $$ LANGUAGE plpgsql;";
 
-            var triggerSql = @"
+            var switchTriggerSql = @"
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -345,8 +344,33 @@ namespace garge_api.Models
             END IF;
         END $$;";
 
-            Database.ExecuteSqlRaw(triggerFunctionSql);
-            Database.ExecuteSqlRaw(triggerSql);
+            var sensorTriggerFunctionSql = @"
+        CREATE OR REPLACE FUNCTION notify_sensordata_change()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            PERFORM pg_notify('sensordata_channel', row_to_json(NEW)::text);
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;";
+
+            var sensorTriggerSql = @"
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_trigger
+                WHERE tgname = 'sensordata_change_trigger'
+            ) THEN
+                CREATE TRIGGER sensordata_change_trigger
+                AFTER INSERT ON ""SensorData""
+                FOR EACH ROW EXECUTE FUNCTION notify_sensordata_change();
+            END IF;
+        END $$;";
+
+            Database.ExecuteSqlRaw(switchTriggerFunctionSql);
+            Database.ExecuteSqlRaw(switchTriggerSql);
+            Database.ExecuteSqlRaw(sensorTriggerFunctionSql);
+            Database.ExecuteSqlRaw(sensorTriggerSql);
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

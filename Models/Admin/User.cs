@@ -15,4 +15,13 @@ public class User : IdentityUser
     public DateTime? PasswordResetCodeExpiration { get; set; }
     public int PasswordResetAttempts { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+
+    public DateTime? TermsAcceptedAt { get; set; }
+    [MaxLength(20)]
+    public string? TermsVersion { get; set; }
+    [MaxLength(45)]
+    public string? TermsAcceptedIp { get; set; }
 }

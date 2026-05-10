@@ -38,7 +38,7 @@ namespace garge_api.Controllers
         private async Task<bool> UserCanAccessSensorAsync(int sensorId)
         {
             if (IsAdmin()) return true;
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var userId = User.UserId();
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
@@ -53,19 +53,19 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto dto)
         {
-            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
+            _logger.LogInformation("CreateBatteryHealth called by {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
+
+            if (!IsAdmin())
+            {
+                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
+                return Forbid();
+            }
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
             {
                 _logger.LogWarning("CreateBatteryHealth voltage sensor not found: {SensorName}", LogSanitizer.Sanitize(sensorName));
                 return NotFound(new { message = "Sensor not found!" });
-            }
-
-            if (!await UserCanAccessSensorAsync(sensor.Id))
-            {
-                _logger.LogWarning("CreateBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
-                return Forbid();
             }
 
             var record = _mapper.Map<BatteryHealth>(dto);
@@ -104,7 +104,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
-            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
+            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
@@ -115,7 +115,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { User = User.Identity?.Name, SensorName = LogSanitizer.Sanitize(sensorName) });
+                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
                 return Forbid();
             }
 
