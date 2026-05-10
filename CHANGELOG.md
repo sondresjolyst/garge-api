@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.1](https://github.com/sondresjolyst/garge-api/compare/v2.4.0...v2.4.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **signalr:** include admins in device ownership lists ([#197](https://github.com/sondresjolyst/garge-api/issues/197)) ([9d902ee](https://github.com/sondresjolyst/garge-api/commit/9d902eec8a73396a9c27af219b2ab8aecde7a6f7))
+
 ## [2.4.0](https://github.com/sondresjolyst/garge-api/compare/v2.3.2...v2.4.0) (2026-05-10)
 
 
