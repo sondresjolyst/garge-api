@@ -1,85 +1,138 @@
-﻿using garge_api.Models;
+using garge_api.Models;
 using Newtonsoft.Json;
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using garge_api.Models.Switch;
+using garge_api.Models.Sensor;
 
-public class PostgresNotificationService : BackgroundService
+namespace garge_api.Services
 {
-    private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<PostgresNotificationService> _logger;
-    private readonly string _connectionString;
-
-    public PostgresNotificationService(IServiceScopeFactory scopeFactory, ILogger<PostgresNotificationService> logger, IConfiguration configuration)
+    public class PostgresNotificationService : BackgroundService
     {
-        _scopeFactory = scopeFactory;
-        _logger = logger;
-        _connectionString = configuration.GetConnectionString("DefaultConnection")
-                            ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        _logger.LogWarning("PostgresNotificationService initialized");
-    }
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly ILogger<PostgresNotificationService> _logger;
+        private readonly string _connectionString;
+        private readonly CoalescingDispatcher _dispatcher;
+        private readonly IDeviceOwnershipService _ownership;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(stoppingToken);
-
-        connection.Notification += async (sender, args) =>
+        public PostgresNotificationService(
+            IServiceScopeFactory scopeFactory,
+            ILogger<PostgresNotificationService> logger,
+            IConfiguration configuration,
+            CoalescingDispatcher dispatcher,
+            IDeviceOwnershipService ownership)
         {
-            try
+            _scopeFactory = scopeFactory;
+            _logger = logger;
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+            _dispatcher = dispatcher;
+            _ownership = ownership;
+            _logger.LogWarning("PostgresNotificationService initialized");
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            await using var connection = new NpgsqlConnection(_connectionString);
+            await connection.OpenAsync(stoppingToken);
+
+            connection.Notification += async (sender, args) =>
             {
-                var switchData = JsonConvert.DeserializeObject<SwitchData>(args.Payload);
-                if (switchData == null)
+                try
                 {
-                    _logger.LogWarning("Deserialized SwitchData is null.");
-                    return;
+                    if (args.Channel == "switchdata_channel")
+                    {
+                        await HandleSwitchNotificationAsync(args.Payload, stoppingToken);
+                    }
+                    else if (args.Channel == "sensordata_channel")
+                    {
+                        await HandleSensorNotificationAsync(args.Payload, stoppingToken);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Ignoring notification on unknown channel {Channel}", args.Channel);
+                    }
                 }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to deserialize notification payload from {Channel}", args.Channel);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error processing notification from {Channel}", args.Channel);
+                }
+            };
 
-                _logger.LogDebug("Notification received for switch {SwitchId}", switchData.SwitchId);
+            await using (var command = new NpgsqlCommand("LISTEN switchdata_channel; LISTEN sensordata_channel;", connection))
+            {
+                await command.ExecuteNonQueryAsync(stoppingToken);
+            }
 
-                // Retrieve the related Switch entity
-                using var scope = _scopeFactory.CreateScope();
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await connection.WaitAsync(stoppingToken);
+            }
+        }
+
+        private async Task HandleSwitchNotificationAsync(string payload, CancellationToken ct)
+        {
+            var switchData = JsonConvert.DeserializeObject<SwitchData>(payload);
+            if (switchData == null)
+            {
+                _logger.LogWarning("Deserialized SwitchData is null.");
+                return;
+            }
+
+            _logger.LogDebug("Notification received for switch {SwitchId}", switchData.SwitchId);
+
+            using (var scope = _scopeFactory.CreateScope())
+            {
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                switchData.Switch = await context.Switches.FirstOrDefaultAsync(s => s.Id == switchData.SwitchId);
+                switchData.Switch = await context.Switches.FirstOrDefaultAsync(s => s.Id == switchData.SwitchId, ct);
 
                 if (switchData.Switch == null)
                 {
                     _logger.LogWarning("Switch with ID {SwitchId} not found.", switchData.SwitchId);
                 }
+            }
 
-                await NotifySubscribersAsync(switchData);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Failed to deserialize switchdata_channel notification payload.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error processing switchdata_channel notification.");
-            }
-        };
+            // Dispatch to all bridges (e.g., garge-operator) and to each owning user.
+            _dispatcher.EnqueueSwitchForBridges(switchData);
 
-        await using (var command = new NpgsqlCommand("LISTEN switchdata_channel;", connection))
-        {
-            await command.ExecuteNonQueryAsync(stoppingToken);
+            var owners = await _ownership.ListSwitchOwnersAsync(switchData.SwitchId, ct);
+            foreach (var userId in owners)
+            {
+                _dispatcher.EnqueueSwitchForUser(userId, switchData);
+            }
         }
 
-        while (!stoppingToken.IsCancellationRequested)
+        private async Task HandleSensorNotificationAsync(string payload, CancellationToken ct)
         {
-            await connection.WaitAsync(stoppingToken);
-        }
-    }
+            var sensorData = JsonConvert.DeserializeObject<SensorData>(payload);
+            if (sensorData == null)
+            {
+                _logger.LogWarning("Deserialized SensorData is null.");
+                return;
+            }
 
-    private async Task NotifySubscribersAsync(SwitchData switchData)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        var webhookService = scope.ServiceProvider.GetRequiredService<WebhookNotificationService>();
+            _logger.LogDebug("Notification received for sensor {SensorId}", sensorData.SensorId);
 
-        var subscriptions = await context.WebhookSubscriptions.ToListAsync();
-        foreach (var subscription in subscriptions)
-        {
-            await webhookService.NotifyClientAsync(subscription.WebhookUrl, switchData, subscription.WebhookSecret);
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                sensorData.Sensor = await context.Sensors.FirstOrDefaultAsync(s => s.Id == sensorData.SensorId, ct);
+
+                if (sensorData.Sensor == null)
+                {
+                    _logger.LogWarning("Sensor with ID {SensorId} not found.", sensorData.SensorId);
+                }
+            }
+
+            var owners = await _ownership.ListSensorOwnersAsync(sensorData.SensorId, ct);
+            foreach (var userId in owners)
+            {
+                _dispatcher.EnqueueSensorForUser(userId, sensorData);
+            }
         }
     }
 }

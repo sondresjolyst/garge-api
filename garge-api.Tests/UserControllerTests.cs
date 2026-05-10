@@ -5,7 +5,6 @@ using garge_api.Models;
 using garge_api.Models.Auth;
 using garge_api.Models.Push;
 using garge_api.Models.Shop;
-using garge_api.Models.Webhook;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -84,17 +83,12 @@ public class UserControllerTests : ControllerTestBase
         {
             Id = 1, UserId = user.Id, Endpoint = "https://push", P256dh = "k", Auth = "a"
         });
-        db.WebhookSubscriptions.Add(new WebhookSubscription
-        {
-            Id = 1, UserId = user.Id, WebhookUrl = "https://hook.example/1"
-        });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
 
         Assert.Empty(db.RefreshTokens);
         Assert.Empty(db.PushSubscriptions);
-        Assert.Empty(db.WebhookSubscriptions);
     }
 
     [Fact]
@@ -146,26 +140,6 @@ public class UserControllerTests : ControllerTestBase
         var dto = new UpdateProfileDto { FirstName = "X", LastName = "Y" };
         var result = await CreateUserController(db, callerId: "user-1").UpdateProfile("user-2", dto);
         Assert.IsType<ForbidResult>(result);
-    }
-
-    [Fact]
-    public async Task DbContext_DeletingUser_CascadesWebhookSubscriptions()
-    {
-        // Hard-delete is not the production path under soft-delete, but the FK
-        // cascade is the safety net that prevents orphan WebhookSubscriptions.
-        using var db = CreateDbContext();
-        var user = MakeDbUser();
-        db.Users.Add(user);
-        db.WebhookSubscriptions.Add(new WebhookSubscription
-        {
-            Id = 99, UserId = user.Id, WebhookUrl = "https://hook.example/cascade"
-        });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        db.Users.Remove(user);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        Assert.Empty(db.WebhookSubscriptions);
     }
 
     [Fact]

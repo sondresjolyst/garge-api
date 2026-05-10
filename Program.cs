@@ -85,7 +85,10 @@ namespace garge_api
                 });
             builder.Services.AddHttpClient<NordPoolService>();
             builder.Services.AddHostedService<ElectricityPriceFetchService>();
-            builder.Services.AddHttpClient<WebhookNotificationService>();
+            builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
+            builder.Services.AddSingleton<CoalescingDispatcher>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
@@ -115,6 +118,16 @@ namespace garge_api
                 };
                 options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
                 {
+                    OnMessageReceived = ctx =>
+                    {
+                        var accessToken = ctx.Request.Query["access_token"];
+                        var path = ctx.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        {
+                            ctx.Token = accessToken;
+                        }
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async ctx =>
                     {
                         var userId = ctx.Principal?.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
@@ -174,7 +187,8 @@ namespace garge_api
                     {
                         policy.WithOrigins(allowedOrigins)
                               .AllowAnyMethod()
-                              .AllowAnyHeader();
+                              .AllowAnyHeader()
+                              .AllowCredentials();
                     });
             });
 
@@ -288,6 +302,7 @@ namespace garge_api
             app.UseAuthorization();
             app.UseIpRateLimiting();
             app.MapControllers();
+            app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.Run();
         }
     }

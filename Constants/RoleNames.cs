@@ -6,13 +6,13 @@ namespace garge_api.Constants
         {
             "Default", "Electricity",
             "Admin", "SensorAdmin", "MqttAdmin", "AutomationAdmin", "SwitchAdmin",
-            "ComplimentaryUser"
+            "ComplimentaryUser", "DeviceBridge"
         };
 
         public static readonly string[] SubscriptionBypassRoles =
         {
             "Admin", "SensorAdmin", "MqttAdmin", "AutomationAdmin", "SwitchAdmin",
-            "ComplimentaryUser"
+            "ComplimentaryUser", "DeviceBridge"
         };
 
         public static readonly Dictionary<string, string[]> RolePermissions = new()

@@ -7,14 +7,12 @@ using garge_api.Dtos.Shop;
 using garge_api.Dtos.Subscription;
 using garge_api.Dtos.Switch;
 using garge_api.Dtos.User;
-using garge_api.Dtos.Webhook;
 using garge_api.Models.Admin;
 using garge_api.Models.Electricity;
 using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
-using garge_api.Models.Webhook;
 using Microsoft.AspNetCore.Identity;
 
 public class MappingProfile : Profile
@@ -62,10 +60,6 @@ public class MappingProfile : Profile
             .ForMember(d => d.PhoneNumber, o => o.MapFrom(s => s.User.PhoneNumber))
             .ForMember(d => d.EmailConfirmed, o => o.MapFrom(s => s.User.EmailConfirmed));
         CreateMap<RegisterUserDto, User>();
-
-        // Webhook mappings
-        CreateMap<WebhookSubscription, WebhookSubscriptionDto>().ReverseMap();
-        CreateMap<CreateWebhookSubscriptionDto, WebhookSubscription>();
 
         // Subscription plan mappings
         CreateMap<Product, ProductResponseDto>()

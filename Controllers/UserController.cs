@@ -118,8 +118,8 @@ namespace garge_api.Controllers
 
         /// <summary>
         /// Removes all per-user rows that should not survive soft-delete (custom
-        /// names, refresh tokens, push subs, webhook subs, etc.). Add new
-        /// user-owned tables here when introduced.
+        /// names, refresh tokens, push subs, etc.). Add new user-owned tables
+        /// here when introduced.
         /// </summary>
         private void ClearUserOwnedRows(string userId)
         {
@@ -129,7 +129,6 @@ namespace garge_api.Controllers
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
             _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
             _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
-            _context.WebhookSubscriptions.RemoveRange(_context.WebhookSubscriptions.Where(w => w.UserId == userId));
             _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
             _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == userId));
         }
