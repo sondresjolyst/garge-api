@@ -1,13 +1,16 @@
 ﻿using garge_api.Dtos.Switch;
+using garge_api.Hubs;
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
 using AutoMapper;
 using garge_api.Models.Switch;
+using garge_api.Services;
 
 namespace garge_api.Controllers
 {
@@ -21,12 +24,16 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
         private readonly ILogger<SwitchesController> _logger;
+        private readonly IDeviceOwnershipService _ownership;
+        private readonly IHubContext<DeviceHub> _hub;
 
-        public SwitchesController(ApplicationDbContext context, IMapper mapper, ILogger<SwitchesController> logger)
+        public SwitchesController(ApplicationDbContext context, IMapper mapper, ILogger<SwitchesController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub)
         {
             _context = context;
             _mapper = mapper;
             _logger = logger;
+            _ownership = ownership;
+            _hub = hub;
         }
 
         private bool IsSwitchAdmin()
@@ -42,24 +49,11 @@ namespace garge_api.Controllers
             if (IsSwitchAdmin()) return true;
 
             var userId = User.UserId();
+            if (string.IsNullOrEmpty(userId)) return false;
 
-            // Direct ownership via UserSwitches
-            if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id))
-                return true;
-
-            // Use ParentName of sensors the user owns to derive switch access
-            var accessibleParentNames = await _context.UserSensors
-                .Where(us => us.UserId == userId)
-                .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
-                .ToListAsync();
-
-            // Check if any device the user can access has discovered this switch
-            var discovered = await _context.DiscoveredDevices
-                .AnyAsync(dd =>
-                    accessibleParentNames.Contains(dd.DiscoveredBy) &&
-                    dd.Target == switchEntity.Name);
-
-            return discovered;
+            // Delegate to the shared ownership service so the request-time access
+            // check and the SignalR dispatch path use identical logic.
+            return await _ownership.CanUserAccessSwitchAsync(userId, switchEntity.Id);
         }
 
         /// <summary>
@@ -687,6 +681,8 @@ namespace garge_api.Controllers
             {
                 _context.UserSwitches.Add(new UserSwitch { UserId = userId!, SwitchId = switchEntity.Id });
                 await _context.SaveChangesAsync();
+                _ownership.InvalidateSwitch(switchEntity.Id);
+                await _hub.Clients.Group(DeviceHub.UserGroup(userId!)).SendAsync("device-created", new { kind = "switch", id = switchEntity.Id });
                 _logger.LogInformation("ClaimSwitch assigned switch to user {@LogData}", new { switchEntity.Id, CallerUserId = User.UserId() });
             }
             return Ok(new { message = "Switch successfully claimed.", switchId = switchEntity.Id, registrationCode = switchEntity.RegistrationCode });
@@ -707,6 +703,7 @@ namespace garge_api.Controllers
             {
                 _context.UserSwitches.Remove(userSwitch);
                 await _context.SaveChangesAsync();
+                _ownership.InvalidateSwitch(id);
             }
 
             _logger.LogInformation("Switch unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id });

@@ -85,7 +85,11 @@ namespace garge_api
                 });
             builder.Services.AddHttpClient<NordPoolService>();
             builder.Services.AddHostedService<ElectricityPriceFetchService>();
-            builder.Services.AddHttpClient<WebhookNotificationService>();
+            builder.Services.AddSignalR();
+            builder.Services.AddSingleton<garge_api.Hubs.IHubConnectionTracker, garge_api.Hubs.HubConnectionTracker>();
+            builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
+            builder.Services.AddSingleton<CoalescingDispatcher>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
@@ -115,6 +119,22 @@ namespace garge_api
                 };
                 options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
                 {
+                    // SignalR cannot send Authorization headers during the WebSocket
+                    // upgrade, so the standard convention is ?access_token=<jwt> in the
+                    // negotiate URL. RequestLoggingMiddleware logs Path only (no query),
+                    // so the token does not reach app logs. Operational note: configure
+                    // any reverse proxy / CDN / Kestrel access log to scrub
+                    // ?access_token= for /hubs/* paths before logs are written or shipped.
+                    OnMessageReceived = ctx =>
+                    {
+                        var accessToken = ctx.Request.Query["access_token"];
+                        var path = ctx.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        {
+                            ctx.Token = accessToken;
+                        }
+                        return Task.CompletedTask;
+                    },
                     OnTokenValidated = async ctx =>
                     {
                         var userId = ctx.Principal?.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
@@ -174,7 +194,8 @@ namespace garge_api
                     {
                         policy.WithOrigins(allowedOrigins)
                               .AllowAnyMethod()
-                              .AllowAnyHeader();
+                              .AllowAnyHeader()
+                              .AllowCredentials();
                     });
             });
 
@@ -288,6 +309,7 @@ namespace garge_api
             app.UseAuthorization();
             app.UseIpRateLimiting();
             app.MapControllers();
+            app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.Run();
         }
     }

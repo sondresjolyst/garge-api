@@ -1,9 +1,11 @@
 using garge_api.Dtos.Sensor;
+using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Sensor;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Swashbuckle.AspNetCore.Annotations;
@@ -24,13 +26,17 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
         private readonly ILogger<SensorController> _logger;
+        private readonly IDeviceOwnershipService _ownership;
+        private readonly IHubContext<DeviceHub> _hub;
         private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
-        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger)
+        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub)
         {
             _context = context;
             _mapper = mapper;
             _logger = logger;
+            _ownership = ownership;
+            _hub = hub;
         }
 
         private bool IsAdmin()
@@ -43,7 +49,9 @@ namespace garge_api.Controllers
         {
             if (IsAdmin()) return true;
             var userId = User.UserId();
-            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
+            if (string.IsNullOrEmpty(userId)) return false;
+            // Delegate to the shared ownership service.
+            return await _ownership.CanUserAccessSensorAsync(userId, sensorId);
         }
 
         /// <summary>
@@ -548,6 +556,8 @@ namespace garge_api.Controllers
             {
                 _context.UserSensors.Add(new UserSensor { UserId = userId!, SensorId = sensor.Id, IsOwner = true });
                 await _context.SaveChangesAsync();
+                _ownership.InvalidateSensor(sensor.Id);
+                await _hub.Clients.Group(DeviceHub.UserGroup(userId!)).SendAsync("device-created", new { kind = "sensor", id = sensor.Id });
                 _logger.LogInformation("ClaimSensor assigned sensor to user {@LogData}", new { sensor.Id, CallerUserId = User.UserId() });
             }
             else
@@ -589,6 +599,7 @@ namespace garge_api.Controllers
             if (userSensor != null)
             {
                 _context.UserSensors.Remove(userSensor);
+                _ownership.InvalidateSensor(id);
             }
 
             // Remove any custom name the user has set for this sensor

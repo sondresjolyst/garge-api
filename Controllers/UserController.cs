@@ -1,12 +1,15 @@
 using AutoMapper;
 using garge_api.Dtos.User;
 using garge_api.Helpers;
+using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Auth;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
@@ -27,13 +30,26 @@ namespace garge_api.Controllers
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
         private readonly ILogger<UserController> _logger;
+        private readonly IDeviceOwnershipService _ownership;
+        private readonly IHubConnectionTracker _hubConnections;
+        private readonly IHubContext<DeviceHub> _hub;
 
-        public UserController(ApplicationDbContext context, UserManager<User> userManager, IMapper mapper, ILogger<UserController> logger)
+        public UserController(
+            ApplicationDbContext context,
+            UserManager<User> userManager,
+            IMapper mapper,
+            ILogger<UserController> logger,
+            IDeviceOwnershipService ownership,
+            IHubConnectionTracker hubConnections,
+            IHubContext<DeviceHub> hub)
         {
             _context = context;
             _userManager = userManager;
             _mapper = mapper;
             _logger = logger;
+            _ownership = ownership;
+            _hubConnections = hubConnections;
+            _hub = hub;
         }
 
         /// <summary>
@@ -112,26 +128,56 @@ namespace garge_api.Controllers
 
             await _context.SaveChangesAsync();
 
+            await ForceDisconnectHubAsync(id);
+
             _logger.LogInformation("Account soft-deleted by user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
         }
 
         /// <summary>
         /// Removes all per-user rows that should not survive soft-delete (custom
-        /// names, refresh tokens, push subs, webhook subs, etc.). Add new
-        /// user-owned tables here when introduced.
+        /// names, refresh tokens, push subs, etc.). Add new user-owned tables
+        /// here when introduced.
         /// </summary>
         private void ClearUserOwnedRows(string userId)
         {
+            // Capture associated device ids before removing the rows so we
+            // can invalidate the ownership cache once the changes commit.
+            var sensorIds = _context.UserSensors.Where(us => us.UserId == userId).Select(us => us.SensorId).ToList();
+            var switchIds = _context.UserSwitches.Where(us => us.UserId == userId).Select(us => us.SwitchId).ToList();
+
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
             _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
             _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
-            _context.WebhookSubscriptions.RemoveRange(_context.WebhookSubscriptions.Where(w => w.UserId == userId));
             _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
             _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == userId));
+
+            foreach (var sid in sensorIds) _ownership.InvalidateSensor(sid);
+            foreach (var sid in switchIds) _ownership.InvalidateSwitch(sid);
+        }
+
+        /// <summary>
+        /// Tells any open SignalR connections for this user to disconnect, then
+        /// closes the server-side handles so further events do not fan out.
+        /// Called from soft-delete after PII scrub commits.
+        /// </summary>
+        private async Task ForceDisconnectHubAsync(string userId)
+        {
+            var connectionIds = _hubConnections.GetConnectionIds(userId);
+            if (connectionIds.Count == 0) return;
+
+            try
+            {
+                // Signal the client to stop the connection and sign out.
+                await _hub.Clients.Clients(connectionIds).SendAsync("forceLogout");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ForceDisconnectHubAsync: send forceLogout failed for user {UserId}", LogSanitizer.Sanitize(userId));
+            }
         }
 
         /// <summary>
