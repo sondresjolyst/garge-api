@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.4.0](https://github.com/sondresjolyst/garge-api/compare/v2.3.2...v2.4.0) (2026-05-10)
+
+
+### Features
+
+* add order + subscription stats to /api/admin/stats ([#185](https://github.com/sondresjolyst/garge-api/issues/185)) ([e29a363](https://github.com/sondresjolyst/garge-api/commit/e29a363a0b1cb3e33f95b4b236805481346ad8b3))
+* filter admin stats by IsTest flag ([#186](https://github.com/sondresjolyst/garge-api/issues/186)) ([3002955](https://github.com/sondresjolyst/garge-api/commit/300295567e06a59bb1c52a9458cd1363a9e996eb))
+* idempotent invoice generation with webhook recovery and admin retry ([#178](https://github.com/sondresjolyst/garge-api/issues/178)) ([0b9ab67](https://github.com/sondresjolyst/garge-api/commit/0b9ab671f856c9c1eee66a362f9df93a8e045158))
+* subscription invoices + activation/charge-failed emails + admin list ([#188](https://github.com/sondresjolyst/garge-api/issues/188)) ([55301e9](https://github.com/sondresjolyst/garge-api/commit/55301e9ee44253e0a552e071d6e3c0318e97d944))
+* Vipps payments - subscriptions and sensor shop ([#173](https://github.com/sondresjolyst/garge-api/issues/173)) ([19e636a](https://github.com/sondresjolyst/garge-api/commit/19e636a65149e3171705b2eddaa5850ddb2d6148))
+* Vipps recurring charges, invoice compliance, admin refund ([#190](https://github.com/sondresjolyst/garge-api/issues/190)) ([a4bc95c](https://github.com/sondresjolyst/garge-api/commit/a4bc95c8eab848d1a89650be0bf4649b42ea0ac0))
+
+
+### Bug Fixes
+
+* install google-chrome-stable instead of the chromium snap stub ([#180](https://github.com/sondresjolyst/garge-api/issues/180)) ([632d228](https://github.com/sondresjolyst/garge-api/commit/632d2282365507996c1232ca2642740dd0fafe5c))
+* open own scope in WebPushService instead of capturing request DbContext ([#177](https://github.com/sondresjolyst/garge-api/issues/177)) ([882cbe7](https://github.com/sondresjolyst/garge-api/commit/882cbe7460de446cbe8778acc1690329b37cecea))
+* recover from invoice render failures by cleaning up empty rows ([#179](https://github.com/sondresjolyst/garge-api/issues/179)) ([a8553a1](https://github.com/sondresjolyst/garge-api/commit/a8553a1ac96e80b45e4f7acc000e6e9be0fdb0dc))
+* **security+gdpr:** security audit + GDPR compliance pass ([#191](https://github.com/sondresjolyst/garge-api/issues/191)) ([df0bf2c](https://github.com/sondresjolyst/garge-api/commit/df0bf2c5038590a4a8c73e677a708969e7871d0f))
+* seed AppSettings + trim trailing slash on Vipps webhook URLs ([b058468](https://github.com/sondresjolyst/garge-api/commit/b058468025ccd71780b3064a31fbe560b24558fc))
+* skip Nordpool fetch on startup if data already in DB ([#172](https://github.com/sondresjolyst/garge-api/issues/172)) ([8322d34](https://github.com/sondresjolyst/garge-api/commit/8322d34b1d8914d0c4f2f531ce920a003a93d6a8))
+* switch VippsConfirmationUrl to unbounded text ([#187](https://github.com/sondresjolyst/garge-api/issues/187)) ([cfa59ca](https://github.com/sondresjolyst/garge-api/commit/cfa59caeb5b8d22099927218248d1e220921dfae))
+* use libasound2t64 in Dockerfile ([#175](https://github.com/sondresjolyst/garge-api/issues/175)) ([3b88fd9](https://github.com/sondresjolyst/garge-api/commit/3b88fd9403544f0854f08d342e3a040d776f63d2))
+* Vipps shipping-address, subscription URL length, invoice PDF rendering ([#174](https://github.com/sondresjolyst/garge-api/issues/174)) ([86a0371](https://github.com/sondresjolyst/garge-api/commit/86a0371fc893bbe134a7e79e63311b597b452334))
+* webhook EF translation crash and PDF render timeout ([#181](https://github.com/sondresjolyst/garge-api/issues/181)) ([dac9498](https://github.com/sondresjolyst/garge-api/commit/dac949849b7c8742f0e689b1aee31256981b5029))
+
 ## [2.3.2](https://github.com/sondresjolyst/garge-api/compare/v2.3.1...v2.3.2) (2026-05-04)
 
 
