@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Constants;
 using garge_api.Dtos.Subscription;
 using garge_api.Helpers;

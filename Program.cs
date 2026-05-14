@@ -1,5 +1,7 @@
 using garge_api.Models;
 using garge_api.Constants;
+using Mapster;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -56,7 +58,10 @@ namespace garge_api
                 options.Level = CompressionLevel.Fastest;
             });
 
-            builder.Services.AddAutoMapper(_ => { }, typeof(MappingProfile));
+            var mapsterConfig = TypeAdapterConfig.GlobalSettings;
+            mapsterConfig.Scan(typeof(MappingProfile).Assembly);
+            builder.Services.AddSingleton(mapsterConfig);
+            builder.Services.AddScoped<IMapper, ServiceMapper>();
 
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));

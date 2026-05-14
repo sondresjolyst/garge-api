@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Security.Claims;
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Models.Switch;
 using garge_api.Services;
 
