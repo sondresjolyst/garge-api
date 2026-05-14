@@ -269,7 +269,15 @@ namespace garge_api.Controllers
 
             if (subscription == null) return NotFound("Active subscription not found.");
 
-            await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}");
+            try
+            {
+                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Vipps agreement cancel failed for subscription {SubscriptionId}", subscription.Id);
+                return StatusCode(502, "Payment provider unavailable.");
+            }
             subscription.Status = SubscriptionStatus.Stopped;
             subscription.UpdatedAt = DateTime.UtcNow;
 

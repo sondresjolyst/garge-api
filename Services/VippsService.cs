@@ -250,13 +250,7 @@ namespace garge_api.Services
             });
 
             var response = await _http.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogError("Vipps update-agreement-max-amount failed: {Status} body={Body}",
-                    (int)response.StatusCode, body);
-                response.EnsureSuccessStatusCode();
-            }
+            await ReadAsStringAndEnsureSuccessAsync(response, "update-agreement-max-amount");
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
@@ -543,11 +537,21 @@ namespace garge_api.Services
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                // Body may echo phone, agreementId, name etc. Log only the
-                // Vipps-specific identifiers so PII does not land in log sinks.
+                // Body may echo phone, agreementId, name etc. Prefer logging Vipps's
+                // own identifiers (errorCode/ref/traceId) so PII doesn't land in log
+                // sinks. Fall back to the raw body when none are present — happens
+                // for problem+json shapes that don't use Vipps's legacy error envelope.
                 var (errorCode, errorRef, traceId) = TryExtractVippsErrorIds(body);
-                _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
-                    operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
+                if (errorCode == null && errorRef == null && traceId == null)
+                {
+                    _logger.LogError("Vipps {Operation} failed: {Status} body={Body}",
+                        operation, (int)response.StatusCode, body);
+                }
+                else
+                {
+                    _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
+                        operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
+                }
                 response.EnsureSuccessStatusCode();
             }
             return body;
