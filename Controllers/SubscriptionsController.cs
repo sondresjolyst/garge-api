@@ -212,15 +212,6 @@ namespace garge_api.Controllers
             var settings = await _settingsCache.GetAsync();
             var unitPriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
 
-            // TEMP DEBUG: log raw forwarding context so we can see why ConsentIp ends up as 127.0.0.x in k8s.
-            var rawRemote = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "(null)";
-            var xff = HttpContext.Request.Headers.TryGetValue("X-Forwarded-For", out var xffVal) ? xffVal.ToString() : "(absent)";
-            var xrealip = HttpContext.Request.Headers.TryGetValue("X-Real-IP", out var xrealVal) ? xrealVal.ToString() : "(absent)";
-            var forwardedHdr = HttpContext.Request.Headers.TryGetValue("Forwarded", out var fwdVal) ? fwdVal.ToString() : "(absent)";
-            _logger.LogInformation(
-                "InitiateSubscription IP debug: RemoteIpAddress={Remote} X-Forwarded-For={Xff} X-Real-IP={Xreal} Forwarded={Fwd}",
-                rawRemote, xff, xrealip, forwardedHdr);
-
             var subscription = new Subscription
             {
                 UserId = userId,
@@ -230,7 +221,7 @@ namespace garge_api.Controllers
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
                 ConsentAcceptedAt = DateTime.UtcNow,
-                ConsentIp = IpTruncator.Truncate(rawRemote)
+                ConsentIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString())
             };
 
             _context.Subscriptions.Add(subscription);
