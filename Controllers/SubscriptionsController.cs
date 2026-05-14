@@ -211,7 +211,6 @@ namespace garge_api.Controllers
 
             var settings = await _settingsCache.GetAsync();
             var unitPriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
-            var effectivePriceInOre = unitPriceInOre * dto.Quantity;
 
             var subscription = new Subscription
             {
@@ -234,7 +233,7 @@ namespace garge_api.Controllers
             try
             {
                 var vippsResponse = await _vipps.CreateAgreementAsync(
-                    product, userId, redirectUrl, msisdn, effectivePriceInOre, idempotencyKey);
+                    product, userId, redirectUrl, msisdn, unitPriceInOre, dto.Quantity, idempotencyKey);
 
                 subscription.VippsAgreementId = vippsResponse.AgreementId;
                 subscription.VippsConfirmationUrl = vippsResponse.VippsConfirmationUrl;
@@ -307,7 +306,7 @@ namespace garge_api.Controllers
             return Ok();
         }
 
-        /// <summary>Updates the quantity of an active AddOn subscription. User must reconfirm the new price in Vipps.</summary>
+        /// <summary>Updates the quantity of an active AddOn subscription. Next scheduled charge reflects the new total automatically (VARIABLE pricing).</summary>
         [HttpPatch("{id:int}/quantity")]
         public async Task<IActionResult> UpdateSubscriptionQuantity(int id, [FromBody] UpdateSubscriptionQuantityDto dto)
         {
@@ -327,23 +326,6 @@ namespace garge_api.Controllers
             if (dto.Quantity == subscription.Quantity)
                 return BadRequest("New quantity matches current quantity.");
 
-            var settings = await _settingsCache.GetAsync();
-            var unitPriceInOre = Pricing.EffectiveInOre(subscription.Product.PriceInOre, settings.VatEnabled);
-            var newAmount = unitPriceInOre * dto.Quantity;
-
-            try
-            {
-                await _vipps.UpdateAgreementAmountAsync(
-                    subscription.VippsAgreementId,
-                    newAmount,
-                    $"updateqty-{subscription.Id}-{dto.Quantity}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Vipps agreement update failed for subscription {SubscriptionId}", subscription.Id);
-                return StatusCode(502, "Payment provider unavailable.");
-            }
-
             subscription.Quantity = dto.Quantity;
             subscription.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -352,7 +334,7 @@ namespace garge_api.Controllers
                 subscription.Id, dto.Quantity, userId);
 
             var dtoOut = _mapper.Map<SubscriptionResponseDto>(subscription);
-            return Ok(new { subscription = dtoOut, message = "Quantity updated. Confirm the new price in your Vipps app." });
+            return Ok(new { subscription = dtoOut, message = "Quantity updated. The next charge will reflect the new total." });
         }
 
         /// <summary>Webhook endpoint for Vipps agreement status changes.</summary>

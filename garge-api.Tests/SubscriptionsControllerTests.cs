@@ -540,7 +540,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new VippsCreateAgreementResponse
             {
                 AgreementId = "agr_new",
@@ -606,7 +606,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/confirm/addon" });
 
         var ctrl = CreateController(db, vipps: vipps);
@@ -687,10 +687,15 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.SaveChangesAsync();
 
         var vipps = MockVipps();
-        int? capturedAmount = null;
+        int? capturedUnit = null;
+        int? capturedQty = null;
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .Callback<Product, string, string, string, int, string>((_, _, _, _, amount, _) => capturedAmount = amount)
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Callback<Product, string, string, string, int, int, string>((_, _, _, _, unit, qty, _) =>
+            {
+                capturedUnit = unit;
+                capturedQty = qty;
+            })
             .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/x" });
 
         var ctrl = CreateController(db, vipps: vipps);
@@ -700,7 +705,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 5
         });
 
-        Assert.Equal(4900 * 5, capturedAmount);
+        Assert.Equal(4900, capturedUnit);
+        Assert.Equal(5, capturedQty);
     }
 
     [Fact]
@@ -717,7 +723,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/x" });
 
         var ctrl = CreateController(db, vipps: vipps);
@@ -748,7 +754,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task UpdateQuantity_ActiveAddOn_CallsVippsUpdateAndUpdatesRow()
+    public async Task UpdateQuantity_ActiveAddOn_UpdatesDbRowOnly()
     {
         using var db = CreateDbContext();
         await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
@@ -760,17 +766,10 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.Subscriptions.AddAsync(sub);
         await db.SaveChangesAsync();
 
-        var vipps = MockVipps();
-        int? capturedAmount = null;
-        vipps.Setup(v => v.UpdateAgreementAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .Callback<string, int, string>((_, amount, _) => capturedAmount = amount)
-            .Returns(Task.CompletedTask);
-
-        var ctrl = CreateController(db, vipps: vipps);
+        var ctrl = CreateController(db);
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 5 });
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Equal(4900 * 5, capturedAmount);
         var updated = await db.Subscriptions.FindAsync(sub.Id);
         Assert.Equal(5, updated!.Quantity);
     }

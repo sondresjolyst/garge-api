@@ -132,16 +132,24 @@ namespace garge_api.Services
 
         public async Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
-            int effectivePriceInOre, string idempotencyKey)
+            int unitPriceInOre, int quantity, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
+
+            // VARIABLE pricing: user approves a ceiling at signup; each scheduled
+            // charge may be a different amount up to that ceiling. Quantity changes
+            // therefore need no Vipps re-approval as long as new total stays under
+            // suggestedMaxAmount. Cap allows the agreement to grow from 1 to 50 units.
+            const int MaxQuantityCeiling = 50;
+            var suggestedMaxAmount = unitPriceInOre * MaxQuantityCeiling;
+            var initialAmount = unitPriceInOre * quantity;
 
             var body = new
             {
                 pricing = new
                 {
-                    type = "LEGACY",
-                    amount = effectivePriceInOre,
+                    type = "VARIABLE",
+                    suggestedMaxAmount,
                     currency = "NOK"
                 },
                 interval = new
@@ -151,7 +159,7 @@ namespace garge_api.Services
                 },
                 initialCharge = new
                 {
-                    amount = effectivePriceInOre,
+                    amount = initialAmount,
                     description = product.Name,
                     transactionType = "DIRECT_CAPTURE"
                 },
@@ -228,22 +236,6 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
-        }
-
-        public async Task UpdateAgreementAmountAsync(string agreementId, int amountInOre, string idempotencyKey)
-        {
-            var e = await GetEffectiveAsync();
-
-            var request = new HttpRequestMessage(HttpMethod.Patch,
-                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(new
-            {
-                pricing = new { type = "LEGACY", amount = amountInOre, currency = "NOK" }
-            });
-
-            var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "update-agreement-amount");
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
