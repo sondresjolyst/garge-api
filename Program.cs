@@ -296,7 +296,7 @@ namespace garge_api
             // through the ingress controller, so the immediate caller is always a
             // trusted reverse proxy. Without this, X-Forwarded-For is dropped and
             // RemoteIpAddress stays at the in-cluster pod IP.
-            fwd.KnownNetworks.Add(new Microsoft.AspNetCore.HttpOverrides.IPNetwork(System.Net.IPAddress.Any, 0));
+            fwd.KnownIPNetworks.Add(new System.Net.IPNetwork(System.Net.IPAddress.Any, 0));
             app.UseForwardedHeaders(fwd);
 
             if (!app.Environment.IsDevelopment())
