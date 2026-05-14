@@ -306,7 +306,7 @@ namespace garge_api.Controllers
             return Ok();
         }
 
-        /// <summary>Updates the quantity of an active AddOn subscription. Next scheduled charge reflects the new total automatically (VARIABLE pricing).</summary>
+        /// <summary>Updates the quantity of an active AddOn subscription. Increases PATCH the Vipps agreement ceiling (user reconfirms in Vipps); decreases are DB-only.</summary>
         [HttpPatch("{id:int}/quantity")]
         public async Task<IActionResult> UpdateSubscriptionQuantity(int id, [FromBody] UpdateSubscriptionQuantityDto dto)
         {
@@ -326,6 +326,28 @@ namespace garge_api.Controllers
             if (dto.Quantity == subscription.Quantity)
                 return BadRequest("New quantity matches current quantity.");
 
+            var isIncrease = dto.Quantity > subscription.Quantity;
+
+            if (isIncrease)
+            {
+                var settings = await _settingsCache.GetAsync();
+                var unitPriceInOre = Pricing.EffectiveInOre(subscription.Product.PriceInOre, settings.VatEnabled);
+                var newCeiling = unitPriceInOre * dto.Quantity;
+
+                try
+                {
+                    await _vipps.UpdateAgreementMaxAmountAsync(
+                        subscription.VippsAgreementId,
+                        newCeiling,
+                        $"qtyceiling-{subscription.Id}-{dto.Quantity}");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Vipps ceiling update failed for subscription {SubscriptionId}", subscription.Id);
+                    return StatusCode(502, "Payment provider unavailable.");
+                }
+            }
+
             subscription.Quantity = dto.Quantity;
             subscription.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -334,7 +356,10 @@ namespace garge_api.Controllers
                 subscription.Id, dto.Quantity, userId);
 
             var dtoOut = _mapper.Map<SubscriptionResponseDto>(subscription);
-            return Ok(new { subscription = dtoOut, message = "Quantity updated. The next charge will reflect the new total." });
+            var message = isIncrease
+                ? "Quantity updated. Confirm the new charge ceiling in your Vipps app before the next charge."
+                : "Quantity updated. The next charge will reflect the new total.";
+            return Ok(new { subscription = dtoOut, message });
         }
 
         /// <summary>Webhook endpoint for Vipps agreement status changes.</summary>

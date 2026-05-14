@@ -136,13 +136,12 @@ namespace garge_api.Services
         {
             var e = await GetEffectiveAsync();
 
-            // VARIABLE pricing: user approves a ceiling at signup; each scheduled
-            // charge may be a different amount up to that ceiling. Quantity changes
-            // therefore need no Vipps re-approval as long as new total stays under
-            // suggestedMaxAmount. Cap allows the agreement to grow from 1 to 50 units.
-            const int MaxQuantityCeiling = 50;
-            var suggestedMaxAmount = unitPriceInOre * MaxQuantityCeiling;
-            var initialAmount = unitPriceInOre * quantity;
+            // VARIABLE pricing: user approves a ceiling equal to the current
+            // unit*quantity. Each scheduled charge may be at most that ceiling.
+            // Raising quantity later PATCHes the ceiling (Vipps re-asks the user);
+            // lowering quantity is a DB-only change since charges stay under the cap.
+            var suggestedMaxAmount = unitPriceInOre * quantity;
+            var initialAmount = suggestedMaxAmount;
 
             var body = new
             {
@@ -236,6 +235,28 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
+        }
+
+        public async Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey)
+        {
+            var e = await GetEffectiveAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Patch,
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
+            AddCommonHeaders(request, e, idempotencyKey);
+            request.Content = BuildJsonContent(new
+            {
+                pricing = new { suggestedMaxAmount = newMaxAmountInOre }
+            });
+
+            var response = await _http.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Vipps update-agreement-max-amount failed: {Status} body={Body}",
+                    (int)response.StatusCode, body);
+                response.EnsureSuccessStatusCode();
+            }
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(

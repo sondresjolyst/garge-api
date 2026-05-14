@@ -754,7 +754,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task UpdateQuantity_ActiveAddOn_UpdatesDbRowOnly()
+    public async Task UpdateQuantity_Increase_PatchesVippsCeilingAndUpdatesRow()
     {
         using var db = CreateDbContext();
         await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
@@ -766,12 +766,45 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.Subscriptions.AddAsync(sub);
         await db.SaveChangesAsync();
 
-        var ctrl = CreateController(db);
+        var vipps = MockVipps();
+        int? capturedCeiling = null;
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Callback<string, int, string>((_, amount, _) => capturedCeiling = amount)
+            .Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 5 });
 
         Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(4900 * 5, capturedCeiling);
         var updated = await db.Subscriptions.FindAsync(sub.Id);
         Assert.Equal(5, updated!.Quantity);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_Decrease_DbOnlyNoVippsCall()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 2,
+            VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 5
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });
+
+        Assert.IsType<OkObjectResult>(result);
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        var updated = await db.Subscriptions.FindAsync(sub.Id);
+        Assert.Equal(3, updated!.Quantity);
     }
 
     [Fact]
