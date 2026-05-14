@@ -25,7 +25,7 @@ namespace garge_api.Models.Subscription
         [MaxLength(100)]
         public required string Name { get; set; }
 
-        [MaxLength(500)]
+        [MaxLength(2000)]
         public string? Description { get; set; }
 
         [Required]

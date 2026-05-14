@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260514063653_ExpandDescriptionLength")]
+    partial class ExpandDescriptionLength
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1166,43 +1169,6 @@ namespace garge_api.Migrations
                     b.ToTable("ShopItems");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Shop.ShopItemPhoto", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Data")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("ShopItemId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ShopItemId")
-                        .IsUnique();
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ShopItemPhotos");
-                });
-
             modelBuilder.Entity("garge_api.Models.Subscription.Product", b =>
                 {
                     b.Property<int>("Id")
@@ -1686,25 +1652,6 @@ namespace garge_api.Migrations
                     b.Navigation("Order");
 
                     b.Navigation("ShopItem");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Shop.ShopItemPhoto", b =>
-                {
-                    b.HasOne("garge_api.Models.Shop.ShopItem", "ShopItem")
-                        .WithMany()
-                        .HasForeignKey("ShopItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ShopItem");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("garge_api.Models.Subscription.Subscription", b =>
