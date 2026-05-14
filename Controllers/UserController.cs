@@ -345,7 +345,6 @@ namespace garge_api.Controllers
                     Email = user?.Email,
                     EmailConfirmed = user?.EmailConfirmed,
                     PhoneNumber = user?.PhoneNumber,
-                    PhoneNumberConfirmed = user?.PhoneNumberConfirmed,
                     CreatedAt = user?.CreatedAt,
                     TermsAcceptedAt = user?.TermsAcceptedAt,
                     TermsVersion = user?.TermsVersion,
