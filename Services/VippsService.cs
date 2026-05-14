@@ -143,6 +143,11 @@ namespace garge_api.Services
             var suggestedMaxAmount = unitPriceInOre * quantity;
             var initialAmount = suggestedMaxAmount;
 
+            // Vipps caps productDescription at 100 chars (validation-error otherwise).
+            // Our descriptions may contain markdown up to 2000 chars; truncate plainly.
+            var productDescription = product.Description ?? string.Empty;
+            if (productDescription.Length > 100) productDescription = productDescription[..100];
+
             var body = new
             {
                 pricing = new
@@ -165,7 +170,7 @@ namespace garge_api.Services
                 merchantRedirectUrl = redirectUrl,
                 merchantAgreementUrl = $"{_appOpts.FrontendBaseUrl}/terms",
                 productName = product.Name,
-                productDescription = product.Description ?? string.Empty,
+                productDescription,
                 phoneNumber,
                 scope = "name address email phoneNumber"
             };
