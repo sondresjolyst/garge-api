@@ -10,6 +10,7 @@ namespace garge_api.Dtos.Shop
         public int PriceInOre { get; set; }
         public int StockCount { get; set; }
         public bool IsActive { get; set; }
+        public bool HasImage { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 

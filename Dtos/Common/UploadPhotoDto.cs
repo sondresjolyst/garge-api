@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace garge_api.Dtos.Sensor
+namespace garge_api.Dtos.Common
 {
-    public class UploadSensorPhotoDto
+    public class UploadPhotoDto
     {
         [Required]
         public required string Data { get; set; }

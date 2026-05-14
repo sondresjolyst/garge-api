@@ -49,6 +49,7 @@ namespace garge_api.Models
         public DbSet<Product> Products { get; set; }
         public DbSet<Subscription.Subscription> Subscriptions { get; set; }
         public DbSet<ShopItem> ShopItems { get; set; }
+        public DbSet<ShopItemPhoto> ShopItemPhotos { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
@@ -260,6 +261,22 @@ namespace garge_api.Models
 
             modelBuilder.Entity<ShopItem>()
                 .HasIndex(si => si.IsActive);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasOne(sip => sip.ShopItem)
+                .WithMany()
+                .HasForeignKey(sip => sip.ShopItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasOne(sip => sip.User)
+                .WithMany()
+                .HasForeignKey(sip => sip.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasIndex(sip => sip.ShopItemId)
+                .IsUnique();
 
             modelBuilder.Entity<Order>()
                 .HasOne(o => o.User)
