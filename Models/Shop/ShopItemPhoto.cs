@@ -4,9 +4,9 @@ using garge_api.Models.Admin;
 using garge_api.Models.Common;
 using Swashbuckle.AspNetCore.Annotations;
 
-namespace garge_api.Models.Sensor
+namespace garge_api.Models.Shop
 {
-    public class SensorPhoto : IPhotoEntity
+    public class ShopItemPhoto : IPhotoEntity
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
@@ -14,7 +14,7 @@ namespace garge_api.Models.Sensor
         public int Id { get; set; }
 
         [Required]
-        public int SensorId { get; set; }
+        public int ShopItemId { get; set; }
 
         [Required]
         public required string UserId { get; set; }
@@ -28,8 +28,8 @@ namespace garge_api.Models.Sensor
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        [ForeignKey(nameof(SensorId))]
-        public Sensor? Sensor { get; set; }
+        [ForeignKey(nameof(ShopItemId))]
+        public ShopItem? ShopItem { get; set; }
 
         [ForeignKey(nameof(UserId))]
         public User? User { get; set; }
