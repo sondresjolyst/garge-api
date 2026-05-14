@@ -73,7 +73,8 @@ public class MappingProfile : Profile
             .ForMember(d => d.Interval, o => o.MapFrom(s => s.Product != null ? s.Product.Interval.ToString() : string.Empty))
             .ForMember(d => d.ProductName, o => o.MapFrom(s => s.Product != null ? s.Product.Name : string.Empty))
             .ForMember(d => d.ProductType, o => o.MapFrom(s => s.Product != null ? s.Product.Type.ToString() : string.Empty))
-            .ForMember(d => d.PriceInOre, o => o.MapFrom(s => s.Product != null ? s.Product.PriceInOre : 0));
+            .ForMember(d => d.PriceInOre, o => o.MapFrom(s => s.Product != null ? s.Product.PriceInOre : 0))
+            .ForMember(d => d.Quantity, o => o.MapFrom(s => s.Quantity));
 
         // Shop mappings
         CreateMap<ShopItem, ShopItemResponseDto>();

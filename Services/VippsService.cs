@@ -230,6 +230,22 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
         }
 
+        public async Task UpdateAgreementAmountAsync(string agreementId, int amountInOre, string idempotencyKey)
+        {
+            var e = await GetEffectiveAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Patch,
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
+            AddCommonHeaders(request, e, idempotencyKey);
+            request.Content = BuildJsonContent(new
+            {
+                pricing = new { type = "LEGACY", amount = amountInOre, currency = "NOK" }
+            });
+
+            var response = await _http.SendAsync(request);
+            await ReadAsStringAndEnsureSuccessAsync(response, "update-agreement-amount");
+        }
+
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey)

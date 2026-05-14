@@ -85,6 +85,7 @@ namespace garge_api.Services
             int effectivePriceInOre, string idempotencyKey);
         Task<VippsAgreementResponse> GetAgreementAsync(string agreementId);
         Task CancelAgreementAsync(string agreementId, string idempotencyKey);
+        Task UpdateAgreementAmountAsync(string agreementId, int amountInOre, string idempotencyKey);
 
         Task<VippsCreateChargeResponse> CreateChargeAsync(
             string agreementId, int amountInOre, DateTime dueDate,

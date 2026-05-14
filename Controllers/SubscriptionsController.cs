@@ -72,6 +72,7 @@ namespace garge_api.Controllers
                     ProductName = s.Product != null ? s.Product.Name : string.Empty,
                     ProductType = s.Product != null ? s.Product.Type.ToString() : string.Empty,
                     PriceInOre = s.Product != null ? s.Product.PriceInOre : 0,
+                    Quantity = s.Quantity,
                     Interval = s.Product != null ? s.Product.Interval.ToString() : string.Empty,
                     Status = s.Status.ToString(),
                     IsTest = s.IsTest,
@@ -184,6 +185,9 @@ namespace garge_api.Controllers
 
             if (product.Type == ProductType.Primary)
             {
+                if (dto.Quantity != 1)
+                    return BadRequest("Primary plan must have quantity 1.");
+
                 var hasActivePrimary = await _context.Subscriptions
                     .Include(s => s.Product)
                     .AnyAsync(s => s.UserId == userId &&
@@ -206,12 +210,14 @@ namespace garge_api.Controllers
             }
 
             var settings = await _settingsCache.GetAsync();
-            var effectivePriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
+            var unitPriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
+            var effectivePriceInOre = unitPriceInOre * dto.Quantity;
 
             var subscription = new Subscription
             {
                 UserId = userId,
                 ProductId = dto.ProductId,
+                Quantity = dto.Quantity,
                 VippsAgreementId = string.Empty,
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
@@ -299,6 +305,54 @@ namespace garge_api.Controllers
                 subscription.Id, userId);
 
             return Ok();
+        }
+
+        /// <summary>Updates the quantity of an active AddOn subscription. User must reconfirm the new price in Vipps.</summary>
+        [HttpPatch("{id:int}/quantity")]
+        public async Task<IActionResult> UpdateSubscriptionQuantity(int id, [FromBody] UpdateSubscriptionQuantityDto dto)
+        {
+            var userId = User.UserId()!;
+
+            var subscription = await _context.Subscriptions
+                .Include(s => s.Product)
+                .FirstOrDefaultAsync(s => s.Id == id && s.UserId == userId);
+
+            if (subscription == null) return NotFound();
+            if (subscription.Status != SubscriptionStatus.Active)
+                return BadRequest("Subscription must be active.");
+            if (subscription.Product == null)
+                return BadRequest("Subscription product missing.");
+            if (subscription.Product.Type == ProductType.Primary)
+                return BadRequest("Primary plan quantity is fixed at 1.");
+            if (dto.Quantity == subscription.Quantity)
+                return BadRequest("New quantity matches current quantity.");
+
+            var settings = await _settingsCache.GetAsync();
+            var unitPriceInOre = Pricing.EffectiveInOre(subscription.Product.PriceInOre, settings.VatEnabled);
+            var newAmount = unitPriceInOre * dto.Quantity;
+
+            try
+            {
+                await _vipps.UpdateAgreementAmountAsync(
+                    subscription.VippsAgreementId,
+                    newAmount,
+                    $"updateqty-{subscription.Id}-{dto.Quantity}");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Vipps agreement update failed for subscription {SubscriptionId}", subscription.Id);
+                return StatusCode(502, "Payment provider unavailable.");
+            }
+
+            subscription.Quantity = dto.Quantity;
+            subscription.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("Subscription {SubscriptionId} quantity updated to {Quantity} for user {UserId}",
+                subscription.Id, dto.Quantity, userId);
+
+            var dtoOut = _mapper.Map<SubscriptionResponseDto>(subscription);
+            return Ok(new { subscription = dtoOut, message = "Quantity updated. Confirm the new price in your Vipps app." });
         }
 
         /// <summary>Webhook endpoint for Vipps agreement status changes.</summary>
