@@ -132,16 +132,28 @@ namespace garge_api.Services
 
         public async Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
-            int effectivePriceInOre, string idempotencyKey)
+            int unitPriceInOre, int quantity, string idempotencyKey)
         {
             var e = await GetEffectiveAsync();
+
+            // VARIABLE pricing: user approves a ceiling equal to the current
+            // unit*quantity. Each scheduled charge may be at most that ceiling.
+            // Raising quantity later PATCHes the ceiling (Vipps re-asks the user);
+            // lowering quantity is a DB-only change since charges stay under the cap.
+            var suggestedMaxAmount = unitPriceInOre * quantity;
+            var initialAmount = suggestedMaxAmount;
+
+            // Vipps caps productDescription at 100 chars (validation-error otherwise).
+            // Our descriptions may contain markdown up to 2000 chars; truncate plainly.
+            var productDescription = product.Description ?? string.Empty;
+            if (productDescription.Length > 100) productDescription = productDescription[..100];
 
             var body = new
             {
                 pricing = new
                 {
-                    type = "LEGACY",
-                    amount = effectivePriceInOre,
+                    type = "VARIABLE",
+                    suggestedMaxAmount,
                     currency = "NOK"
                 },
                 interval = new
@@ -151,14 +163,14 @@ namespace garge_api.Services
                 },
                 initialCharge = new
                 {
-                    amount = effectivePriceInOre,
+                    amount = initialAmount,
                     description = product.Name,
                     transactionType = "DIRECT_CAPTURE"
                 },
                 merchantRedirectUrl = redirectUrl,
                 merchantAgreementUrl = $"{_appOpts.FrontendBaseUrl}/terms",
                 productName = product.Name,
-                productDescription = product.Description ?? string.Empty,
+                productDescription,
                 phoneNumber,
                 scope = "name address email phoneNumber"
             };
@@ -228,6 +240,22 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
+        }
+
+        public async Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey)
+        {
+            var e = await GetEffectiveAsync();
+
+            var request = new HttpRequestMessage(HttpMethod.Patch,
+                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
+            AddCommonHeaders(request, e, idempotencyKey);
+            request.Content = BuildJsonContent(new
+            {
+                pricing = new { suggestedMaxAmount = newMaxAmountInOre }
+            });
+
+            var response = await _http.SendAsync(request);
+            await ReadAsStringAndEnsureSuccessAsync(response, "update-agreement-max-amount");
         }
 
         public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
@@ -514,11 +542,21 @@ namespace garge_api.Services
             var body = await response.Content.ReadAsStringAsync();
             if (!response.IsSuccessStatusCode)
             {
-                // Body may echo phone, agreementId, name etc. Log only the
-                // Vipps-specific identifiers so PII does not land in log sinks.
+                // Body may echo phone, agreementId, name etc. Prefer logging Vipps's
+                // own identifiers (errorCode/ref/traceId) so PII doesn't land in log
+                // sinks. Fall back to the raw body when none are present — happens
+                // for problem+json shapes that don't use Vipps's legacy error envelope.
                 var (errorCode, errorRef, traceId) = TryExtractVippsErrorIds(body);
-                _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
-                    operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
+                if (errorCode == null && errorRef == null && traceId == null)
+                {
+                    _logger.LogError("Vipps {Operation} failed: {Status} body={Body}",
+                        operation, (int)response.StatusCode, body);
+                }
+                else
+                {
+                    _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
+                        operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
+                }
                 response.EnsureSuccessStatusCode();
             }
             return body;

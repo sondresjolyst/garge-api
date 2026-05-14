@@ -13,7 +13,7 @@ using Npgsql;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 using System.Security.Claims;
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Services;
 
 namespace garge_api.Controllers

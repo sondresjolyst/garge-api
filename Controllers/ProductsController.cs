@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Dtos.Subscription;
 using garge_api.Models;
 using garge_api.Models.Subscription;

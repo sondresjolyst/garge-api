@@ -37,6 +37,10 @@ namespace garge_api.Models.Subscription
         public string? VippsConfirmationUrl { get; set; }
 
         [Required]
+        [Range(1, 50)]
+        public int Quantity { get; set; } = 1;
+
+        [Required]
         public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Pending;
 
         public DateTime? StartDate { get; set; }

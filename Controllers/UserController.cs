@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Dtos.User;
 using garge_api.Helpers;
 using garge_api.Hubs;

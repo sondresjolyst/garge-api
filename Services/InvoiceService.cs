@@ -127,6 +127,35 @@ namespace garge_api.Services
                 .FirstOrDefaultAsync(s => s.Id == subscriptionId)
                 ?? throw new InvalidOperationException($"Subscription {subscriptionId} not found");
 
+            // Fallback: if the agreement-activated webhook hasn't populated
+            // BillingAddress yet (race with first charge), fetch from Vipps now.
+            // Vipps service may be absent in test setups; skip silently then.
+            if (string.IsNullOrEmpty(subscription.BillingAddress))
+            {
+                var vipps = scope.ServiceProvider.GetService<IVippsService>();
+                if (vipps != null)
+                {
+                    try
+                    {
+                        var details = await vipps.GetAgreementAsync(subscription.VippsAgreementId);
+                        if (!string.IsNullOrEmpty(details?.Sub))
+                        {
+                            var info = await vipps.GetUserInfoAsync(details.Sub);
+                            var formatted = VippsAddressFormatter.Format(info?.Address);
+                            if (!string.IsNullOrEmpty(formatted))
+                            {
+                                subscription.BillingAddress = formatted;
+                                await db.SaveChangesAsync();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Invoice fallback: failed to fetch Vipps billing address for subscription {SubscriptionId}", subscription.Id);
+                    }
+                }
+            }
+
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
 
             var invoice = new Invoice

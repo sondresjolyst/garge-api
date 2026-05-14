@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Models.Admin;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;

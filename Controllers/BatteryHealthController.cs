@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Dtos.Sensor;
 using garge_api.Helpers;
 using garge_api.Models;

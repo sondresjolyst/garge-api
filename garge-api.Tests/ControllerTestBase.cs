@@ -1,4 +1,4 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Controllers;
 using garge_api.Models;
 using Microsoft.AspNetCore.Authentication;

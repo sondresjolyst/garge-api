@@ -10,6 +10,7 @@ namespace garge_api.Dtos.Subscription
         public string ProductName { get; set; } = string.Empty;
         public string ProductType { get; set; } = string.Empty;
         public int PriceInOre { get; set; }
+        public int Quantity { get; set; }
         public string Interval { get; set; } = string.Empty;
         public string VippsAgreementId { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
@@ -31,6 +32,16 @@ namespace garge_api.Dtos.Subscription
 
         [Required]
         public bool ConsentToWaiveWithdrawal { get; set; }
+
+        [Range(1, 50)]
+        public int Quantity { get; set; } = 1;
+    }
+
+    public class UpdateSubscriptionQuantityDto
+    {
+        [Required]
+        [Range(1, 50)]
+        public int Quantity { get; set; }
     }
 
     public class InitiateSubscriptionResponseDto
@@ -49,6 +60,7 @@ namespace garge_api.Dtos.Subscription
         public string ProductName { get; set; } = string.Empty;
         public string ProductType { get; set; } = string.Empty;
         public int PriceInOre { get; set; }
+        public int Quantity { get; set; }
         public string Interval { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public bool IsTest { get; set; }

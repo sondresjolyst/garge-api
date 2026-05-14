@@ -540,7 +540,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new VippsCreateAgreementResponse
             {
                 AgreementId = "agr_new",
@@ -606,7 +606,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
             .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/confirm/addon" });
 
         var ctrl = CreateController(db, vipps: vipps);
@@ -672,5 +672,195 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var result = await ctrl.CancelSubscription(sub.Id);
 
         Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task InitiateAddOn_WithQuantity_SendsPriceTimesQuantityToVipps()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        await db.Subscriptions.AddAsync(new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        int? capturedUnit = null;
+        int? capturedQty = null;
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Callback<Product, string, string, string, int, int, string>((_, _, _, _, unit, qty, _) =>
+            {
+                capturedUnit = unit;
+                capturedQty = qty;
+            })
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/x" });
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        await ctrl.InitiateSubscription(new InitiateSubscriptionDto
+        {
+            ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 5
+        });
+
+        Assert.Equal(4900, capturedUnit);
+        Assert.Equal(5, capturedQty);
+    }
+
+    [Fact]
+    public async Task InitiateAddOn_WithQuantity_StoresQuantityOnSubscription()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        await db.Subscriptions.AddAsync(new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "addon_agr", VippsConfirmationUrl = "https://vipps.no/x" });
+
+        var ctrl = CreateController(db, vipps: vipps);
+
+        await ctrl.InitiateSubscription(new InitiateSubscriptionDto
+        {
+            ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 3
+        });
+
+        var addon = await db.Subscriptions.SingleAsync(s => s.ProductId == 2);
+        Assert.Equal(3, addon.Quantity);
+    }
+
+    [Fact]
+    public async Task InitiatePrimary_WithQuantityAbove1_Returns400()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+        var result = await ctrl.InitiateSubscription(new InitiateSubscriptionDto
+        {
+            ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 2
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_Increase_PatchesVippsCeilingAndUpdatesRow()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 2,
+            VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 3
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        int? capturedCeiling = null;
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Callback<string, int, string>((_, amount, _) => capturedCeiling = amount)
+            .Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 5 });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(4900 * 5, capturedCeiling);
+        var updated = await db.Subscriptions.FindAsync(sub.Id);
+        Assert.Equal(5, updated!.Quantity);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_Decrease_DbOnlyNoVippsCall()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 2,
+            VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 5
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+
+        var ctrl = CreateController(db, vipps: vipps);
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });
+
+        Assert.IsType<OkObjectResult>(result);
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        var updated = await db.Subscriptions.FindAsync(sub.Id);
+        Assert.Equal(3, updated!.Quantity);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_NotOwner_Returns404()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakeAddOnProduct());
+        var sub = new Subscription
+        {
+            UserId = "other-user", ProductId = 2,
+            VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 1
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db, userId: "user-1");
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 5 });
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_Primary_Returns400()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active, Quantity = 1
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 2 });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_NotActive_Returns400()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakeAddOnProduct());
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 2,
+            VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Pending, Quantity = 1
+        };
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctrl = CreateController(db);
+        var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });
+
+        Assert.IsType<BadRequestObjectResult>(result);
     }
 }
