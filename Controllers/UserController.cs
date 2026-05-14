@@ -286,6 +286,55 @@ namespace garge_api.Controllers
                 .Select(sd => new { sd.SwitchId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
+            var batteryHealth = await _context.BatteryHealthData
+                .Where(bh => sensorIds.Contains(bh.SensorId))
+                .OrderBy(bh => bh.Timestamp)
+                .ToListAsync();
+
+            var automationRules = await _context.AutomationRules
+                .Where(r => sensorIds.Contains(r.SensorId)
+                            || (r.TargetType == "socket" && switchIds.Contains(r.TargetId)))
+                .ToListAsync();
+
+            var groups = await _context.Groups
+                .Where(g => g.UserId == id)
+                .Include(g => g.GroupSensors)
+                .Include(g => g.GroupSwitches)
+                .ToListAsync();
+
+            var subscriptions = await _context.Subscriptions
+                .Include(s => s.Product)
+                .Where(s => s.UserId == id)
+                .OrderBy(s => s.CreatedAt)
+                .ToListAsync();
+
+            var orders = await _context.Orders
+                .Include(o => o.OrderItems).ThenInclude(oi => oi.ShopItem)
+                .Where(o => o.UserId == id)
+                .OrderBy(o => o.CreatedAt)
+                .ToListAsync();
+
+            var orderIds = orders.Select(o => o.Id).ToList();
+            var subscriptionIds = subscriptions.Select(s => s.Id).ToList();
+
+            var invoices = await _context.Invoices
+                .Where(i => (i.OrderId != null && orderIds.Contains(i.OrderId.Value))
+                            || (i.SubscriptionId != null && subscriptionIds.Contains(i.SubscriptionId.Value)))
+                .OrderBy(i => i.IssuedAt)
+                .Select(i => new { i.Id, i.OrderId, i.SubscriptionId, i.VippsChargeId, i.AmountInOre, i.IssuedAt })
+                .ToListAsync();
+
+            var pushSubscriptions = await _context.PushSubscriptions
+                .Where(p => p.UserId == id)
+                .Select(p => new { p.Endpoint, p.CreatedAt })
+                .ToListAsync();
+
+            var offlineNotifications = await _context.SensorOfflineNotifications
+                .Where(n => n.UserId == id)
+                .OrderBy(n => n.NotifiedAt)
+                .Select(n => new { n.SensorId, n.NotifiedAt, n.ResolvedAt })
+                .ToListAsync();
+
             var export = new
             {
                 ExportedAt = DateTime.UtcNow,
@@ -294,8 +343,15 @@ namespace garge_api.Controllers
                     FirstName = user?.FirstName,
                     LastName = user?.LastName,
                     Email = user?.Email,
+                    EmailConfirmed = user?.EmailConfirmed,
+                    PhoneNumber = user?.PhoneNumber,
+                    CreatedAt = user?.CreatedAt,
+                    TermsAcceptedAt = user?.TermsAcceptedAt,
+                    TermsVersion = user?.TermsVersion,
+                    TermsAcceptedIp = user?.TermsAcceptedIp,
                     profile.PriceZone,
-                    EmailConfirmed = user?.EmailConfirmed
+                    profile.PushNotificationsEnabled,
+                    profile.OfflineAlertThresholdHours
                 },
                 Sensors = sensors.Select(s => new
                 {
@@ -312,7 +368,10 @@ namespace garge_api.Controllers
                     Photo = sensorPhotos
                         .Where(p => p.SensorId == s.Id)
                         .Select(p => new { p.ContentType, p.Data, p.CreatedAt })
-                        .FirstOrDefault()
+                        .FirstOrDefault(),
+                    BatteryHealth = batteryHealth
+                        .Where(bh => bh.SensorId == s.Id)
+                        .Select(bh => new { bh.Status, bh.Timestamp })
                 }),
                 Switches = switches.Select(sw => new
                 {
@@ -323,7 +382,71 @@ namespace garge_api.Controllers
                     History = switchHistory
                         .Where(h => h.SwitchId == sw.Id)
                         .Select(h => new { h.Value, h.Timestamp })
-                })
+                }),
+                Groups = groups.Select(g => new
+                {
+                    g.Id,
+                    g.Name,
+                    g.Icon,
+                    SensorIds = g.GroupSensors.Select(gs => gs.SensorId),
+                    SwitchIds = g.GroupSwitches.Select(gsw => gsw.SwitchId)
+                }),
+                AutomationRules = automationRules.Select(r => new
+                {
+                    r.Id,
+                    r.TargetType,
+                    r.TargetId,
+                    r.SensorType,
+                    r.SensorId,
+                    r.Condition,
+                    r.Threshold,
+                    r.Action,
+                    r.IsEnabled,
+                    r.LastTriggeredAt,
+                    r.ElectricityPriceCondition,
+                    r.ElectricityPriceThreshold,
+                    r.ElectricityPriceArea,
+                    r.ElectricityPriceOperator,
+                    r.TimerDurationHours,
+                    r.TimerActivatedAt,
+                    r.CreatedAt
+                }),
+                Subscriptions = subscriptions.Select(s => new
+                {
+                    s.Id,
+                    ProductName = s.Product?.Name,
+                    ProductType = s.Product?.Type.ToString(),
+                    s.Quantity,
+                    Status = s.Status.ToString(),
+                    s.StartDate,
+                    s.NextChargeDate,
+                    s.ConsentAcceptedAt,
+                    s.ConsentIp,
+                    s.BillingAddress,
+                    s.IsTest,
+                    s.CreatedAt,
+                    s.UpdatedAt
+                }),
+                Orders = orders.Select(o => new
+                {
+                    o.Id,
+                    Status = o.Status.ToString(),
+                    o.TotalInOre,
+                    o.ShippingAddress,
+                    o.ShippedAt,
+                    o.IsTest,
+                    o.CreatedAt,
+                    o.UpdatedAt,
+                    Items = o.OrderItems.Select(oi => new
+                    {
+                        ShopItemName = oi.ShopItem != null ? oi.ShopItem.Name : null,
+                        oi.Quantity,
+                        oi.PriceAtPurchaseInOre
+                    })
+                }),
+                Invoices = invoices,
+                PushSubscriptions = pushSubscriptions,
+                OfflineNotifications = offlineNotifications
             };
 
             _logger.LogInformation("Data exported for user {UserId}", LogSanitizer.Sanitize(id));
