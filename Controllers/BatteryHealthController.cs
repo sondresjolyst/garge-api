@@ -81,8 +81,20 @@ namespace garge_api.Controllers
             //   DISCONNECT_CONFIRM_CYCLES (18) + POST_CHARGE_WAIT_CYCLES (6) = 24h
             // from real charger removal to record creation. Update both in
             // lockstep if firmware constants change.
+            //
+            // Three branches:
+            //   - increment   -> new charge cycle; backdate by 24h
+            //   - decrement   -> firmware reset (NVS schema bump, factory reset);
+            //                    prior LastChargedAt no longer applies, clear it
+            //   - same/no prev with ChargesRecorded=0 -> no charge ever recorded;
+            //                                            keep null
+            //   - same/no prev with ChargesRecorded>0 -> carry prior timestamp
             if (previous != null && dto.ChargesRecorded > previous.ChargesRecorded)
                 record.LastChargedAt = DateTime.UtcNow.AddHours(-24);
+            else if (previous != null && dto.ChargesRecorded < previous.ChargesRecorded)
+                record.LastChargedAt = null;
+            else if (dto.ChargesRecorded == 0)
+                record.LastChargedAt = null;
             else
                 record.LastChargedAt = previous?.LastChargedAt;
 
