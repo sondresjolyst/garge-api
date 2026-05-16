@@ -43,15 +43,16 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Deprecated: battery health is now computed server-side by
-        /// <c>BatteryHealthAnalyzerService</c> from the voltage stream.
-        /// Endpoint is kept temporarily so firmware/operator that still
-        /// posts can do so without errors; the payload is ignored.
+        /// Deprecated no-op kept until firmware (liz-sensors#131) stops posting
+        /// battery health. Body is intentionally untyped so we don't need to
+        /// hold a DTO shape just to accept and discard the payload. Removed
+        /// once phase 3 firmware ships.
         /// </summary>
         [HttpPost("name/{sensorName}")]
         [SwaggerOperation(Summary = "Deprecated. Battery health is now computed server-side; payload ignored.", Tags = new[] { "Deprecated" })]
         [SwaggerResponse(200, "Acknowledged. No record written; analyzer runs from voltage stream.")]
-        public IActionResult CreateBatteryHealth(string sensorName, [FromBody] CreateBatteryHealthDto _)
+        [Obsolete("Battery health is computed server-side by BatteryHealthAnalyzerService. Remove after firmware no longer posts (liz-sensors#131).")]
+        public IActionResult CreateBatteryHealth(string sensorName)
         {
             _logger.LogInformation("CreateBatteryHealth (deprecated) called for {SensorName}; ignoring payload — analyzer drives health from voltage.",
                 LogSanitizer.Sanitize(sensorName));
