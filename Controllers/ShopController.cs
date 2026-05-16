@@ -1,5 +1,7 @@
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Constants;
+using garge_api.Controllers.Common;
+using garge_api.Dtos.Common;
 using garge_api.Dtos.Shop;
 using garge_api.Helpers;
 using garge_api.Models;
@@ -60,12 +62,21 @@ namespace garge_api.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> GetItems()
         {
+            var photoItemIds = await _context.ShopItemPhotos
+                .Select(p => p.ShopItemId)
+                .ToListAsync();
+            var photoSet = photoItemIds.ToHashSet();
+
             var items = await _context.ShopItems
                 .Where(i => i.IsActive)
                 .OrderBy(i => i.PriceInOre)
                 .ToListAsync();
 
-            return Ok(_mapper.Map<List<ShopItemResponseDto>>(items));
+            var dtos = _mapper.Map<List<ShopItemResponseDto>>(items);
+            foreach (var dto in dtos)
+                dto.HasImage = photoSet.Contains(dto.Id);
+
+            return Ok(dtos);
         }
 
         [HttpGet("items/{id}")]
@@ -74,7 +85,9 @@ namespace garge_api.Controllers
         {
             var item = await _context.ShopItems.FindAsync(id);
             if (item == null) return NotFound();
-            return Ok(_mapper.Map<ShopItemResponseDto>(item));
+            var dto = _mapper.Map<ShopItemResponseDto>(item);
+            dto.HasImage = await _context.ShopItemPhotos.AnyAsync(p => p.ShopItemId == id);
+            return Ok(dto);
         }
 
         [HttpPost("items")]
@@ -101,7 +114,9 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("ShopItem {ItemId} updated", id);
-            return Ok(_mapper.Map<ShopItemResponseDto>(item));
+            var responseDto = _mapper.Map<ShopItemResponseDto>(item);
+            responseDto.HasImage = await _context.ShopItemPhotos.AnyAsync(p => p.ShopItemId == id);
+            return Ok(responseDto);
         }
 
         [HttpDelete("items/{id}")]
@@ -543,5 +558,43 @@ namespace garge_api.Controllers
                     item.StockCount += oi.Quantity;
             }
         }
+
+        [HttpPost("items/{itemId}/photo")]
+        [Authorize(Policy = "Admin")]
+        public async Task<IActionResult> UploadShopItemPhoto(int itemId, [FromBody] UploadPhotoDto dto)
+        {
+            if (!await _context.ShopItems.AnyAsync(i => i.Id == itemId))
+                return NotFound();
+
+            var userId = User.UserId()!;
+            return await PhotoEndpointHelpers.UpsertAsync(
+                _context,
+                _context.ShopItemPhotos,
+                p => p.ShopItemId == itemId,
+                () => new ShopItemPhoto
+                {
+                    ShopItemId = itemId,
+                    UserId = userId,
+                    Data = dto.Data,
+                    ContentType = dto.ContentType
+                },
+                dto,
+                userId);
+        }
+
+        [HttpGet("items/{itemId}/photo")]
+        [AllowAnonymous]
+        public Task<IActionResult> GetShopItemPhoto(int itemId) =>
+            PhotoEndpointHelpers.GetAsync(
+                _context.ShopItemPhotos,
+                p => p.ShopItemId == itemId);
+
+        [HttpDelete("items/{itemId}/photo")]
+        [Authorize(Policy = "Admin")]
+        public Task<IActionResult> DeleteShopItemPhoto(int itemId) =>
+            PhotoEndpointHelpers.DeleteAsync(
+                _context,
+                _context.ShopItemPhotos,
+                p => p.ShopItemId == itemId);
     }
 }

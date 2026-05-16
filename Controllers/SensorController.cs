@@ -1,3 +1,5 @@
+using garge_api.Controllers.Common;
+using garge_api.Dtos.Common;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
@@ -11,7 +13,7 @@ using Npgsql;
 using Swashbuckle.AspNetCore.Annotations;
 using System.Globalization;
 using System.Security.Claims;
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Services;
 
 namespace garge_api.Controllers
@@ -1086,37 +1088,25 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Photo saved.")]
         [SwaggerResponse(400, "Invalid request.")]
         [SwaggerResponse(403, "No access to sensor.")]
-        public async Task<IActionResult> UploadSensorPhoto(int sensorId, [FromBody] UploadSensorPhotoDto dto)
+        public async Task<IActionResult> UploadSensorPhoto(int sensorId, [FromBody] UploadPhotoDto dto)
         {
             if (!await UserCanAccessSensorAsync(sensorId))
                 return Forbid();
 
-            if (string.IsNullOrWhiteSpace(dto.Data) || string.IsNullOrWhiteSpace(dto.ContentType))
-                return BadRequest(new { message = "Data and ContentType are required." });
-
             var userId = User.UserId()!;
-
-            var existing = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
-            if (existing != null)
-            {
-                existing.Data = dto.Data;
-                existing.ContentType = dto.ContentType;
-                existing.UserId = userId;
-                existing.CreatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                _context.SensorPhotos.Add(new Models.Sensor.SensorPhoto
+            return await PhotoEndpointHelpers.UpsertAsync(
+                _context,
+                _context.SensorPhotos,
+                sp => sp.SensorId == sensorId,
+                () => new SensorPhoto
                 {
                     SensorId = sensorId,
                     UserId = userId,
                     Data = dto.Data,
                     ContentType = dto.ContentType
-                });
-            }
-
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Photo saved." });
+                },
+                dto,
+                userId);
         }
 
         [HttpGet("{sensorId}/photo")]
@@ -1129,11 +1119,9 @@ namespace garge_api.Controllers
             if (!await UserCanAccessSensorAsync(sensorId))
                 return Forbid();
 
-            var photo = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
-            if (photo == null)
-                return NotFound(new { message = "No photo found." });
-
-            return Ok(new { data = photo.Data, contentType = photo.ContentType });
+            return await PhotoEndpointHelpers.GetAsync(
+                _context.SensorPhotos,
+                sp => sp.SensorId == sensorId);
         }
 
         [HttpDelete("{sensorId}/photo")]
@@ -1146,13 +1134,10 @@ namespace garge_api.Controllers
             if (!await UserCanAccessSensorAsync(sensorId))
                 return Forbid();
 
-            var photo = await _context.SensorPhotos.FirstOrDefaultAsync(sp => sp.SensorId == sensorId);
-            if (photo == null)
-                return NotFound(new { message = "No photo found." });
-
-            _context.SensorPhotos.Remove(photo);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Photo deleted." });
+            return await PhotoEndpointHelpers.DeleteAsync(
+                _context,
+                _context.SensorPhotos,
+                sp => sp.SensorId == sensorId);
         }
     }
 }

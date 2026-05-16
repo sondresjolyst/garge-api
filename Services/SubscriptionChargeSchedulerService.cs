@@ -55,17 +55,19 @@ namespace garge_api.Services
                     if (sub.Product == null || !sub.NextChargeDate.HasValue) continue;
 
                     var dueDate = sub.NextChargeDate.Value;
+                    var unitPriceInOre = Pricing.EffectiveInOre(sub.Product.PriceInOre, settings.VatEnabled);
+                    var amountInOre = unitPriceInOre * sub.Quantity;
                     try
                     {
                         await vipps.CreateChargeAsync(
                             sub.VippsAgreementId,
-                            sub.Product.PriceInOre,
+                            amountInOre,
                             dueDate,
                             sub.Product.Name,
                             idempotencyKey: $"charge-{sub.Id}-{dueDate.Ticks}");
 
-                        _logger.LogInformation("ChargeScheduler: posted charge for subscription {SubId} due {DueDate}",
-                            sub.Id, dueDate);
+                        _logger.LogInformation("ChargeScheduler: posted charge for subscription {SubId} amount {Amount} due {DueDate}",
+                            sub.Id, amountInOre, dueDate);
                     }
                     catch (Exception ex)
                     {

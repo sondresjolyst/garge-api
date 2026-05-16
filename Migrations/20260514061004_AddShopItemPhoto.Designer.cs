@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260514061004_AddShopItemPhoto")]
+    partial class AddShopItemPhoto
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -762,43 +765,6 @@ namespace garge_api.Migrations
                     b.ToTable("SensorOfflineNotifications");
                 });
 
-            modelBuilder.Entity("garge_api.Models.Sensor.BatteryChargeEvent", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("DurationMinutes")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("EndedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<float>("PeakRatio")
-                        .HasColumnType("real");
-
-                    b.Property<float>("PeakVoltage")
-                        .HasColumnType("real");
-
-                    b.Property<float>("RestingAtTime")
-                        .HasColumnType("real");
-
-                    b.Property<int>("SensorId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SensorId", "StartedAt")
-                        .IsUnique();
-
-                    b.ToTable("BatteryChargeEvents");
-                });
-
             modelBuilder.Entity("garge_api.Models.Sensor.BatteryHealth", b =>
                 {
                     b.Property<int>("Id")
@@ -810,44 +776,17 @@ namespace garge_api.Migrations
                     b.Property<float>("Baseline")
                         .HasColumnType("real");
 
-                    b.Property<float?>("ChargeAcceptanceRatio")
-                        .HasColumnType("real");
-
                     b.Property<int>("ChargesRecorded")
                         .HasColumnType("integer");
 
-                    b.Property<float>("CurrentVoltage")
-                        .HasColumnType("real");
-
-                    b.Property<float>("DailyDropPctPerWeek")
-                        .HasColumnType("real");
-
                     b.Property<float>("DropPct")
                         .HasColumnType("real");
-
-                    b.Property<int>("FullChargesLast30d")
-                        .HasColumnType("integer");
 
                     b.Property<float>("LastCharge")
                         .HasColumnType("real");
 
                     b.Property<DateTime?>("LastChargedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("LastFullChargeAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<float?>("LastFullChargePeak")
-                        .HasColumnType("real");
-
-                    b.Property<bool>("OnChargerNow")
-                        .HasColumnType("boolean");
-
-                    b.Property<float>("PeakResting")
-                        .HasColumnType("real");
-
-                    b.Property<float>("RestingMedian")
-                        .HasColumnType("real");
 
                     b.Property<int>("SensorId")
                         .HasColumnType("integer");
@@ -859,9 +798,6 @@ namespace garge_api.Migrations
 
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<float?>("VoltageMin24h")
-                        .HasColumnType("real");
 
                     b.HasKey("Id");
 
@@ -879,9 +815,6 @@ namespace garge_api.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<float?>("CalibrationOffsetV")
-                        .HasColumnType("real");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1212,8 +1145,8 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
@@ -1285,8 +1218,8 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<int>("Interval")
                         .HasColumnType("integer");
@@ -1341,9 +1274,6 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("ProductId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Quantity")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("StartDate")
@@ -1622,17 +1552,6 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Sensor.BatteryChargeEvent", b =>
-                {
-                    b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
-                        .WithMany()
-                        .HasForeignKey("SensorId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Sensor");
                 });
 
             modelBuilder.Entity("garge_api.Models.Sensor.BatteryHealth", b =>

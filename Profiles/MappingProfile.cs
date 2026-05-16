@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using Mapster;
 using garge_api.Dtos.Admin;
 using garge_api.Dtos.Auth;
 using garge_api.Dtos.Electricity;
@@ -15,86 +15,88 @@ using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
 using Microsoft.AspNetCore.Identity;
 
-public class MappingProfile : Profile
+public class MappingProfile : IRegister
 {
-    public MappingProfile()
+    public void Register(TypeAdapterConfig config)
     {
         // Admin mappings
-        CreateMap<IdentityRole, RoleDto>();
-        CreateMap<RolePermission, RolePermissionDto>().ReverseMap();
-        CreateMap<User, UserDto>();
-        CreateMap<AppSettings, AppSettingsDto>();
-        CreateMap<AppSettings, PublicSettingsDto>();
-        CreateMap<UpdateAppSettingsDto, AppSettings>()
-            .ForAllMembers(opt => opt.Condition((_, _, srcMember) => srcMember != null));
+        config.NewConfig<IdentityRole, RoleDto>();
+        config.NewConfig<RolePermission, RolePermissionDto>().TwoWays();
+        config.NewConfig<User, UserDto>();
+        config.NewConfig<AppSettings, AppSettingsDto>();
+        config.NewConfig<AppSettings, PublicSettingsDto>();
+        config.NewConfig<UpdateAppSettingsDto, AppSettings>()
+            .IgnoreNullValues(true);
 
         // Electricity mappings
-        CreateMap<PriceResponse, PriceResponseDto>();
-        CreateMap<AreaPrices, AreaPricesDto>();
-        CreateMap<PriceEntry, PriceEntryDto>();
+        config.NewConfig<PriceResponse, PriceResponseDto>();
+        config.NewConfig<AreaPrices, AreaPricesDto>();
+        config.NewConfig<PriceEntry, PriceEntryDto>();
 
         // Sensor mappings
-        CreateMap<CreateSensorDataDto, SensorData>();
-        CreateMap<CreateSensorDto, Sensor>();
-        CreateMap<Sensor, SensorDto>().ReverseMap();
-        CreateMap<UpdateSensorDto, Sensor>();
-        CreateMap<SensorData, SensorDataDto>().ReverseMap();
-        CreateMap<BatteryHealth, BatteryHealthDto>().ReverseMap();
-        CreateMap<CreateBatteryHealthDto, BatteryHealth>();
-        CreateMap<SensorActivity, SensorActivityDto>().ReverseMap();
-        CreateMap<CreateSensorActivityDto, SensorActivity>();
-        CreateMap<UpdateSensorActivityDto, SensorActivity>();
+        config.NewConfig<CreateSensorDataDto, SensorData>();
+        config.NewConfig<CreateSensorDto, Sensor>();
+        config.NewConfig<Sensor, SensorDto>().TwoWays();
+        config.NewConfig<UpdateSensorDto, Sensor>();
+        config.NewConfig<SensorData, SensorDataDto>().TwoWays();
+        config.NewConfig<BatteryHealth, BatteryHealthDto>().TwoWays();
+        config.NewConfig<CreateBatteryHealthDto, BatteryHealth>();
+        config.NewConfig<BatteryChargeEvent, BatteryChargeEventDto>();
+        config.NewConfig<SensorActivity, SensorActivityDto>().TwoWays();
+        config.NewConfig<CreateSensorActivityDto, SensorActivity>();
+        config.NewConfig<UpdateSensorActivityDto, SensorActivity>();
 
         // Switch mappings
-        CreateMap<Switch, SwitchDto>().ReverseMap();
-        CreateMap<CreateSwitchDto, Switch>();
-        CreateMap<UpdateSwitchDto, Switch>();
-        CreateMap<SwitchData, SwitchDataDto>().ReverseMap();
-        CreateMap<CreateSwitchDataDto, SwitchData>();
+        config.NewConfig<Switch, SwitchDto>().TwoWays();
+        config.NewConfig<CreateSwitchDto, Switch>();
+        config.NewConfig<UpdateSwitchDto, Switch>();
+        config.NewConfig<SwitchData, SwitchDataDto>().TwoWays();
+        config.NewConfig<CreateSwitchDataDto, SwitchData>();
 
         // User mappings
-        CreateMap<UserProfile, UserProfileDto>()
-            .ForMember(d => d.FirstName, o => o.MapFrom(s => s.User.FirstName))
-            .ForMember(d => d.LastName, o => o.MapFrom(s => s.User.LastName))
-            .ForMember(d => d.Email, o => o.MapFrom(s => s.User.Email))
-            .ForMember(d => d.PhoneNumber, o => o.MapFrom(s => s.User.PhoneNumber))
-            .ForMember(d => d.EmailConfirmed, o => o.MapFrom(s => s.User.EmailConfirmed));
-        CreateMap<RegisterUserDto, User>();
+        config.NewConfig<UserProfile, UserProfileDto>()
+            .Map(d => d.FirstName, s => s.User.FirstName)
+            .Map(d => d.LastName, s => s.User.LastName)
+            .Map(d => d.Email, s => s.User.Email)
+            .Map(d => d.PhoneNumber, s => s.User.PhoneNumber)
+            .Map(d => d.EmailConfirmed, s => s.User.EmailConfirmed);
+        config.NewConfig<RegisterUserDto, User>();
 
         // Subscription plan mappings
-        CreateMap<Product, ProductResponseDto>()
-            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Interval.ToString()))
-            .ForMember(d => d.Type, o => o.MapFrom(s => s.Type.ToString()));
-        CreateMap<CreateProductDto, Product>();
-        CreateMap<UpdateProductDto, Product>();
+        config.NewConfig<Product, ProductResponseDto>()
+            .Map(d => d.Interval, s => s.Interval.ToString())
+            .Map(d => d.Type, s => s.Type.ToString());
+        config.NewConfig<CreateProductDto, Product>();
+        config.NewConfig<UpdateProductDto, Product>();
 
-        CreateMap<garge_api.Models.Subscription.Subscription, SubscriptionResponseDto>()
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
-            .ForMember(d => d.Interval, o => o.MapFrom(s => s.Product != null ? s.Product.Interval.ToString() : string.Empty))
-            .ForMember(d => d.ProductName, o => o.MapFrom(s => s.Product != null ? s.Product.Name : string.Empty))
-            .ForMember(d => d.ProductType, o => o.MapFrom(s => s.Product != null ? s.Product.Type.ToString() : string.Empty))
-            .ForMember(d => d.PriceInOre, o => o.MapFrom(s => s.Product != null ? s.Product.PriceInOre : 0));
+        config.NewConfig<garge_api.Models.Subscription.Subscription, SubscriptionResponseDto>()
+            .Map(d => d.Status, s => s.Status.ToString())
+            .Map(d => d.Interval, s => s.Product != null ? s.Product.Interval.ToString() : string.Empty)
+            .Map(d => d.ProductName, s => s.Product != null ? s.Product.Name : string.Empty)
+            .Map(d => d.ProductType, s => s.Product != null ? s.Product.Type.ToString() : string.Empty)
+            .Map(d => d.PriceInOre, s => s.Product != null ? s.Product.PriceInOre : 0)
+            .Map(d => d.Quantity, s => s.Quantity);
 
         // Shop mappings
-        CreateMap<ShopItem, ShopItemResponseDto>();
-        CreateMap<CreateShopItemDto, ShopItem>();
-        CreateMap<UpdateShopItemDto, ShopItem>();
+        config.NewConfig<ShopItem, ShopItemResponseDto>();
+        config.NewConfig<CreateShopItemDto, ShopItem>();
+        config.NewConfig<UpdateShopItemDto, ShopItem>();
 
-        CreateMap<Order, OrderResponseDto>()
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
-            .ForMember(d => d.Items, o => o.MapFrom(s => s.OrderItems))
-            .ForMember(d => d.HasInvoice, o => o.MapFrom(s => s.Invoice != null));
+        config.NewConfig<Order, OrderResponseDto>()
+            .Map(d => d.Status, s => s.Status.ToString())
+            .Map(d => d.Items, s => s.OrderItems)
+            .Map(d => d.HasInvoice, s => s.Invoice != null);
 
-        CreateMap<OrderItem, OrderItemResponseDto>()
-            .ForMember(d => d.ShopItemName, o => o.MapFrom(s => s.ShopItem != null ? s.ShopItem.Name : string.Empty));
+        config.NewConfig<OrderItem, OrderItemResponseDto>()
+            .Map(d => d.ShopItemName, s => s.ShopItem != null ? s.ShopItem.Name : string.Empty);
 
-        CreateMap<Invoice, InvoiceResponseDto>();
+        config.NewConfig<Invoice, InvoiceResponseDto>();
 
-        CreateMap<Order, AdminOrderResponseDto>()
-            .ForMember(d => d.Status, o => o.MapFrom(s => s.Status.ToString()))
-            .ForMember(d => d.Items, o => o.MapFrom(s => s.OrderItems))
-            .ForMember(d => d.HasInvoice, o => o.MapFrom(s => s.Invoice != null))
-            .ForMember(d => d.UserEmail, o => o.MapFrom(s => s.User != null ? s.User.Email ?? string.Empty : string.Empty))
-            .ForMember(d => d.UserName, o => o.MapFrom(s => s.User != null ? $"{s.User.FirstName} {s.User.LastName}" : string.Empty));
+        config.NewConfig<Order, AdminOrderResponseDto>()
+            .Map(d => d.Status, s => s.Status.ToString())
+            .Map(d => d.Items, s => s.OrderItems)
+            .Map(d => d.HasInvoice, s => s.Invoice != null)
+            .Map(d => d.UserEmail, s => s.User != null ? s.User.Email ?? string.Empty : string.Empty)
+            .Map(d => d.UserName, s => s.User != null ? s.User.FirstName + " " + s.User.LastName : string.Empty);
     }
 }

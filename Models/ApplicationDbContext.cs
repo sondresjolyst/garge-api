@@ -26,6 +26,7 @@ namespace garge_api.Models
         public DbSet<Sensor.Sensor> Sensors { get; set; }
         public DbSet<SensorData> SensorData { get; set; }
         public DbSet<BatteryHealth> BatteryHealthData { get; set; }
+        public DbSet<BatteryChargeEvent> BatteryChargeEvents { get; set; }
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
@@ -49,6 +50,7 @@ namespace garge_api.Models
         public DbSet<Product> Products { get; set; }
         public DbSet<Subscription.Subscription> Subscriptions { get; set; }
         public DbSet<ShopItem> ShopItems { get; set; }
+        public DbSet<ShopItemPhoto> ShopItemPhotos { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
@@ -83,6 +85,10 @@ namespace garge_api.Models
 
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => bh.SensorId);
+
+            modelBuilder.Entity<BatteryChargeEvent>()
+                .HasIndex(e => new { e.SensorId, e.StartedAt })
+                .IsUnique();
 
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => bh.Timestamp);
@@ -260,6 +266,22 @@ namespace garge_api.Models
 
             modelBuilder.Entity<ShopItem>()
                 .HasIndex(si => si.IsActive);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasOne(sip => sip.ShopItem)
+                .WithMany()
+                .HasForeignKey(sip => sip.ShopItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasOne(sip => sip.User)
+                .WithMany()
+                .HasForeignKey(sip => sip.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ShopItemPhoto>()
+                .HasIndex(sip => sip.ShopItemId)
+                .IsUnique();
 
             modelBuilder.Entity<Order>()
                 .HasOne(o => o.User)

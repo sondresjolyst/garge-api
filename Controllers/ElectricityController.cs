@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 using garge_api.Constants;
-using AutoMapper;
+using MapsterMapper;
 using garge_api.Dtos.Electricity;
 using garge_api.Models;
 using Microsoft.EntityFrameworkCore;

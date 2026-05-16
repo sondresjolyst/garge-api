@@ -1,5 +1,7 @@
 using garge_api.Models;
 using garge_api.Constants;
+using Mapster;
+using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -56,7 +58,10 @@ namespace garge_api
                 options.Level = CompressionLevel.Fastest;
             });
 
-            builder.Services.AddAutoMapper(_ => { }, typeof(MappingProfile));
+            var mapsterConfig = TypeAdapterConfig.GlobalSettings;
+            mapsterConfig.Scan(typeof(MappingProfile).Assembly);
+            builder.Services.AddSingleton(mapsterConfig);
+            builder.Services.AddScoped<IMapper, ServiceMapper>();
 
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -90,6 +95,8 @@ namespace garge_api
             builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
             builder.Services.AddSingleton<CoalescingDispatcher>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
+            builder.Services.AddSingleton<BatteryHealthAnalyzerService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<BatteryHealthAnalyzerService>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
@@ -287,6 +294,11 @@ namespace garge_api
             };
             fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
+            // Trust any caller. In our k8s deployment the only path to the pod is
+            // through the ingress controller, so the immediate caller is always a
+            // trusted reverse proxy. Without this, X-Forwarded-For is dropped and
+            // RemoteIpAddress stays at the in-cluster pod IP.
+            fwd.KnownIPNetworks.Add(new System.Net.IPNetwork(System.Net.IPAddress.Any, 0));
             app.UseForwardedHeaders(fwd);
 
             if (!app.Environment.IsDevelopment())
