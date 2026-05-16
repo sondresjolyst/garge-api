@@ -178,13 +178,6 @@ namespace garge_api.Services
             {
                 SensorId = sensor.Id,
                 Status = classification.Status,
-                // Legacy field mapping for cutover backwards-compat:
-                Baseline = peakResting,
-                LastCharge = lastEvent?.PeakVoltage ?? 0f,
-                DropPct = dropPct,
-                ChargesRecorded = fullChargesLast30d,
-                LastChargedAt = lastEvent?.EndedAt,
-                // New analyzer-computed fields:
                 CurrentVoltage = currentVoltage,
                 RestingMedian = restingMedian,
                 PeakResting = peakResting,
