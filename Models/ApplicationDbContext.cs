@@ -26,6 +26,7 @@ namespace garge_api.Models
         public DbSet<Sensor.Sensor> Sensors { get; set; }
         public DbSet<SensorData> SensorData { get; set; }
         public DbSet<BatteryHealth> BatteryHealthData { get; set; }
+        public DbSet<BatteryChargeEvent> BatteryChargeEvents { get; set; }
         public DbSet<Switch.Switch> Switches { get; set; }
         public DbSet<SwitchData> SwitchData { get; set; }
         public DbSet<RefreshToken> RefreshTokens { get; set; }
@@ -84,6 +85,10 @@ namespace garge_api.Models
 
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => bh.SensorId);
+
+            modelBuilder.Entity<BatteryChargeEvent>()
+                .HasIndex(e => new { e.SensorId, e.StartedAt })
+                .IsUnique();
 
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => bh.Timestamp);

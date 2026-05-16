@@ -15,13 +15,15 @@ namespace garge_api.Services
         private readonly string _connectionString;
         private readonly CoalescingDispatcher _dispatcher;
         private readonly IDeviceOwnershipService _ownership;
+        private readonly BatteryHealthAnalyzerService _batteryAnalyzer;
 
         public PostgresNotificationService(
             IServiceScopeFactory scopeFactory,
             ILogger<PostgresNotificationService> logger,
             IConfiguration configuration,
             CoalescingDispatcher dispatcher,
-            IDeviceOwnershipService ownership)
+            IDeviceOwnershipService ownership,
+            BatteryHealthAnalyzerService batteryAnalyzer)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
@@ -29,6 +31,7 @@ namespace garge_api.Services
                                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
             _dispatcher = dispatcher;
             _ownership = ownership;
+            _batteryAnalyzer = batteryAnalyzer;
             _logger.LogWarning("PostgresNotificationService initialized");
         }
 
@@ -148,6 +151,18 @@ namespace garge_api.Services
             foreach (var userId in owners)
             {
                 _dispatcher.EnqueueSensorForUser(userId, evt);
+            }
+
+            // Voltage sensors get re-analyzed on every new reading. The
+            // analyzer self-filters by sensor type, so calling it for all
+            // sensors is cheap.
+            try
+            {
+                await _batteryAnalyzer.AnalyzeSensorAsync(sensorData.SensorId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Battery health analyzer failed for sensor {SensorId}", sensorData.SensorId);
             }
         }
     }
