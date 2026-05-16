@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.5.0](https://github.com/sondresjolyst/garge-api/compare/v2.4.1...v2.5.0) (2026-05-16)
+
+
+### Features
+
+* **battery:** server-side health analyzer from voltage stream ([#209](https://github.com/sondresjolyst/garge-api/issues/209)) ([ad37eff](https://github.com/sondresjolyst/garge-api/commit/ad37effcaff6ee11232e029020d4fa4340b07a42))
+* **gdpr:** expand user data export for GDPR Art 15/20 compliance ([#205](https://github.com/sondresjolyst/garge-api/issues/205)) ([4d3f29b](https://github.com/sondresjolyst/garge-api/commit/4d3f29bffc68de28addcef08a4e93b4be1719656))
+* **shop:** expand Description column to 2000 chars on ShopItem + Product ([#203](https://github.com/sondresjolyst/garge-api/issues/203)) ([da8e879](https://github.com/sondresjolyst/garge-api/commit/da8e879de30f4517a05f64e5482dd3291022f649))
+* **shop:** photo upload for shop items, share helpers with sensor photos ([#202](https://github.com/sondresjolyst/garge-api/issues/202)) ([bacfaeb](https://github.com/sondresjolyst/garge-api/commit/bacfaeb2b575dd4de15c0e110c2651da18345126))
+* **subscription:** quantity field for add-on subscriptions ([#204](https://github.com/sondresjolyst/garge-api/issues/204)) ([cc22e51](https://github.com/sondresjolyst/garge-api/commit/cc22e511f52f2ac316269460fae0a2f4629f9c5f))
+
+
+### Reverts
+
+* drop temporary IP debug logging from subscription initiate ([#207](https://github.com/sondresjolyst/garge-api/issues/207)) ([3d234ab](https://github.com/sondresjolyst/garge-api/commit/3d234abe0fabfb606b6ff20fc099d2680ff3b945))
+
 ## [2.4.1](https://github.com/sondresjolyst/garge-api/compare/v2.4.0...v2.4.1) (2026-05-10)
 
 
