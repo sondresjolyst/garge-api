@@ -121,11 +121,18 @@ namespace garge_api.Services
                 return;
             }
 
+            // Drop unphysical readings. 12 V lead-acid systems never produce
+            // readings below ~5 V (sensor init artifacts, disconnects) or above
+            // ~20 V (charger overvoltage, wiring shorts). Including them poisons
+            // bottom-quartile resting-median and the slope built from it.
+            const float MinPlausibleVolt = 5.0f;
+            const float MaxPlausibleVolt = 20.0f;
             var samples = new List<BatteryHealthMath.VoltageSample>(rawSamples.Count);
             foreach (var s in rawSamples)
             {
-                if (float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v))
-                    samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
+                if (!float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
+                if (v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
+                samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
             }
             if (samples.Count == 0) return;
 
@@ -142,8 +149,17 @@ namespace garge_api.Services
                 .DefaultIfEmpty(null)
                 .Min();
 
-            var slopeSamples = samples.Where(s => s.Timestamp >= now - SlopeWindow).ToList();
-            var slopePctWeek = BatteryHealthMath.ComputeSlopePercentPerWeek(slopeSamples);
+            // Fit slope to daily resting-voltage checkpoints (same bottom-25% median
+            // stat used for "Drop from peak") so both metrics describe the same
+            // underlying signal: trend of resting voltage. Using raw mean here
+            // would skew the slope whenever the window contains charging spikes.
+            var slopeCheckpoints = new List<BatteryHealthMath.VoltageSample>();
+            for (var t = now - SlopeWindow; t <= now; t = t.AddDays(1))
+            {
+                var r = BatteryHealthMath.ComputeRestingMedian(samples, t, RestingWindow);
+                if (r > 0) slopeCheckpoints.Add(new BatteryHealthMath.VoltageSample(t, r));
+            }
+            var slopePctWeek = BatteryHealthMath.ComputeSlopePercentPerWeek(slopeCheckpoints);
 
             var detected = BatteryHealthMath.DetectChargeEvents(samples, restingMedian);
             await UpsertChargeEventsAsync(db, sensor.Id, detected, ct);
@@ -155,7 +171,8 @@ namespace garge_api.Services
 
             var daysOfData = (int)Math.Round((now - samples[0].Timestamp).TotalDays);
             var dropPct = peakResting > 0 ? (peakResting - restingMedian) / peakResting * 100f : 0f;
-            var classification = BatteryHealthMath.ClassifyHealth(dropPct, slopePctWeek, acceptance, daysOfData);
+            var hasRecentCharge = recentEvents.Count > 0;
+            var classification = BatteryHealthMath.ClassifyHealth(dropPct, slopePctWeek, acceptance, daysOfData, hasRecentCharge);
 
             db.BatteryHealthData.Add(new BatteryHealth
             {

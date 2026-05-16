@@ -175,10 +175,18 @@ namespace garge_api.Helpers
             float dropPctFromPeak,
             float slopePctPerWeek,
             float? chargeAcceptanceRatio,
-            int daysOfData)
+            int daysOfData,
+            bool hasRecentCharge)
         {
             if (daysOfData < LearningMinDays)
                 return new HealthClassification("learning", $"only {daysOfData}d of data (need ≥{LearningMinDays}d)", dropPctFromPeak);
+
+            // Without a recent charge event we cannot separate true battery
+            // degradation from normal self-discharge plus sensor parasitic drain.
+            // Skip the drop / slope penalties and report "learning" with a hint
+            // so the user knows a charge cycle is needed to assess health.
+            if (!hasRecentCharge)
+                return new HealthClassification("learning", "no charge events in 90d — connect charger to assess health", dropPctFromPeak);
 
             // S1
             var s1 = dropPctFromPeak switch

@@ -90,7 +90,7 @@ public class BatteryHealthMathTests
     [Fact]
     public void ClassifyHealth_InsufficientData_ReturnsLearning()
     {
-        var result = BatteryHealthMath.ClassifyHealth(0f, 0f, null, daysOfData: 5);
+        var result = BatteryHealthMath.ClassifyHealth(0f, 0f, null, daysOfData: 5, hasRecentCharge: false);
         Assert.Equal("learning", result.Status);
     }
 
@@ -101,7 +101,8 @@ public class BatteryHealthMathTests
             dropPctFromPeak: 1f,
             slopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: 1.15f,
-            daysOfData: 30);
+            daysOfData: 30,
+            hasRecentCharge: true);
         Assert.Equal("good", result.Status);
     }
 
@@ -112,7 +113,8 @@ public class BatteryHealthMathTests
             dropPctFromPeak: 7f,    // > replace threshold
             slopePctPerWeek: 0f,
             chargeAcceptanceRatio: 1.15f,
-            daysOfData: 30);
+            daysOfData: 30,
+            hasRecentCharge: true);
         Assert.Equal("replace", result.Status);
     }
 
@@ -123,7 +125,8 @@ public class BatteryHealthMathTests
             dropPctFromPeak: 0f,
             slopePctPerWeek: -0.2f,   // attention range
             chargeAcceptanceRatio: 1.15f,
-            daysOfData: 30);
+            daysOfData: 30,
+            hasRecentCharge: true);
         Assert.Equal("attention", result.Status);
     }
 
@@ -131,11 +134,14 @@ public class BatteryHealthMathTests
     public void ClassifyHealth_NoChargeEvent_S3Skipped()
     {
         // No charge acceptance data — S3 must not push status above S1/S2 verdict.
+        // Charge events exist (hasRecentCharge true) but acceptance ratio is unset
+        // (e.g. only short charges that didn't qualify).
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 1f,
             slopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: null,
-            daysOfData: 30);
+            daysOfData: 30,
+            hasRecentCharge: true);
         Assert.Equal("good", result.Status);
     }
 
@@ -146,8 +152,24 @@ public class BatteryHealthMathTests
             dropPctFromPeak: 1f,
             slopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: 1.02f, // < replace threshold
-            daysOfData: 30);
+            daysOfData: 30,
+            hasRecentCharge: true);
         Assert.Equal("replace", result.Status);
+    }
+
+    [Fact]
+    public void ClassifyHealth_NoRecentCharge_ReturnsLearning()
+    {
+        // Without a charge event we cannot tell degradation from self-discharge.
+        // Even bad-looking drop + slope must not be flagged as replace.
+        var result = BatteryHealthMath.ClassifyHealth(
+            dropPctFromPeak: 7f,
+            slopePctPerWeek: -1f,
+            chargeAcceptanceRatio: null,
+            daysOfData: 30,
+            hasRecentCharge: false);
+        Assert.Equal("learning", result.Status);
+        Assert.Contains("charger", result.Reason);
     }
 
     [Fact]
