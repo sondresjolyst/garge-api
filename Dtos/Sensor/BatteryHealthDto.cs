@@ -6,14 +6,6 @@ namespace garge_api.Dtos.Sensor
         public int SensorId { get; set; }
         public required string Status { get; set; }
 
-        // Legacy fields. Kept during cutover so existing clients don't break.
-        public float Baseline { get; set; }
-        public float LastCharge { get; set; }
-        public float DropPct { get; set; }
-        public int ChargesRecorded { get; set; }
-        public DateTime? LastChargedAt { get; set; }
-
-        // Analyzer-computed fields.
         public float CurrentVoltage { get; set; }
         public float RestingMedian { get; set; }
         public float PeakResting { get; set; }

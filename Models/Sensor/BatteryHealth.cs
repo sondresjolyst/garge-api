@@ -24,16 +24,6 @@ namespace garge_api.Models.Sensor
         [MaxLength(20)]
         public required string Status { get; set; }
 
-        // Legacy fields, kept for cutover period. Will be removed in phase 2.
-        // Populated by analyzer with mapped equivalents so old clients keep
-        // working until they migrate to the new field names.
-        public float Baseline { get; set; }
-        public float LastCharge { get; set; }
-        public float DropPct { get; set; }
-        public int ChargesRecorded { get; set; }
-        public DateTime? LastChargedAt { get; set; }
-
-        // New analyzer-computed fields ---
         public float CurrentVoltage { get; set; }
         public float RestingMedian { get; set; }
         public float PeakResting { get; set; }
