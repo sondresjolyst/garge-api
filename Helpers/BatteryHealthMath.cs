@@ -141,6 +141,55 @@ namespace garge_api.Helpers
         }
 
         /// <summary>
+        /// Median resting voltage in a settle window after a charge event
+        /// ended. Used to anchor per-cycle slope at a comparable state-of-
+        /// charge — post-charge surface charge has decayed and the battery
+        /// is back at its "fully topped up" rested voltage.
+        ///
+        /// Returns null if the window contains fewer than
+        /// <paramref name="minSamples"/> samples (next charge started before
+        /// settle completed, or the sensor lost connectivity).
+        /// </summary>
+        public static float? PostChargeResting(
+            IReadOnlyList<VoltageSample> samples,
+            DateTime chargeEndedAt,
+            TimeSpan settleStart,
+            TimeSpan settleEnd,
+            int minSamples = 3)
+        {
+            var windowStart = chargeEndedAt + settleStart;
+            var windowEnd = chargeEndedAt + settleEnd;
+            var values = samples
+                .Where(s => s.Timestamp >= windowStart && s.Timestamp <= windowEnd)
+                .Select(s => s.Value)
+                .OrderBy(v => v)
+                .ToList();
+            if (values.Count < minSamples) return null;
+            return Median(values);
+        }
+
+        /// <summary>
+        /// Cycle-anchored slope: linear least-squares fit across post-charge
+        /// resting samples (one anchor per detected full-charge event). This
+        /// is the only voltage statistic that physically reflects capacity
+        /// loss — every anchor is taken at the same state-of-charge
+        /// (just-after-full-charge), so anchor-to-anchor drift is degradation,
+        /// not SOC variation.
+        ///
+        /// Returns null if fewer than <paramref name="minAnchors"/> events
+        /// produced a settled post-charge measurement: without enough cycles
+        /// we cannot distinguish a one-off event from real degradation, so
+        /// the signal stays silent.
+        /// </summary>
+        public static float? ComputeCycleSlopePercentPerWeek(
+            IReadOnlyList<VoltageSample> anchors,
+            int minAnchors)
+        {
+            if (anchors.Count < minAnchors) return null;
+            return ComputeSlopePercentPerWeek(anchors);
+        }
+
+        /// <summary>
         /// Linear least-squares slope of values over time, expressed as
         /// percent change per week of the values' mean. Positive = rising.
         /// </summary>
@@ -173,7 +222,7 @@ namespace garge_api.Helpers
         /// </summary>
         public static HealthClassification ClassifyHealth(
             float dropPctFromPeak,
-            float slopePctPerWeek,
+            float? cycleSlopePctPerWeek,
             float? chargeAcceptanceRatio,
             int daysOfData,
             bool hasRecentCharge)
@@ -196,14 +245,20 @@ namespace garge_api.Helpers
                 _ => 2
             };
 
-            // S2 (slope is decline if negative; we compare magnitude of decline)
-            var declinePctWeek = slopePctPerWeek < 0 ? -slopePctPerWeek : 0;
-            var s2 = declinePctWeek switch
+            // S2 — null means we don't have enough cycle anchors to compute a
+            // meaningful trend; signal stays silent rather than penalize.
+            var s2 = 0;
+            var declinePctWeek = 0f;
+            if (cycleSlopePctPerWeek.HasValue)
             {
-                var d when d <= S2AttentionSlopePctWeek => 0,
-                var d when d <= S2ReplaceSlopePctWeek => 1,
-                _ => 2
-            };
+                declinePctWeek = cycleSlopePctPerWeek.Value < 0 ? -cycleSlopePctPerWeek.Value : 0;
+                s2 = declinePctWeek switch
+                {
+                    var d when d <= S2AttentionSlopePctWeek => 0,
+                    var d when d <= S2ReplaceSlopePctWeek => 1,
+                    _ => 2
+                };
+            }
 
             // S3 (only if we have a charge event)
             var s3 = 0;
