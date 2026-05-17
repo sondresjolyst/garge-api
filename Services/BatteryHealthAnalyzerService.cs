@@ -37,9 +37,18 @@ namespace garge_api.Services
         // recent-only stat to avoid false alarms.
         private static readonly TimeSpan CurrentRestingWindow = TimeSpan.FromDays(3);
         private static readonly TimeSpan PeakRestingRollingWindow = TimeSpan.FromDays(90);
-        private static readonly TimeSpan SlopeWindow = TimeSpan.FromDays(30);
         private static readonly TimeSpan ChargeEventLookback = TimeSpan.FromDays(90);
         private static readonly TimeSpan FullChargeCountWindow = TimeSpan.FromDays(30);
+
+        // Post-charge settle window: skip 12h of surface-charge decay, then
+        // take the median resting voltage between 12h and 36h after the
+        // charge event ended. This is the canonical "same SOC" anchor for
+        // cycle-over-cycle capacity tracking.
+        private static readonly TimeSpan PostChargeSettleStart = TimeSpan.FromHours(12);
+        private static readonly TimeSpan PostChargeSettleEnd = TimeSpan.FromHours(36);
+        // Minimum cycle anchors before S2 slope is meaningful — below this,
+        // we cannot tell a one-off event from a real declining trend.
+        private const int S2MinAnchors = 3;
 
         // OnChargerNow threshold: voltage above the sensor's 90d best rested
         // state. Per-sensor ratio so calibration drift between sensors is fine.
@@ -168,20 +177,31 @@ namespace garge_api.Services
                 .DefaultIfEmpty(null)
                 .Min();
 
-            // Fit slope to daily resting-voltage checkpoints (same bottom-25% median
-            // stat used for "Drop from peak") so both metrics describe the same
-            // underlying signal: trend of resting voltage. Using raw mean here
-            // would skew the slope whenever the window contains charging spikes.
-            var slopeCheckpoints = new List<BatteryHealthMath.VoltageSample>();
-            for (var t = now - SlopeWindow; t <= now; t = t.AddDays(1))
-            {
-                var r = BatteryHealthMath.ComputeRestingMedian(samples, t, RestingWindow);
-                if (r > 0) slopeCheckpoints.Add(new BatteryHealthMath.VoltageSample(t, r));
-            }
-            var slopePctWeek = BatteryHealthMath.ComputeSlopePercentPerWeek(slopeCheckpoints);
-
             var detected = BatteryHealthMath.DetectChargeEvents(samples, restingMedian);
             await UpsertChargeEventsAsync(db, sensor.Id, detected, ct);
+
+            // Cycle-anchored slope: one anchor per detected charge event,
+            // taken from the post-charge settle window. Each anchor is a
+            // same-SOC measurement, so anchor-to-anchor drift reflects
+            // capacity loss rather than state-of-charge variation. A
+            // calendar-time slope of raw bottom-25 medians (the prior
+            // approach) could not distinguish a transient deep-discharge
+            // event from real degradation — both showed as a negative slope.
+            var anchors = detected
+                .Select(e => new
+                {
+                    e.EndedAt,
+                    Resting = BatteryHealthMath.PostChargeResting(
+                        samples,
+                        e.EndedAt,
+                        PostChargeSettleStart,
+                        PostChargeSettleEnd)
+                })
+                .Where(a => a.Resting.HasValue)
+                .OrderBy(a => a.EndedAt)
+                .Select(a => new BatteryHealthMath.VoltageSample(a.EndedAt, a.Resting!.Value))
+                .ToList();
+            var cycleSlopePctWeek = BatteryHealthMath.ComputeCycleSlopePercentPerWeek(anchors, S2MinAnchors);
 
             var recentEvents = detected.Where(e => e.EndedAt >= now - ChargeEventLookback).ToList();
             var fullChargesLast30d = detected.Count(e => e.EndedAt >= now - FullChargeCountWindow);
@@ -197,7 +217,7 @@ namespace garge_api.Services
                 ? Math.Max(0f, (peakResting - currentResting) / peakResting * 100f)
                 : 0f;
             var hasRecentCharge = recentEvents.Count > 0;
-            var classification = BatteryHealthMath.ClassifyHealth(dropPct, slopePctWeek, acceptance, daysOfData, hasRecentCharge);
+            var classification = BatteryHealthMath.ClassifyHealth(dropPct, cycleSlopePctWeek, acceptance, daysOfData, hasRecentCharge);
 
             db.BatteryHealthData.Add(new BatteryHealth
             {
@@ -214,14 +234,16 @@ namespace garge_api.Services
                 LastFullChargePeak = lastEvent?.PeakVoltage,
                 VoltageMin24h = voltageMin24h,
                 FullChargesLast30d = fullChargesLast30d,
-                DailyDropPctPerWeek = slopePctWeek,
+                DailyDropPctPerWeek = cycleSlopePctWeek,
                 ChargeAcceptanceRatio = acceptance,
                 Timestamp = now,
             });
 
             _logger.LogInformation(
-                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} currentResting={CurrentResting:F3} restingMedian14d={Resting:F3} peakResting={PeakResting:F3} drop={Drop:F2}% slope={Slope:F3}%/wk onCharger={OnCharger} fullCharges30d={Count}",
-                sensor.Id, classification.Status, currentResting, restingMedian, peakResting, dropPct, slopePctWeek, onChargerNow, fullChargesLast30d);
+                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} currentResting={CurrentResting:F3} restingMedian14d={Resting:F3} peakResting={PeakResting:F3} drop={Drop:F2}% cycleSlope={Slope} anchors={Anchors}/{MinAnchors} onCharger={OnCharger} fullCharges30d={Count}",
+                sensor.Id, classification.Status, currentResting, restingMedian, peakResting, dropPct,
+                cycleSlopePctWeek.HasValue ? $"{cycleSlopePctWeek.Value:F3}%/wk" : "null",
+                anchors.Count, S2MinAnchors, onChargerNow, fullChargesLast30d);
         }
 
         private static async Task UpsertChargeEventsAsync(
