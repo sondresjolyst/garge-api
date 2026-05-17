@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.6.0](https://github.com/sondresjolyst/garge-api/compare/v2.5.2...v2.6.0) (2026-05-17)
+
+
+### Features
+
+* **battery:** admin reanalyze endpoint to bypass NOTIFY/sweep wait ([#224](https://github.com/sondresjolyst/garge-api/issues/224)) ([dd43bc3](https://github.com/sondresjolyst/garge-api/commit/dd43bc3c04c7eac5f0f1157a6c5755b0fbdf7900))
+* **battery:** admin reanalyze endpoint to bypass NOTIFY/sweep wait ([#224](https://github.com/sondresjolyst/garge-api/issues/224)) ([#225](https://github.com/sondresjolyst/garge-api/issues/225)) ([363e35a](https://github.com/sondresjolyst/garge-api/commit/363e35a40a50a7fad4f8e6a988cefbd3d47cb0c2))
+
 ## [2.5.2](https://github.com/sondresjolyst/garge-api/compare/v2.5.1...v2.5.2) (2026-05-17)
 
 
