@@ -14,7 +14,7 @@ namespace garge_api.Dtos.Sensor
         public float? LastFullChargePeak { get; set; }
         public float? VoltageMin24h { get; set; }
         public int FullChargesLast30d { get; set; }
-        public float DailyDropPctPerWeek { get; set; }
+        public float? DailyDropPctPerWeek { get; set; }
         public float? ChargeAcceptanceRatio { get; set; }
 
         // Sensor-level calibration offset (volts). Frontend may add this to

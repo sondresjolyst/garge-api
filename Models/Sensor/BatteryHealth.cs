@@ -32,7 +32,9 @@ namespace garge_api.Models.Sensor
         public float? LastFullChargePeak { get; set; }
         public float? VoltageMin24h { get; set; }
         public int FullChargesLast30d { get; set; }
-        public float DailyDropPctPerWeek { get; set; }
+        // Cycle-anchored slope (% per week of mean). Null when fewer than the
+        // minimum number of post-charge resting anchors have been collected.
+        public float? DailyDropPctPerWeek { get; set; }
         public float? ChargeAcceptanceRatio { get; set; }
 
         [Required]

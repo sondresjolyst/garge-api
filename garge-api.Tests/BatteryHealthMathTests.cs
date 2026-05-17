@@ -90,7 +90,7 @@ public class BatteryHealthMathTests
     [Fact]
     public void ClassifyHealth_InsufficientData_ReturnsLearning()
     {
-        var result = BatteryHealthMath.ClassifyHealth(0f, 0f, null, daysOfData: 5, hasRecentCharge: false);
+        var result = BatteryHealthMath.ClassifyHealth(0f, (float?)null, null, daysOfData: 5, hasRecentCharge: false);
         Assert.Equal("learning", result.Status);
     }
 
@@ -99,7 +99,7 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 1f,
-            slopePctPerWeek: -0.05f,
+            cycleSlopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: 1.15f,
             daysOfData: 30,
             hasRecentCharge: true);
@@ -111,7 +111,7 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 7f,    // > replace threshold
-            slopePctPerWeek: 0f,
+            cycleSlopePctPerWeek: 0f,
             chargeAcceptanceRatio: 1.15f,
             daysOfData: 30,
             hasRecentCharge: true);
@@ -123,7 +123,7 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 0f,
-            slopePctPerWeek: -0.2f,   // attention range
+            cycleSlopePctPerWeek: -0.2f,   // attention range
             chargeAcceptanceRatio: 1.15f,
             daysOfData: 30,
             hasRecentCharge: true);
@@ -138,7 +138,7 @@ public class BatteryHealthMathTests
         // (e.g. only short charges that didn't qualify).
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 1f,
-            slopePctPerWeek: -0.05f,
+            cycleSlopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: null,
             daysOfData: 30,
             hasRecentCharge: true);
@@ -150,7 +150,7 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 1f,
-            slopePctPerWeek: -0.05f,
+            cycleSlopePctPerWeek: -0.05f,
             chargeAcceptanceRatio: 1.02f, // < replace threshold
             daysOfData: 30,
             hasRecentCharge: true);
@@ -164,12 +164,92 @@ public class BatteryHealthMathTests
         // Even bad-looking drop + slope must not be flagged as replace.
         var result = BatteryHealthMath.ClassifyHealth(
             dropPctFromPeak: 7f,
-            slopePctPerWeek: -1f,
+            cycleSlopePctPerWeek: -1f,
             chargeAcceptanceRatio: null,
             daysOfData: 30,
             hasRecentCharge: false);
         Assert.Equal("learning", result.Status);
         Assert.Contains("charger", result.Reason);
+    }
+
+    [Fact]
+    public void ClassifyHealth_NullSlope_S2Skipped()
+    {
+        // Cycle slope null = insufficient anchors. Even a normally-bad slope
+        // value (passed via the other tests) must not pin status when null.
+        var result = BatteryHealthMath.ClassifyHealth(
+            dropPctFromPeak: 0f,
+            cycleSlopePctPerWeek: null,
+            chargeAcceptanceRatio: 1.15f,
+            daysOfData: 30,
+            hasRecentCharge: true);
+        Assert.Equal("good", result.Status);
+    }
+
+    [Fact]
+    public void PostChargeResting_Settled_ReturnsMedian()
+    {
+        var start = DateTime.UtcNow.AddDays(-2);
+        // Charge ended at t=0 of this trace. Sample voltage hourly 0..48h.
+        // Surface charge decays 0-12h, then stable at 12.7V from 12-48h.
+        var samples = Trace(start, 48, h => h < 12 ? 13.2f : 12.70f);
+        var resting = BatteryHealthMath.PostChargeResting(
+            samples,
+            chargeEndedAt: start,
+            settleStart: TimeSpan.FromHours(12),
+            settleEnd: TimeSpan.FromHours(36));
+        Assert.NotNull(resting);
+        Assert.InRange(resting!.Value, 12.69f, 12.71f);
+    }
+
+    [Fact]
+    public void PostChargeResting_NotEnoughSamples_ReturnsNull()
+    {
+        // Only one sample inside the 12-36h window.
+        var start = DateTime.UtcNow.AddDays(-2);
+        var samples = new List<BatteryHealthMath.VoltageSample>
+        {
+            new(start.AddHours(20), 12.70f),
+        };
+        var resting = BatteryHealthMath.PostChargeResting(
+            samples,
+            chargeEndedAt: start,
+            settleStart: TimeSpan.FromHours(12),
+            settleEnd: TimeSpan.FromHours(36),
+            minSamples: 3);
+        Assert.Null(resting);
+    }
+
+    [Fact]
+    public void ComputeCycleSlopePercentPerWeek_BelowMinAnchors_ReturnsNull()
+    {
+        var now = DateTime.UtcNow;
+        var anchors = new List<BatteryHealthMath.VoltageSample>
+        {
+            new(now.AddDays(-30), 12.70f),
+            new(now.AddDays(-15), 12.68f),
+        };
+        var slope = BatteryHealthMath.ComputeCycleSlopePercentPerWeek(anchors, minAnchors: 3);
+        Assert.Null(slope);
+    }
+
+    [Fact]
+    public void ComputeCycleSlopePercentPerWeek_DecliningAnchors_NegativeSlope()
+    {
+        // 5 post-charge anchors 7 days apart, each 0.05V lower than the
+        // previous. Real degradation pattern; slope should be clearly < 0.
+        var now = DateTime.UtcNow;
+        var anchors = new List<BatteryHealthMath.VoltageSample>
+        {
+            new(now.AddDays(-28), 12.80f),
+            new(now.AddDays(-21), 12.75f),
+            new(now.AddDays(-14), 12.70f),
+            new(now.AddDays(-7),  12.65f),
+            new(now,              12.60f),
+        };
+        var slope = BatteryHealthMath.ComputeCycleSlopePercentPerWeek(anchors, minAnchors: 3);
+        Assert.NotNull(slope);
+        Assert.True(slope!.Value < -0.1f, $"expected negative slope, got {slope}");
     }
 
     [Fact]
