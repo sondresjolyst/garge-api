@@ -3,6 +3,7 @@ using garge_api.Dtos.Sensor;
 using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Sensor;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -22,13 +23,19 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IMapper _mapper;
         private readonly ILogger<BatteryHealthController> _logger;
+        private readonly BatteryHealthAnalyzerService _analyzer;
         private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
-        public BatteryHealthController(ApplicationDbContext context, IMapper mapper, ILogger<BatteryHealthController> logger)
+        public BatteryHealthController(
+            ApplicationDbContext context,
+            IMapper mapper,
+            ILogger<BatteryHealthController> logger,
+            BatteryHealthAnalyzerService analyzer)
         {
             _context = context;
             _mapper = mapper;
             _logger = logger;
+            _analyzer = analyzer;
         }
 
         private bool IsAdmin() =>
@@ -156,6 +163,62 @@ namespace garge_api.Controllers
             sensor.CalibrationOffsetV = null;
             await _context.SaveChangesAsync();
             return NoContent();
+        }
+
+        /// <summary>
+        /// Admin: force-reanalyze every voltage sensor. Bypasses the 90-min
+        /// staleness gate used by the background sweep and the per-sensor
+        /// NOTIFY trigger. Useful after deploying a new analyzer version so
+        /// the UI doesn't show pre-fix data until each sensor publishes its
+        /// next reading. Idempotent.
+        /// </summary>
+        [HttpPost("admin/reanalyze")]
+        [Authorize(Policy = "Admin")]
+        [SwaggerOperation(Summary = "Admin: re-run the analyzer for all voltage sensors.")]
+        [SwaggerResponse(200, "Processed counts.")]
+        public async Task<IActionResult> ReanalyzeAll(CancellationToken ct)
+        {
+            var sensorIds = await _context.Sensors
+                .Where(s => s.Type == "voltage")
+                .Select(s => s.Id)
+                .ToListAsync(ct);
+
+            var ok = 0;
+            var failed = 0;
+            foreach (var id in sensorIds)
+            {
+                try
+                {
+                    await _analyzer.AnalyzeSensorAsync(id, ct);
+                    ok++;
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    _logger.LogWarning(ex, "Reanalyze failed for sensor {SensorId}", id);
+                }
+            }
+
+            _logger.LogInformation("BatteryHealth ReanalyzeAll: ok={Ok} failed={Failed} total={Total}", ok, failed, sensorIds.Count);
+            return Ok(new { processed = ok, failed, total = sensorIds.Count });
+        }
+
+        /// <summary>
+        /// Admin: force-reanalyze a single voltage sensor by id.
+        /// </summary>
+        [HttpPost("admin/reanalyze/{sensorId:int}")]
+        [Authorize(Policy = "Admin")]
+        [SwaggerOperation(Summary = "Admin: re-run the analyzer for one voltage sensor.")]
+        [SwaggerResponse(200, "Reanalyzed.")]
+        [SwaggerResponse(404, "Sensor not found or not a voltage sensor.")]
+        public async Task<IActionResult> ReanalyzeOne(int sensorId, CancellationToken ct)
+        {
+            var exists = await _context.Sensors
+                .AnyAsync(s => s.Id == sensorId && s.Type == "voltage", ct);
+            if (!exists) return NotFound(new { message = "Voltage sensor not found." });
+
+            await _analyzer.AnalyzeSensorAsync(sensorId, ct);
+            return Ok(new { sensorId });
         }
     }
 }
