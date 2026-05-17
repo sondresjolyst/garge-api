@@ -28,11 +28,22 @@ namespace garge_api.Services
         private static readonly TimeSpan FallbackInterval = TimeSpan.FromHours(1);
         private static readonly TimeSpan StalenessThreshold = TimeSpan.FromMinutes(90);
 
+        // Long window: smooths historical lows. Used for peakResting daily
+        // checkpoints, slope checkpoints, and charge-event detection baseline.
         private static readonly TimeSpan RestingWindow = TimeSpan.FromDays(14);
+        // Short window: tracks the battery's *current* rested voltage. The 14d
+        // window can include prior deep-discharge dips the battery has since
+        // recovered from, so "on charger now" and "drop from peak" need a
+        // recent-only stat to avoid false alarms.
+        private static readonly TimeSpan CurrentRestingWindow = TimeSpan.FromDays(3);
         private static readonly TimeSpan PeakRestingRollingWindow = TimeSpan.FromDays(90);
         private static readonly TimeSpan SlopeWindow = TimeSpan.FromDays(30);
         private static readonly TimeSpan ChargeEventLookback = TimeSpan.FromDays(90);
         private static readonly TimeSpan FullChargeCountWindow = TimeSpan.FromDays(30);
+
+        // OnChargerNow threshold: voltage above the sensor's 90d best rested
+        // state. Per-sensor ratio so calibration drift between sensors is fine.
+        private const float OnChargerRatio = 1.02f;
 
         public BatteryHealthAnalyzerService(
             IServiceScopeFactory scopeFactory,
@@ -136,12 +147,20 @@ namespace garge_api.Services
             }
             if (samples.Count == 0) return;
 
+            // 14d bottom-25 median: historical low, used for charge-event
+            // baseline and slope checkpoints (smooth long-term trend).
             var restingMedian = BatteryHealthMath.ComputeRestingMedian(samples, now, RestingWindow);
+            // 3d bottom-25 median: current rested state, used for OnChargerNow
+            // and drop-from-peak (so a recovered battery isn't flagged on the
+            // basis of an old dip still inside the 14d window).
+            var currentResting = BatteryHealthMath.ComputeRestingMedian(samples, now, CurrentRestingWindow);
             var peakResting = BatteryHealthMath.ComputePeakResting(samples, now, PeakRestingRollingWindow, RestingWindow);
 
             var currentVoltage = samples[^1].Value;
-            var onChargerNow = restingMedian > 0
-                && samples.TakeLast(3).All(s => s.Value >= restingMedian * 1.05f);
+            // Compare current voltage to the 90d best rested state. A charger
+            // pushes voltage measurably above any rested level for that sensor.
+            var onChargerNow = peakResting > 0
+                && samples.TakeLast(3).All(s => s.Value >= peakResting * OnChargerRatio);
 
             var voltageMin24h = samples
                 .Where(s => s.Timestamp >= now.AddHours(-24))
@@ -170,7 +189,13 @@ namespace garge_api.Services
             float? acceptance = recentEvents.Count > 0 ? recentEvents.Max(e => e.PeakRatio) : null;
 
             var daysOfData = (int)Math.Round((now - samples[0].Timestamp).TotalDays);
-            var dropPct = peakResting > 0 ? (peakResting - restingMedian) / peakResting * 100f : 0f;
+            // Drop reflects how far the *current* rested state sits below the 90d
+            // best rested state. Using currentResting (3d) instead of the 14d
+            // restingMedian keeps a recovered-from deep-discharge dip from
+            // permanently penalizing the battery once voltage is back up.
+            var dropPct = peakResting > 0
+                ? Math.Max(0f, (peakResting - currentResting) / peakResting * 100f)
+                : 0f;
             var hasRecentCharge = recentEvents.Count > 0;
             var classification = BatteryHealthMath.ClassifyHealth(dropPct, slopePctWeek, acceptance, daysOfData, hasRecentCharge);
 
@@ -179,7 +204,10 @@ namespace garge_api.Services
                 SensorId = sensor.Id,
                 Status = classification.Status,
                 CurrentVoltage = currentVoltage,
-                RestingMedian = restingMedian,
+                // Persist the short-window value: UI labels this "Resting
+                // voltage" and users expect it to reflect the battery's
+                // present resting state, not its 14d low-water mark.
+                RestingMedian = currentResting,
                 PeakResting = peakResting,
                 OnChargerNow = onChargerNow,
                 LastFullChargeAt = lastEvent?.EndedAt,
@@ -192,8 +220,8 @@ namespace garge_api.Services
             });
 
             _logger.LogInformation(
-                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} resting={Resting:F3} peakResting={PeakResting:F3} drop={Drop:F2}% slope={Slope:F3}%/wk onCharger={OnCharger} fullCharges30d={Count}",
-                sensor.Id, classification.Status, restingMedian, peakResting, dropPct, slopePctWeek, onChargerNow, fullChargesLast30d);
+                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} currentResting={CurrentResting:F3} restingMedian14d={Resting:F3} peakResting={PeakResting:F3} drop={Drop:F2}% slope={Slope:F3}%/wk onCharger={OnCharger} fullCharges30d={Count}",
+                sensor.Id, classification.Status, currentResting, restingMedian, peakResting, dropPct, slopePctWeek, onChargerNow, fullChargesLast30d);
         }
 
         private static async Task UpsertChargeEventsAsync(
