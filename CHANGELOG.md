@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.5.2](https://github.com/sondresjolyst/garge-api/compare/v2.5.1...v2.5.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* **battery:** anchor S2 slope to post-charge resting (per-cycle) ([#221](https://github.com/sondresjolyst/garge-api/issues/221)) ([fc42211](https://github.com/sondresjolyst/garge-api/commit/fc42211f549fa1920c148a8cfdb2538af4104561))
+* **battery:** anchor S2 slope to post-charge resting (per-cycle) ([#221](https://github.com/sondresjolyst/garge-api/issues/221)) ([d285277](https://github.com/sondresjolyst/garge-api/commit/d28527751d13b116a31eca789bd8692f9cba5329))
+
 ## [2.5.1](https://github.com/sondresjolyst/garge-api/compare/v2.5.0...v2.5.1) (2026-05-17)
 
 
