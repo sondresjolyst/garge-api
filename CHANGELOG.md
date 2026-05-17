@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.5.1](https://github.com/sondresjolyst/garge-api/compare/v2.5.0...v2.5.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **battery:** drop pre-analyzer zombie BatteryHealth rows ([#216](https://github.com/sondresjolyst/garge-api/issues/216)) ([793d0b3](https://github.com/sondresjolyst/garge-api/commit/793d0b3fb6d25446ba8b549ae4f881e7b8c8b1fd))
+* **battery:** drop pre-analyzer zombie BatteryHealth rows ([#216](https://github.com/sondresjolyst/garge-api/issues/216)) ([add9736](https://github.com/sondresjolyst/garge-api/commit/add973690945d0c229d864b8f7cdd1a49ae9b43b))
+* **battery:** split resting median into long + short windows ([#217](https://github.com/sondresjolyst/garge-api/issues/217)) ([786de88](https://github.com/sondresjolyst/garge-api/commit/786de88ab01b548125eee2eb6fa1884e43381e5d))
+* **battery:** split resting median into long + short windows ([#217](https://github.com/sondresjolyst/garge-api/issues/217)) ([c0fdcd3](https://github.com/sondresjolyst/garge-api/commit/c0fdcd374e444884ccca68f2e672fb8d62dcc383))
+
 ## [2.5.0](https://github.com/sondresjolyst/garge-api/compare/v2.4.1...v2.5.0) (2026-05-16)
 
 
