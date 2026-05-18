@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.6.0](https://github.com/sondresjolyst/garge-api/compare/v2.5.2...v2.6.0) (2026-05-17)
+
+
+### Features
+
+* **battery:** admin reanalyze endpoint to bypass NOTIFY/sweep wait ([#224](https://github.com/sondresjolyst/garge-api/issues/224)) ([dd43bc3](https://github.com/sondresjolyst/garge-api/commit/dd43bc3c04c7eac5f0f1157a6c5755b0fbdf7900))
+* **battery:** admin reanalyze endpoint to bypass NOTIFY/sweep wait ([#224](https://github.com/sondresjolyst/garge-api/issues/224)) ([#225](https://github.com/sondresjolyst/garge-api/issues/225)) ([363e35a](https://github.com/sondresjolyst/garge-api/commit/363e35a40a50a7fad4f8e6a988cefbd3d47cb0c2))
+
+## [2.5.2](https://github.com/sondresjolyst/garge-api/compare/v2.5.1...v2.5.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* **battery:** anchor S2 slope to post-charge resting (per-cycle) ([#221](https://github.com/sondresjolyst/garge-api/issues/221)) ([fc42211](https://github.com/sondresjolyst/garge-api/commit/fc42211f549fa1920c148a8cfdb2538af4104561))
+* **battery:** anchor S2 slope to post-charge resting (per-cycle) ([#221](https://github.com/sondresjolyst/garge-api/issues/221)) ([d285277](https://github.com/sondresjolyst/garge-api/commit/d28527751d13b116a31eca789bd8692f9cba5329))
+
+## [2.5.1](https://github.com/sondresjolyst/garge-api/compare/v2.5.0...v2.5.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* **battery:** drop pre-analyzer zombie BatteryHealth rows ([#216](https://github.com/sondresjolyst/garge-api/issues/216)) ([793d0b3](https://github.com/sondresjolyst/garge-api/commit/793d0b3fb6d25446ba8b549ae4f881e7b8c8b1fd))
+* **battery:** drop pre-analyzer zombie BatteryHealth rows ([#216](https://github.com/sondresjolyst/garge-api/issues/216)) ([add9736](https://github.com/sondresjolyst/garge-api/commit/add973690945d0c229d864b8f7cdd1a49ae9b43b))
+* **battery:** split resting median into long + short windows ([#217](https://github.com/sondresjolyst/garge-api/issues/217)) ([786de88](https://github.com/sondresjolyst/garge-api/commit/786de88ab01b548125eee2eb6fa1884e43381e5d))
+* **battery:** split resting median into long + short windows ([#217](https://github.com/sondresjolyst/garge-api/issues/217)) ([c0fdcd3](https://github.com/sondresjolyst/garge-api/commit/c0fdcd374e444884ccca68f2e672fb8d62dcc383))
+
+## [2.5.0](https://github.com/sondresjolyst/garge-api/compare/v2.4.1...v2.5.0) (2026-05-16)
+
+
+### Features
+
+* **battery:** server-side health analyzer from voltage stream ([#209](https://github.com/sondresjolyst/garge-api/issues/209)) ([ad37eff](https://github.com/sondresjolyst/garge-api/commit/ad37effcaff6ee11232e029020d4fa4340b07a42))
+* **gdpr:** expand user data export for GDPR Art 15/20 compliance ([#205](https://github.com/sondresjolyst/garge-api/issues/205)) ([4d3f29b](https://github.com/sondresjolyst/garge-api/commit/4d3f29bffc68de28addcef08a4e93b4be1719656))
+* **shop:** expand Description column to 2000 chars on ShopItem + Product ([#203](https://github.com/sondresjolyst/garge-api/issues/203)) ([da8e879](https://github.com/sondresjolyst/garge-api/commit/da8e879de30f4517a05f64e5482dd3291022f649))
+* **shop:** photo upload for shop items, share helpers with sensor photos ([#202](https://github.com/sondresjolyst/garge-api/issues/202)) ([bacfaeb](https://github.com/sondresjolyst/garge-api/commit/bacfaeb2b575dd4de15c0e110c2651da18345126))
+* **subscription:** quantity field for add-on subscriptions ([#204](https://github.com/sondresjolyst/garge-api/issues/204)) ([cc22e51](https://github.com/sondresjolyst/garge-api/commit/cc22e511f52f2ac316269460fae0a2f4629f9c5f))
+
+
+### Reverts
+
+* drop temporary IP debug logging from subscription initiate ([#207](https://github.com/sondresjolyst/garge-api/issues/207)) ([3d234ab](https://github.com/sondresjolyst/garge-api/commit/3d234abe0fabfb606b6ff20fc099d2680ff3b945))
+
 ## [2.4.1](https://github.com/sondresjolyst/garge-api/compare/v2.4.0...v2.4.1) (2026-05-10)
 
 
