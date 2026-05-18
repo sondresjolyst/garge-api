@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Controllers.Common;
 using garge_api.Dtos.Common;
 using garge_api.Dtos.Sensor;
@@ -679,6 +680,12 @@ namespace garge_api.Controllers
             {
                 _logger.LogWarning("CreateSensor forbidden for {@LogData}", new { CallerUserId = User.UserId() });
                 return Forbid();
+            }
+
+            if (!SensorTypes.IsAllowed(sensorDto.Type))
+            {
+                _logger.LogWarning("CreateSensor rejected unsupported type {@LogData}", new { sensorDto.Name, sensorDto.Type });
+                return BadRequest(new { message = $"Unsupported sensor type '{sensorDto.Type}'. Allowed: {string.Join(", ", SensorTypes.Allowed)}." });
             }
 
             var sensor = new Sensor
