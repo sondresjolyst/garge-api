@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/sondresjolyst/garge-api/compare/v2.6.0...v2.7.0) (2026-05-18)
+
+
+### Features
+
+* **battery:** remove deprecated POST /api/battery-health/name endpoint ([#214](https://github.com/sondresjolyst/garge-api/issues/214)) ([71213a2](https://github.com/sondresjolyst/garge-api/commit/71213a290a7befe80b677dc6a181ab21814493ac))
+
 ## [2.6.0](https://github.com/sondresjolyst/garge-api/compare/v2.5.2...v2.6.0) (2026-05-17)
 
 
