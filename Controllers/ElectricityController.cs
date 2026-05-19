@@ -1,12 +1,12 @@
 ﻿using garge_api.Services;
 using garge_api.Helpers;
+using garge_api.Dtos.Electricity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 using garge_api.Constants;
 using MapsterMapper;
-using garge_api.Dtos.Electricity;
 using garge_api.Models;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
@@ -66,12 +66,14 @@ namespace garge_api.Controllers
             var resolution = type.ToUpper();
             var queryDate = date ?? DateTime.UtcNow;
 
+            var vatRate = ElectricityPriceHelper.GetVatRate(area);
+
             // Try serving from DB first
             var storedEntries = await GetStoredPricesAsync(resolution, area, queryDate);
             if (storedEntries.Count > 0)
             {
                 _logger.LogInformation("Serving {Count} {Resolution} price entries from DB for area {Area}", storedEntries.Count, LogSanitizer.Sanitize(resolution), LogSanitizer.Sanitize(area));
-                var dbDto = BuildPriceResponseDto(storedEntries, area, currency);
+                var dbDto = BuildPriceResponseDto(storedEntries, area, currency, vatRate);
                 return Ok(dbDto);
             }
 
@@ -85,14 +87,37 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "No price data found." });
             }
 
-            // Convert NordPool values (NOK/MWh) to kr/kWh before returning
-            foreach (var areaPrices in data.Areas.Values)
-                foreach (var entry in areaPrices.Values)
-                    entry.Value /= 1000m;
+            // Convert NordPool values (NOK/MWh) to kr/kWh, then apply VAT for gross
+            var nordpoolDto = new PriceResponseDto
+            {
+                Start = data.Start,
+                End = data.End,
+                Updated = data.Updated,
+                Currency = data.Currency,
+                Areas = new Dictionary<string, AreaPricesDto>()
+            };
+            foreach (var (areaKey, areaPrices) in data.Areas)
+            {
+                var areaVat = ElectricityPriceHelper.GetVatRate(areaKey);
+                nordpoolDto.Areas[areaKey] = new AreaPricesDto
+                {
+                    VatRate = areaVat,
+                    Values = areaPrices.Values.Select(e =>
+                    {
+                        var spot = e.Value / 1000m;
+                        return new PriceEntryDto
+                        {
+                            Start = e.Start,
+                            End = e.End,
+                            SpotValue = spot,
+                            Value = spot * (1m + areaVat),
+                        };
+                    }).ToList()
+                };
+            }
 
-            var dto = _mapper.Map<PriceResponseDto>(data);
             _logger.LogInformation("Returning NordPool price data {@LogData}", new { type = LogSanitizer.Sanitize(type), area = LogSanitizer.Sanitize(area), date, currency });
-            return Ok(dto);
+            return Ok(nordpoolDto);
         }
 
         private async Task<List<garge_api.Models.Electricity.StoredElectricityPrice>> GetStoredPricesAsync(string resolution, string area, DateTime date)
@@ -119,15 +144,21 @@ namespace garge_api.Controllers
         }
 
         private static PriceResponseDto BuildPriceResponseDto(
-            List<garge_api.Models.Electricity.StoredElectricityPrice> entries, string area, string currency)
+            List<garge_api.Models.Electricity.StoredElectricityPrice> entries, string area, string currency, decimal vatRate)
         {
             var areaPricesDto = new AreaPricesDto
             {
-                Values = entries.Select(e => new PriceEntryDto
+                VatRate = vatRate,
+                Values = entries.Select(e =>
                 {
-                    Start = e.DeliveryStart,
-                    End = e.DeliveryEnd,
-                    Value = (decimal)e.Value,  // already in kr/kWh
+                    var spot = (decimal)e.Value; // stored as kr/kWh, ex-VAT
+                    return new PriceEntryDto
+                    {
+                        Start = e.DeliveryStart,
+                        End = e.DeliveryEnd,
+                        SpotValue = spot,
+                        Value = spot * (1m + vatRate),
+                    };
                 }).ToList()
             };
 
@@ -164,13 +195,18 @@ namespace garge_api.Controllers
             if (entry == null)
                 return NotFound(new { message = $"No stored price found for area '{area}' at current time." });
 
-            return Ok(new
+            var vatRate = ElectricityPriceHelper.GetVatRate(area);
+            var spot = (decimal)entry.Value;
+
+            return Ok(new CurrentPriceDto
             {
-                area = entry.Area,
-                value = entry.Value,
-                currency = entry.Currency,
-                deliveryStart = entry.DeliveryStart,
-                deliveryEnd = entry.DeliveryEnd,
+                Area = entry.Area,
+                Value = spot * (1m + vatRate),
+                SpotValue = spot,
+                VatRate = vatRate,
+                Currency = entry.Currency,
+                DeliveryStart = entry.DeliveryStart,
+                DeliveryEnd = entry.DeliveryEnd,
             });
         }
     }
