@@ -18,7 +18,6 @@ namespace garge_api.Controllers
     [Route("api/switches")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
-    [Authorize(Policy = "ActiveSubscription")]
     public class SwitchesController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -659,7 +658,7 @@ namespace garge_api.Controllers
         }
 
         [HttpPost("claim")]
-        [Authorize]
+        [Authorize(Policy = "ActiveSubscription")]
         [SwaggerOperation(Summary = "Claims a switch using a registration code.")]
         [SwaggerResponse(200, "Switch claimed successfully.")]
         [SwaggerResponse(400, "Registration code is required.")]
