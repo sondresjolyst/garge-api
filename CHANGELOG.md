@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.8.0](https://github.com/sondresjolyst/garge-api/compare/v2.7.0...v2.8.0) (2026-05-19)
+
+
+### Features
+
+* **electricity:** apply VAT server-side and expose spot + vatRate ([#232](https://github.com/sondresjolyst/garge-api/issues/232)) ([1f3a217](https://github.com/sondresjolyst/garge-api/commit/1f3a2171e7a80493f584d22c45680ee09588f65b))
+* **sensors:** reject unsupported types in CreateSensor ([#233](https://github.com/sondresjolyst/garge-api/issues/233)) ([e34cfb4](https://github.com/sondresjolyst/garge-api/commit/e34cfb47b9a8142070d69d7830083a8a4908d94b))
+
 ## [2.7.0](https://github.com/sondresjolyst/garge-api/compare/v2.6.0...v2.7.0) (2026-05-18)
 
 
