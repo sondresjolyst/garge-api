@@ -174,6 +174,7 @@ namespace garge_api
                     policy.AddRequirements(new ActiveSubscriptionRequirement()));
             });
             builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
+            builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, JsonForbidResultHandler>();
             builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
             builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
             builder.Services.AddDataProtection()
