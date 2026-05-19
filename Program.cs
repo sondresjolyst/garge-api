@@ -95,6 +95,8 @@ namespace garge_api
             builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
             builder.Services.AddSingleton<CoalescingDispatcher>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
+            builder.Services.AddSingleton<BatteryHealthAnalyzerService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<BatteryHealthAnalyzerService>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
             builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();

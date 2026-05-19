@@ -40,7 +40,7 @@ public class MappingProfile : IRegister
         config.NewConfig<UpdateSensorDto, Sensor>();
         config.NewConfig<SensorData, SensorDataDto>().TwoWays();
         config.NewConfig<BatteryHealth, BatteryHealthDto>().TwoWays();
-        config.NewConfig<CreateBatteryHealthDto, BatteryHealth>();
+        config.NewConfig<BatteryChargeEvent, BatteryChargeEventDto>();
         config.NewConfig<SensorActivity, SensorActivityDto>().TwoWays();
         config.NewConfig<CreateSensorActivityDto, SensorActivity>();
         config.NewConfig<UpdateSensorActivityDto, SensorActivity>();

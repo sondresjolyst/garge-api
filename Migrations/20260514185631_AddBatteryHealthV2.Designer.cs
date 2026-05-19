@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260514185631_AddBatteryHealthV2")]
+    partial class AddBatteryHealthV2
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -807,17 +810,32 @@ namespace garge_api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<float>("Baseline")
+                        .HasColumnType("real");
+
                     b.Property<float?>("ChargeAcceptanceRatio")
                         .HasColumnType("real");
+
+                    b.Property<int>("ChargesRecorded")
+                        .HasColumnType("integer");
 
                     b.Property<float>("CurrentVoltage")
                         .HasColumnType("real");
 
-                    b.Property<float?>("DailyDropPctPerWeek")
+                    b.Property<float>("DailyDropPctPerWeek")
+                        .HasColumnType("real");
+
+                    b.Property<float>("DropPct")
                         .HasColumnType("real");
 
                     b.Property<int>("FullChargesLast30d")
                         .HasColumnType("integer");
+
+                    b.Property<float>("LastCharge")
+                        .HasColumnType("real");
+
+                    b.Property<DateTime?>("LastChargedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("LastFullChargeAt")
                         .HasColumnType("timestamp with time zone");
