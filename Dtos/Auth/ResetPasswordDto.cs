@@ -14,7 +14,7 @@ namespace garge_api.Dtos.Auth
         public required string Code { get; set; }
 
         [Required]
-        [StringLength(128, MinimumLength = 10)]
+        [StringLength(128, MinimumLength = 8)]
         public required string NewPassword { get; set; }
     }
 }
