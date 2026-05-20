@@ -13,6 +13,13 @@ namespace garge_api.Models.Sensor
 
         public bool IsOwner { get; set; } = true;
 
+        /// <summary>
+        /// When set, the owner has turned this sensor off (or it was auto-suspended for being over
+        /// quota). Suspended owned sensors do not count toward subscription capacity and their
+        /// dashboard/history reads are blocked, but telemetry keeps flowing. Null = active.
+        /// </summary>
+        public DateTime? SuspendedAt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey(nameof(UserId))]

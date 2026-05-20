@@ -60,12 +60,20 @@ namespace garge_api.Authorization
                 _cache.Set(TestModeCacheKey, isTestMode, TimeSpan.FromSeconds(30));
             }
 
-            var ownedSensorCount = await db.UserSensors.CountAsync(us => us.UserId == userId && us.IsOwner);
+            // Only ACTIVE (non-suspended) owned sensors consume capacity: turning a sensor off frees
+            // a slot, and over-quota sensors are suspended rather than counted.
+            var ownedSensorCount = await db.UserSensors.CountAsync(us => us.UserId == userId && us.IsOwner && us.SuspendedAt == null);
 
+            // A subscription contributes to capacity while Active, OR during the paid-period grace
+            // after cancel/lapse — i.e. a Stopped/Expired sub whose NextChargeDate is still in the
+            // future. The user paid through that date, so access continues until then.
+            var now = DateTime.UtcNow;
             var activeSubs = await db.Subscriptions
                 .Where(s => s.UserId == userId
-                         && s.Status == SubscriptionStatus.Active
-                         && (!s.IsTest || isTestMode))
+                         && (!s.IsTest || isTestMode)
+                         && (s.Status == SubscriptionStatus.Active
+                             || ((s.Status == SubscriptionStatus.Stopped || s.Status == SubscriptionStatus.Expired)
+                                 && s.NextChargeDate != null && s.NextChargeDate > now)))
                 .Select(s => new { Type = s.Product!.Type, s.Quantity })
                 .ToListAsync();
 

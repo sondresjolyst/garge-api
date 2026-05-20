@@ -219,4 +219,55 @@ public class ActiveSubscriptionHandlerTests
 
         Assert.True(ctx.HasSucceeded);
     }
+
+    [Fact]
+    public async Task SuspendedOwnedSensor_NotCounted_FreesCapacity()
+    {
+        // The user owns one sensor but has turned it off (SuspendedAt set). It must not consume the
+        // Primary's single slot, so they can claim a different sensor.
+        var (handler, db) = Create();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        await db.UserSensors.AddAsync(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow });
+        await db.Subscriptions.AddAsync(Primary("user-1"));
+        await db.SaveChangesAsync();
+
+        var ctx = MakeContext("user-1");
+        await Handle(handler, ctx);
+
+        Assert.True(ctx.HasSucceeded);
+    }
+
+    [Fact]
+    public async Task CancelledPrimary_WithinPaidPeriod_StillGrantsCapacity()
+    {
+        // Cancelled (Stopped) but paid through a future NextChargeDate — capacity continues until then.
+        var (handler, db) = Create();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        var sub = Primary("user-1", status: SubscriptionStatus.Stopped);
+        sub.NextChargeDate = DateTime.UtcNow.AddDays(10);
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctx = MakeContext("user-1");
+        await Handle(handler, ctx);
+
+        Assert.True(ctx.HasSucceeded);
+    }
+
+    [Fact]
+    public async Task CancelledPrimary_AfterPaidPeriod_NoCapacity()
+    {
+        // Stopped and the paid period has ended — no capacity.
+        var (handler, db) = Create();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        var sub = Primary("user-1", status: SubscriptionStatus.Stopped);
+        sub.NextChargeDate = DateTime.UtcNow.AddDays(-1);
+        await db.Subscriptions.AddAsync(sub);
+        await db.SaveChangesAsync();
+
+        var ctx = MakeContext("user-1");
+        await Handle(handler, ctx);
+
+        Assert.False(ctx.HasSucceeded);
+    }
 }
