@@ -227,7 +227,7 @@ namespace garge_api.Controllers
             _context.Subscriptions.Add(subscription);
             await _context.SaveChangesAsync();
 
-            var redirectUrl = $"{_appOpts.FrontendBaseUrl}/profile/billing/return";
+            var redirectUrl = $"{_appOpts.FrontendBaseUrl}/profile/billing/return?subscriptionId={subscription.Id}";
             var idempotencyKey = $"sub-{subscription.Id}";
 
             try
