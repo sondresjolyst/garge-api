@@ -184,6 +184,7 @@ namespace garge_api
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddScoped<IAnonymizationService, AnonymizationService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
             builder.Services.AddHttpClient<IVippsService, VippsService>();
