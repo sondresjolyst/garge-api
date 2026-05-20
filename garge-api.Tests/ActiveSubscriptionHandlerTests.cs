@@ -1,6 +1,7 @@
 using garge_api.Authorization;
 using garge_api.Models;
 using garge_api.Models.Admin;
+using garge_api.Services;
 using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
 using Microsoft.AspNetCore.Authorization;
@@ -29,8 +30,11 @@ public class ActiveSubscriptionHandlerTests
             new Product { Id = AddOnProductId,  Name = "AddOn",   PriceInOre = 0, Interval = BillingInterval.Monthly, Type = ProductType.AddOn });
         db.SaveChanges();
 
+        var capacityService = new SubscriptionCapacityService(db, new MemoryCache(new MemoryCacheOptions()));
+
         var serviceProvider = new Mock<IServiceProvider>();
         serviceProvider.Setup(sp => sp.GetService(typeof(ApplicationDbContext))).Returns(db);
+        serviceProvider.Setup(sp => sp.GetService(typeof(ISubscriptionCapacityService))).Returns(capacityService);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(serviceProvider.Object);
@@ -38,7 +42,7 @@ public class ActiveSubscriptionHandlerTests
         var scopeFactory = new Mock<IServiceScopeFactory>();
         scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
 
-        var handler = new ActiveSubscriptionHandler(scopeFactory.Object, new MemoryCache(new MemoryCacheOptions()));
+        var handler = new ActiveSubscriptionHandler(scopeFactory.Object);
         return (handler, db);
     }
 
