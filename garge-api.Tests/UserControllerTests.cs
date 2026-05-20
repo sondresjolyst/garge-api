@@ -5,6 +5,7 @@ using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Auth;
 using garge_api.Models.Push;
+using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
 using garge_api.Services;
 using Microsoft.AspNetCore.Identity;
@@ -30,10 +31,12 @@ public class UserControllerTests : ControllerTestBase
         var hub = new Mock<IHubContext<DeviceHub>>();
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
+        var anonymizer = new AnonymizationService(db, NullLogger<AnonymizationService>.Instance);
+
         var controller = new UserController(
             db, MockUserManager.Object, MockMapper.Object,
             NullLogger<UserController>.Instance,
-            ownership, tracker.Object, hub.Object);
+            ownership, tracker.Object, hub.Object, anonymizer);
         controller.ControllerContext = MakeControllerContext(callerId);
         return controller;
     }
@@ -102,6 +105,38 @@ public class UserControllerTests : ControllerTestBase
 
         Assert.Empty(db.RefreshTokens);
         Assert.Empty(db.PushSubscriptions);
+    }
+
+    [Fact]
+    public async Task DeleteOwnAccount_MovesTelemetryToMlStore_AndLeavesNoOrphans()
+    {
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        db.Sensors.Add(new Sensor { Id = 1, Name = "garge_volt", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" });
+        db.UserSensors.Add(new UserSensor { UserId = user.Id, SensorId = 1, IsOwner = true });
+        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = user.Id, SensorId = 1, StartedAt = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), EndedAt = null });
+        db.SensorData.AddRange(
+            new SensorData { SensorId = 1, Value = "12.5", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new SensorData { SensorId = 1, Value = "12.6", Timestamp = new DateTime(2020, 3, 1, 0, 0, 0, DateTimeKind.Utc) });
+        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Status = "ok", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) });
+        db.SensorPhotos.Add(new SensorPhoto { UserId = user.Id, SensorId = 1, ContentType = "image/jpeg", Data = "AQID" });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
+
+        // Telemetry moved to the anonymized ML store...
+        Assert.Equal(2, db.AnonymizedReadings.Count());
+        Assert.Equal("voltage", db.AnonymizedSeries.Single().SourceType);
+        // ...and no personal telemetry / photos / ownership rows left behind (orphan-bug fix).
+        Assert.Empty(db.SensorData);
+        Assert.Empty(db.BatteryHealthData);
+        Assert.Empty(db.SensorPhotos);
+        Assert.Empty(db.SensorOwnershipPeriods);
+        Assert.Empty(db.UserSensors);
     }
 
     [Fact]
