@@ -23,7 +23,6 @@ namespace garge_api.Controllers
     [Route("api/sensors")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
-    [Authorize(Policy = "ActiveSubscription")]
     public class SensorController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
@@ -527,7 +526,7 @@ namespace garge_api.Controllers
         /// <param name="dto">The registration code DTO.</param>
         /// <returns>Success or error message.</returns>
         [HttpPost("claim")]
-        [Authorize]
+        [Authorize(Policy = "ActiveSubscription")]
         public async Task<IActionResult> ClaimSensor([FromBody] ClaimSensorDto dto)
         {
             _logger.LogInformation("ClaimSensor called by {@LogData}", new { CallerUserId = User.UserId(), RegistrationCode = dto.RegistrationCode });

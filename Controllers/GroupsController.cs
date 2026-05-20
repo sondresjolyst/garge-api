@@ -14,7 +14,6 @@ namespace garge_api.Controllers
     [Route("api/groups")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
-    [Authorize(Policy = "ActiveSubscription")]
     public class GroupsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;

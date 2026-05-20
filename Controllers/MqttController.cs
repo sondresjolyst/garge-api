@@ -17,7 +17,6 @@ namespace garge_api.Controllers
     [Route("api/mqtt")]
     [EnableCors("AllowAllOrigins")]
     [Authorize]
-    [Authorize(Policy = "ActiveSubscription")]
     public class MqttController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
