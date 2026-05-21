@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.8.1](https://github.com/sondresjolyst/garge-api/compare/v2.8.0...v2.8.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* include subscriptionId in Vipps subscription return URL ([#248](https://github.com/sondresjolyst/garge-api/issues/248)) ([1fd82c5](https://github.com/sondresjolyst/garge-api/commit/1fd82c50e0ec3f0c6369ae72f56a20eda6c6c54e))
+* lower password minimum length to 8 ([#242](https://github.com/sondresjolyst/garge-api/issues/242)) ([5a65c0f](https://github.com/sondresjolyst/garge-api/commit/5a65c0ffb136b3a7d51882a5e0f98a2e8e8e8cd7))
+* return JSON body when ActiveSubscriptionRequirement forbids a request ([#243](https://github.com/sondresjolyst/garge-api/issues/243)) ([df91ce6](https://github.com/sondresjolyst/garge-api/commit/df91ce662c1bac8855713eabdb7bf7b10be7455f))
+* rewrite ActiveSubscriptionRequirement around Primary + AddOn capacity ([#244](https://github.com/sondresjolyst/garge-api/issues/244)) ([72021a4](https://github.com/sondresjolyst/garge-api/commit/72021a41282ee774391aad75b73129e630f9df02))
+
 ## [2.8.0](https://github.com/sondresjolyst/garge-api/compare/v2.7.0...v2.8.0) (2026-05-19)
 
 
