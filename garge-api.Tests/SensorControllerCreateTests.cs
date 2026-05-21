@@ -22,10 +22,12 @@ public class SensorControllerCreateTests : ControllerTestBase
         var hub = new Mock<IHubContext<DeviceHub>>();
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
+        var capacity = new SubscriptionCapacityService(db, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+
         var controller = new SensorController(
             db, MockMapper.Object,
             NullLogger<SensorController>.Instance,
-            ownership, hub.Object);
+            ownership, hub.Object, capacity);
         controller.ControllerContext = MakeControllerContext("admin-1", isAdmin: true);
         return controller;
     }

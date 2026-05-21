@@ -36,8 +36,10 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         var hub = new Mock<IHubContext<DeviceHub>>();
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
+        var capacity = new SubscriptionCapacityService(db, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+
         var controller = new SensorController(
-            db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object);
+            db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object, capacity);
         controller.ControllerContext = MakeControllerContext(userId, isAdmin);
         return controller;
     }

@@ -30,15 +30,17 @@ namespace garge_api.Controllers
         private readonly ILogger<SensorController> _logger;
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubContext<DeviceHub> _hub;
+        private readonly ISubscriptionCapacityService _capacity;
         private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
-        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub)
+        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, ISubscriptionCapacityService capacity)
         {
             _context = context;
             _mapper = mapper;
             _logger = logger;
             _ownership = ownership;
             _hub = hub;
+            _capacity = capacity;
         }
 
         private bool IsAdmin()
@@ -74,6 +76,30 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// True when the caller has this owned sensor suspended (turned off / over quota). Suspended
+        /// sensors stay visible in the list but their dashboard/history reads are blocked. Admins are
+        /// never suspended. Export and unclaim/delete must never use this gate (GDPR rights).
+        /// </summary>
+        private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
+        {
+            if (IsAdmin()) return false;
+            var userId = User.UserId();
+            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null);
+        }
+
+        /// <summary>Of the given sensor ids, the subset the caller has suspended (empty for admins).</summary>
+        private async Task<HashSet<int>> CallerSuspendedSensorIdsAsync(IEnumerable<int> sensorIds)
+        {
+            if (IsAdmin()) return new HashSet<int>();
+            var userId = User.UserId();
+            var ids = await _context.UserSensors
+                .Where(us => us.UserId == userId && us.SuspendedAt != null && sensorIds.Contains(us.SensorId))
+                .Select(us => us.SensorId)
+                .ToListAsync();
+            return ids.ToHashSet();
+        }
+
+        /// <summary>
         /// Retrieves all sensors the user has access to.
         /// </summary>
         /// <returns>A list of sensors the user has access to.</returns>
@@ -103,12 +129,15 @@ namespace garge_api.Controllers
                 .Where(x => x.UserId == currentUserId)
                 .ToDictionaryAsync(x => x.SensorId, x => x.CustomName);
 
-            // Map sensors and inject the user-specific custom name
+            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensors.Select(s => s.Id).ToList());
+
+            // Map sensors and inject the user-specific custom name + suspended state
             var dtos = sensors.Select(sensor =>
             {
                 var dto = _mapper.Map<SensorDto>(sensor);
                 if (customNames.TryGetValue(sensor.Id, out var customName))
                     dto.CustomName = customName;
+                dto.Suspended = suspendedIds.Contains(sensor.Id);
                 return dto;
             }).ToList();
 
@@ -154,6 +183,8 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(customName))
                 dto.CustomName = customName;
 
+            dto.Suspended = await IsSensorSuspendedForCallerAsync(id);
+
             _logger.LogInformation("Returning sensor {@LogData}", new { id, CallerUserId = User.UserId() });
             return Ok(dto);
         }
@@ -193,6 +224,9 @@ namespace garge_api.Controllers
                 _logger.LogWarning("GetSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
                 return Forbid();
             }
+
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+                return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
             var query = WithinOwnershipWindow(
                 _context.SensorData.Where(sd => sd.SensorId == sensorId));
@@ -287,8 +321,12 @@ namespace garge_api.Controllers
                 }
             }
 
+            // Suspended sensors stay out of the batch (the caller can't read their data while off).
+            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds);
+            var visibleSensorIds = sensorIds.Where(sid => !suspendedIds.Contains(sid)).ToList();
+
             var query = WithinOwnershipWindow(
-                _context.SensorData.Where(sd => sensorIds.Contains(sd.SensorId)));
+                _context.SensorData.Where(sd => visibleSensorIds.Contains(sd.SensorId)));
 
             DateTime? effectiveStart = null;
             DateTime? effectiveEnd = null;
@@ -315,7 +353,7 @@ namespace garge_api.Controllers
             var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
             if (groupBySpan.HasValue)
             {
-                var grouped = await GetAveragedDataAsync(sensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
+                var grouped = await GetAveragedDataAsync(visibleSensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
                 totalCount = grouped.Count;
                 result = grouped;
             }
@@ -663,6 +701,58 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id });
             return Ok(new { message = "Sensor removed from your account." });
+        }
+
+        /// <summary>Owner turns a sensor off: blocks its data reads and frees a quota slot. Always allowed.</summary>
+        [HttpPost("{id}/suspend")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Suspend (turn off) an owned sensor.")]
+        [SwaggerResponse(200, "Sensor suspended.")]
+        [SwaggerResponse(404, "Sensor not owned by the caller.")]
+        public async Task<IActionResult> SuspendSensor(int id)
+        {
+            var userId = User.UserId();
+            var userSensor = await _context.UserSensors.FirstOrDefaultAsync(us => us.UserId == userId && us.SensorId == id && us.IsOwner);
+            if (userSensor == null)
+                return NotFound(new { message = "You do not own this sensor." });
+
+            if (userSensor.SuspendedAt == null)
+            {
+                userSensor.SuspendedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+                _ownership.InvalidateSensor(id);
+                _logger.LogInformation("Sensor suspended by user {@LogData}", new { CallerUserId = User.UserId(), id });
+            }
+            return Ok(new { message = "Sensor turned off.", suspended = true });
+        }
+
+        /// <summary>Owner turns a sensor back on. Rejected if it would exceed the current plan capacity.</summary>
+        [HttpPost("{id}/activate")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Activate (turn on) an owned sensor.")]
+        [SwaggerResponse(200, "Sensor activated.")]
+        [SwaggerResponse(400, "Activating would exceed the plan limit.")]
+        [SwaggerResponse(404, "Sensor not owned by the caller.")]
+        public async Task<IActionResult> ActivateSensor(int id)
+        {
+            var userId = User.UserId();
+            var userSensor = await _context.UserSensors.FirstOrDefaultAsync(us => us.UserId == userId && us.SensorId == id && us.IsOwner);
+            if (userSensor == null)
+                return NotFound(new { message = "You do not own this sensor." });
+
+            if (userSensor.SuspendedAt != null)
+            {
+                var capacity = await _capacity.GetCapacityAsync(userId!);
+                var activeOwned = await _capacity.GetActiveOwnedSensorCountAsync(userId!);
+                if (activeOwned >= capacity)
+                    return BadRequest(new { message = "Turning this on would exceed your plan. Turn off another sensor or upgrade your subscription." });
+
+                userSensor.SuspendedAt = null;
+                await _context.SaveChangesAsync();
+                _ownership.InvalidateSensor(id);
+                _logger.LogInformation("Sensor activated by user {@LogData}", new { CallerUserId = User.UserId(), id });
+            }
+            return Ok(new { message = "Sensor turned on.", suspended = false });
         }
 
         private static string GenerateDefaultName(string originalName)
@@ -1120,6 +1210,9 @@ namespace garge_api.Controllers
                 _logger.LogWarning("GetLatestSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
                 return Forbid();
             }
+
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+                return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
             var latestData = await WithinOwnershipWindow(
                     _context.SensorData.Where(sd => sd.SensorId == sensorId))

@@ -77,6 +77,14 @@ namespace garge_api.Controllers
                 && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
         }
 
+        /// <summary>True when the caller has this owned sensor suspended (turned off / over quota). Admins are never suspended.</summary>
+        private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
+        {
+            if (IsAdmin()) return false;
+            var userId = User.UserId();
+            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null);
+        }
+
         /// <summary>
         /// Returns the latest battery health record for the voltage sensor identified by name.
         /// </summary>
@@ -101,6 +109,9 @@ namespace garge_api.Controllers
                 _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
                 return Forbid();
             }
+
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+                return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
             var latest = await WithinOwnershipWindow(
                     _context.BatteryHealthData.Where(bh => bh.SensorId == sensor.Id))
@@ -127,6 +138,8 @@ namespace garge_api.Controllers
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null) return NotFound(new { message = "Sensor not found!" });
             if (!await UserCanAccessSensorAsync(sensor.Id)) return Forbid();
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+                return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
             var query = WithinOwnershipWindow(_context.BatteryChargeEvents.Where(e => e.SensorId == sensor.Id));
             if (since.HasValue) query = query.Where(e => e.StartedAt >= since.Value);
