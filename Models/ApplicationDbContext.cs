@@ -57,6 +57,8 @@ namespace garge_api.Models
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
         public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
+        public DbSet<Anonymized.AnonymizedSeries> AnonymizedSeries { get; set; }
+        public DbSet<Anonymized.AnonymizedReading> AnonymizedReadings { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -229,6 +231,15 @@ namespace garge_api.Models
                 .HasOne(p => p.Switch)
                 .WithMany()
                 .HasForeignKey(p => p.SwitchId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Anonymized.AnonymizedReading>()
+                .HasIndex(r => new { r.SeriesId, r.Timestamp });
+
+            modelBuilder.Entity<Anonymized.AnonymizedReading>()
+                .HasOne(r => r.Series)
+                .WithMany()
+                .HasForeignKey(r => r.SeriesId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<UserSwitch>()
