@@ -48,6 +48,35 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
+        // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
+        // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
+        private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
+        {
+            if (IsAdmin()) return query;
+            var userId = User.UserId();
+            return query.Where(bh => _context.SensorOwnershipPeriods.Any(p =>
+                p.UserId == userId && p.SensorId == bh.SensorId
+                && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)));
+        }
+
+        private IQueryable<BatteryChargeEvent> WithinOwnershipWindow(IQueryable<BatteryChargeEvent> query)
+        {
+            if (IsAdmin()) return query;
+            var userId = User.UserId();
+            return query.Where(e => _context.SensorOwnershipPeriods.Any(p =>
+                p.UserId == userId && p.SensorId == e.SensorId
+                && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.StartedAt < p.EndedAt)));
+        }
+
+        private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
+        {
+            if (IsAdmin()) return query;
+            var userId = User.UserId();
+            return query.Where(sd => _context.SensorOwnershipPeriods.Any(p =>
+                p.UserId == userId && p.SensorId == sd.SensorId
+                && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
+        }
+
         /// <summary>
         /// Returns the latest battery health record for the voltage sensor identified by name.
         /// </summary>
@@ -73,8 +102,8 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var latest = await _context.BatteryHealthData
-                .Where(bh => bh.SensorId == sensor.Id)
+            var latest = await WithinOwnershipWindow(
+                    _context.BatteryHealthData.Where(bh => bh.SensorId == sensor.Id))
                 .OrderByDescending(bh => bh.Timestamp)
                 .FirstOrDefaultAsync();
 
@@ -99,7 +128,7 @@ namespace garge_api.Controllers
             if (sensor == null) return NotFound(new { message = "Sensor not found!" });
             if (!await UserCanAccessSensorAsync(sensor.Id)) return Forbid();
 
-            var query = _context.BatteryChargeEvents.Where(e => e.SensorId == sensor.Id);
+            var query = WithinOwnershipWindow(_context.BatteryChargeEvents.Where(e => e.SensorId == sensor.Id));
             if (since.HasValue) query = query.Where(e => e.StartedAt >= since.Value);
             var events = await query.OrderByDescending(e => e.StartedAt).ToListAsync();
             return Ok(_mapper.Map<List<BatteryChargeEventDto>>(events));
@@ -115,8 +144,8 @@ namespace garge_api.Controllers
             if (sensor == null) return NotFound(new { message = "Sensor not found!" });
             if (!await UserCanAccessSensorAsync(sensor.Id)) return Forbid();
 
-            var latest = await _context.SensorData
-                .Where(sd => sd.SensorId == sensor.Id)
+            var latest = await WithinOwnershipWindow(
+                    _context.SensorData.Where(sd => sd.SensorId == sensor.Id))
                 .OrderByDescending(sd => sd.Timestamp)
                 .Select(sd => sd.Value)
                 .FirstOrDefaultAsync();

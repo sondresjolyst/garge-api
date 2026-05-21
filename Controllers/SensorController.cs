@@ -57,6 +57,23 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Restricts a SensorData query to readings that fall inside the caller's own ownership
+        /// period(s), so a new owner of a re-claimed/resold sensor never sees the previous owner's
+        /// history. Admins see everything. The access check (UserCanAccessSensorAsync) still gates
+        /// whether the sensor is visible at all; this bounds the time window of the data returned.
+        /// </summary>
+        private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
+        {
+            if (IsAdmin()) return query;
+            var userId = User.UserId();
+            return query.Where(sd => _context.SensorOwnershipPeriods.Any(p =>
+                p.UserId == userId
+                && p.SensorId == sd.SensorId
+                && sd.Timestamp >= p.StartedAt
+                && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
+        }
+
+        /// <summary>
         /// Retrieves all sensors the user has access to.
         /// </summary>
         /// <returns>A list of sensors the user has access to.</returns>
@@ -177,9 +194,8 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var query = _context.SensorData
-                .Where(sd => sd.SensorId == sensorId)
-                .AsQueryable();
+            var query = WithinOwnershipWindow(
+                _context.SensorData.Where(sd => sd.SensorId == sensorId));
 
             DateTime? effectiveStart = null;
             DateTime? effectiveEnd = null;
@@ -206,7 +222,7 @@ namespace garge_api.Controllers
             var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
             if (groupBySpan.HasValue)
             {
-                var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd);
+                var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
                 totalCount = grouped.Count;
                 result = grouped;
             }
@@ -271,9 +287,8 @@ namespace garge_api.Controllers
                 }
             }
 
-            var query = _context.SensorData
-                .Where(sd => sensorIds.Contains(sd.SensorId))
-                .AsQueryable();
+            var query = WithinOwnershipWindow(
+                _context.SensorData.Where(sd => sensorIds.Contains(sd.SensorId)));
 
             DateTime? effectiveStart = null;
             DateTime? effectiveEnd = null;
@@ -300,7 +315,7 @@ namespace garge_api.Controllers
             var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
             if (groupBySpan.HasValue)
             {
-                var grouped = await GetAveragedDataAsync(sensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd);
+                var grouped = await GetAveragedDataAsync(sensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
                 totalCount = grouped.Count;
                 result = grouped;
             }
@@ -327,7 +342,8 @@ namespace garge_api.Controllers
         }
 
         private async Task<List<SensorDataDto>> GetAveragedDataAsync(
-            IEnumerable<int> sensorIds, long bucketSeconds, DateTime? effectiveStart, DateTime? effectiveEnd)
+            IEnumerable<int> sensorIds, long bucketSeconds, DateTime? effectiveStart, DateTime? effectiveEnd,
+            string? userId, bool isAdmin)
         {
             var effectiveBucket = EnforcedBucketSeconds(bucketSeconds, effectiveStart, effectiveEnd);
 
@@ -340,6 +356,16 @@ namespace garge_api.Controllers
 
             if (effectiveStart.HasValue) { whereClauses.Add("sd.\"Timestamp\" >= @startDate"); parameters.Add(new("startDate", effectiveStart.Value)); }
             if (effectiveEnd.HasValue) { whereClauses.Add("sd.\"Timestamp\" <= @endDate"); parameters.Add(new("endDate", effectiveEnd.Value)); }
+
+            // Bound to the caller's own ownership window(s) — see WithinOwnershipWindow. Admins see all.
+            if (!isAdmin)
+            {
+                whereClauses.Add(@"EXISTS (SELECT 1 FROM ""SensorOwnershipPeriods"" p
+                    WHERE p.""UserId"" = @userId AND p.""SensorId"" = sd.""SensorId""
+                    AND sd.""Timestamp"" >= p.""StartedAt""
+                    AND (p.""EndedAt"" IS NULL OR sd.""Timestamp"" < p.""EndedAt""))");
+                parameters.Add(new("userId", (object?)userId ?? DBNull.Value));
+            }
 
             var sql = $"""
                 SELECT
@@ -557,6 +583,19 @@ namespace garge_api.Controllers
             if (!alreadyClaimed)
             {
                 _context.UserSensors.Add(new UserSensor { UserId = userId!, SensorId = sensor.Id, IsOwner = true });
+
+                // Open an ownership period that bounds which telemetry this user may read. The
+                // first-ever owner starts at the epoch sentinel (sees all history); every later
+                // (resale) owner starts now, so they never see the previous owner's readings.
+                var firstEverOwner = !await _context.SensorOwnershipPeriods.AnyAsync(p => p.SensorId == sensor.Id);
+                _context.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod
+                {
+                    UserId = userId!,
+                    SensorId = sensor.Id,
+                    StartedAt = firstEverOwner ? SensorOwnershipPeriod.FirstOwnerStart : DateTime.UtcNow,
+                    EndedAt = null
+                });
+
                 await _context.SaveChangesAsync();
                 _ownership.InvalidateSensor(sensor.Id);
                 await _hub.Clients.Group(DeviceHub.UserGroup(userId!)).SendAsync("device-created", new { kind = "sensor", id = sensor.Id });
@@ -602,6 +641,14 @@ namespace garge_api.Controllers
             {
                 _context.UserSensors.Remove(userSensor);
                 _ownership.InvalidateSensor(id);
+
+                // Close this user's open ownership period so they no longer read new readings,
+                // and a future owner of the same sensor cannot see this user's history.
+                var openPeriods = await _context.SensorOwnershipPeriods
+                    .Where(p => p.UserId == userId && p.SensorId == id && p.EndedAt == null)
+                    .ToListAsync();
+                foreach (var period in openPeriods)
+                    period.EndedAt = DateTime.UtcNow;
             }
 
             // Remove any custom name the user has set for this sensor
@@ -1074,8 +1121,8 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var latestData = await _context.SensorData
-                .Where(sd => sd.SensorId == sensorId)
+            var latestData = await WithinOwnershipWindow(
+                    _context.SensorData.Where(sd => sd.SensorId == sensorId))
                 .OrderByDescending(sd => sd.Timestamp)
                 .FirstOrDefaultAsync();
 

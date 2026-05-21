@@ -273,8 +273,12 @@ namespace garge_api.Controllers
                 .Select(p => new { p.SensorId, p.ContentType, p.Data, p.CreatedAt })
                 .ToListAsync();
 
+            // Bound to the user's own ownership window(s): they export the data from periods they
+            // owned, not a previous owner's readings on a re-claimed sensor.
             var sensorReadings = await _context.SensorData
-                .Where(sd => sensorIds.Contains(sd.SensorId))
+                .Where(sd => sensorIds.Contains(sd.SensorId)
+                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == sd.SensorId
+                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SensorId, sd.Value, sd.Timestamp })
                 .ToListAsync();
@@ -286,7 +290,9 @@ namespace garge_api.Controllers
                 .ToListAsync();
 
             var batteryHealth = await _context.BatteryHealthData
-                .Where(bh => sensorIds.Contains(bh.SensorId))
+                .Where(bh => sensorIds.Contains(bh.SensorId)
+                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == bh.SensorId
+                        && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)))
                 .OrderBy(bh => bh.Timestamp)
                 .ToListAsync();
 
