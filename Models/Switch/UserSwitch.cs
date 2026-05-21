@@ -11,6 +11,12 @@ namespace garge_api.Models.Switch
         [Required]
         public int SwitchId { get; set; }
 
+        /// <summary>
+        /// When set, the owner has turned this switch off (or it was auto-suspended for being over
+        /// quota). Reads are blocked while suspended, but telemetry keeps flowing. Null = active.
+        /// </summary>
+        public DateTime? SuspendedAt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         [ForeignKey(nameof(UserId))]
