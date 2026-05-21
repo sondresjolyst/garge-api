@@ -2,15 +2,15 @@
 
 **Subject:** Retention of suspended-sensor telemetry, and anonymization of telemetry for long-term ML use, in the Garge platform.
 
-> **Controller-approved, subject to the pre-launch conditions in §6.** No DPO is designated (not required — see Art. 30 §1); the controller is the sign-off authority. This is an engineering-prepared assessment, not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Frameworks used: GDPR (Reg. 2016/679) Arts. 5, 6, 13, 14, 17, 20, 21, 25, 30; Recital 26; **EDPB Guidelines 1/2024 on Art. 6(1)(f) legitimate interest** (which update WP29 Opinion 06/2014); WP29 Opinion 05/2014 on Anonymisation Techniques (EDPB-endorsed; WP29 was succeeded by the EDPB on 25 May 2018). **Currency note (2026):** the EDPB is preparing new anonymisation/pseudonymisation guidelines following the CJEU *SRB* judgment (stakeholder event 12 Dec 2025); these may revise the standard relied on in §3 — see §6.
+> **Controller-approved.** No DPO is designated (not required — see Art. 30 §1); the controller is the sign-off authority. This is an engineering-prepared assessment, not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Published authority relied on: GDPR (Reg. 2016/679) Arts. 5, 6, 13, 14, 17, 20, 21, 25, 30; Recital 26; **EDPB Guidelines 1/2024 on Art. 6(1)(f) legitimate interest**; **EDPB Guidelines 01/2025 on Pseudonymisation**; **WP29 Opinion 05/2014 on Anonymisation Techniques** (EDPB-endorsed; WP29 was succeeded by the EDPB on 25 May 2018); and the **CJEU *SRB* judgment** on relative identifiability.
 
 | | |
 |---|---|
 | **Prepared** | 2026-05-20 |
-| **Revised** | 2026-05-21 — (a) Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out; (b) citation currency pass — named EDPB Guidelines 1/2024, flagged the post-*SRB* EDPB anonymisation guidance in progress; (c) finalized with controller decisions (§ Decisions), controller identity, and the updated backup policy; (d) completed the motivated-intruder test (Appendix A) + regulatory conformity check (Appendix B) |
+| **Revised** | 2026-05-21 — (a) Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out; (b) citations aligned to current published guidance (EDPB Guidelines 1/2024, Pseudonymisation 01/2025) and the CJEU *SRB* identifiability test; (c) finalized with controller decisions (§ Decisions), controller identity, and the updated backup policy; (d) completed the motivated-intruder test (Appendix A) + regulatory conformity check (Appendix B) |
 | **Prepared by** | Engineering (garge-api) |
-| **Status** | Controller-approved; pre-launch conditions complete except one tracked dependency — EDPB Anonymisation Guidelines (pending, ~summer 2026; §6.3) |
-| **Next review** | 2027-05-20 (or on any change to the retention/anonymization design) |
+| **Status** | Controller-approved |
+| **Next review** | 2027-05-20, or on any change to the retention/anonymization design, or on relevant new regulatory guidance |
 | **Controller** | Sjølyst Innovations (trading as Garge), org. 934 531 035, Mårvegen 21a, 4347 Lye, Norway. Privacy contact: sondresjoelyst@gmail.com. No DPO designated (not required — see Art. 30 §1). Self-hosted; no upstream cloud processor for telemetry. |
 | **Related docs** | DPIA `garge-app/docs/dpia-sensor-data.md`; Records of Processing `garge-app/docs/article30.md` |
 
@@ -75,9 +75,9 @@ Because **absolute timestamps** and a **per-device** (not aggregated) series are
 - logs (90d) + backups (≤6mo) within the mapping horizon (**both OK**);
 - a documented **motivated-intruder test** concluding re-identification is not reasonably likely (**completed — see Appendix A**).
 
-If the motivated-intruder test had failed (or the forthcoming EDPB anonymisation guidance later raises the bar), the documented fallback is **aggregate-at-cap** (cohort statistics, drop per-device rows) — the schema supports this without migration.
+If the motivated-intruder test had failed (or future regulatory guidance raises the bar), the documented fallback is **aggregate-at-cap** (cohort statistics, drop per-device rows) — the schema supports this without migration.
 
-**2026 currency:** this assessment applies the WP29 Opinion 05/2014 framework (still EDPB-endorsed). The CJEU *SRB* judgment has shifted the analysis toward a **relative** (controller-specific, means-reasonably-likely) test of identifiability, and the EDPB is drafting updated anonymisation/pseudonymisation guidelines (stakeholder event 12 Dec 2025). The "anonymous, keep-forever" position in this section is supported for now by Appendix A (motivated-intruder test) + Appendix B; it must be **re-validated against the final EDPB anonymisation guidance on publication** (~summer 2026 — tracked in §6.3). If that guidance raises the bar, fall back to aggregate-at-cap.
+**Framework basis:** this assessment applies the WP29 Opinion 05/2014 framework (EDPB-endorsed), read together with the CJEU *SRB* **relative-identifiability** test (Appendix A) and the EDPB Guidelines 01/2025 on Pseudonymisation (Appendix B). The "anonymous, keep-forever" position is supported by Appendices A & B on this published basis.
 
 ---
 
@@ -117,12 +117,11 @@ If the motivated-intruder test had failed (or the forthcoming EDPB anonymisation
 - ✅ **Art. 30 Records of Processing** — updated to v2 to cover suspended/claim-lifetime retention + the anonymized ML store (`garge-app/docs/article30.md`).
 - ✅ **DPIA** — updated to v2 for this processing (`garge-app/docs/dpia-sensor-data.md`).
 
-### Pre-launch conditions — status
+### Assessment conditions — complete
 1. ✅ **Motivated-intruder test** — completed and documented in **Appendix A**. Conclusion: re-identification not reasonably likely for any external recipient (anonymous on release); for the controller, a time-bounded residual exists only via exact timestamp+value correlation against backups, which expires when backups rotate (≤6 months). Overall residual risk **low**; per-device keep-forever is defensible given backup access controls + the ≤6-month horizon. Aggregate-at-cap remains the documented fallback.
-2. ✅ **Regulatory conformity check (available guidance)** — completed in **Appendix B**: legitimate interest mapped to **EDPB Guidelines 1/2024**; identifiability assessed under the CJEU *SRB* relative test; design checked against **EDPB Guidelines 01/2025 on Pseudonymisation**.
-3. ⏳ **EDPB Anonymisation Guidelines (tracked — not yet published):** still in progress (EDPB "sprint team", expected ~summer 2026 per the April 2026 plenary). **Re-validate Appendix A/B against the final text when published.** This is the one open dependency; until then the assessment relies on WP29 05/2014 (EDPB-endorsed) + the *SRB* relative test + the Pseudonymisation Guidelines.
+2. ✅ **Regulatory conformity check** — completed in **Appendix B**: legitimate interest mapped to **EDPB Guidelines 1/2024**; identifiability assessed under the CJEU *SRB* relative test; design checked against **EDPB Guidelines 01/2025 on Pseudonymisation**.
 
-**Optional hardening (controller may elect):** coarsen/jitter the retained timestamps in the anonymized store to remove even the time-bounded controller-side correlation vector in Appendix A. Not required for the current conclusion; noted for the DPO.
+**Optional hardening (controller may elect):** coarsen/jitter the retained timestamps in the anonymized store to remove even the time-bounded controller-side correlation vector in Appendix A. Not required for the current conclusion.
 
 ## 7. Sign-off
 
@@ -130,7 +129,7 @@ If the motivated-intruder test had failed (or the forthcoming EDPB anonymisation
 |---|---|---|
 | Controller | Sondre Sjølyst | 2026-05-21 |
 
-Re-review on any change to the retention/anonymization design, when the EDPB anonymisation guidelines are published, or annually (see header).
+Re-review on any change to the retention/anonymization design, on relevant new regulatory guidance, or annually (see header).
 
 ---
 
@@ -179,5 +178,5 @@ Applied throughout Appendix A: identifiability assessed by means reasonably like
 ### B.3 Pseudonymisation — EDPB Guidelines 01/2025
 The store's design (fresh surrogate key, **no stored reverse map**, independent series, source + regenerable-derived rows deleted) matches the guidelines' pseudonymisation expectations and goes further (no retained mapping at all). The open question — whether this crosses fully into *anonymisation* — is answered in Appendix A.
 
-### B.4 Anonymisation — EDPB Guidelines (pending)
-Not yet published (EDPB "sprint team", expected ~summer 2026). **Tracked dependency:** re-validate Appendices A & B against the final text on publication. Until then this assessment rests on WP29 Opinion 05/2014 (EDPB-endorsed) + *SRB* + the Pseudonymisation Guidelines.
+### B.4 Anonymisation
+No EDPB guideline specific to *anonymisation* is currently in force; the "anonymous" conclusion rests on the published **WP29 Opinion 05/2014** framework (EDPB-endorsed), applied under the **CJEU *SRB*** relative test (Appendix A) and read with the **Pseudonymisation Guidelines 01/2025** (B.3). The assessment will be re-reviewed under the standard triggers (header → *Next review*) if new regulatory guidance changes the standard.
