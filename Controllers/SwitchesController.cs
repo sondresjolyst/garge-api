@@ -1,4 +1,5 @@
 ﻿using garge_api.Dtos.Switch;
+using garge_api.Helpers;
 using garge_api.Hubs;
 using garge_api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -63,18 +64,7 @@ namespace garge_api.Controllers
         /// owner's history. Admins see everything; the access check still gates visibility overall.
         /// </summary>
         private IQueryable<SwitchData> WithinOwnershipWindow(IQueryable<SwitchData> query)
-        {
-            if (IsSwitchAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(sd =>
-                _context.SwitchOwnershipPeriods.Any(p => p.UserId == userId && p.SwitchId == sd.SwitchId
-                    && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
-                || _context.Switches.Any(sw => sw.Id == sd.SwitchId
-                    && _context.DiscoveredDevices.Any(dd => dd.Target == sw.Name
-                        && _context.Sensors.Any(s => s.ParentName == dd.DiscoveredBy
-                            && _context.SensorOwnershipPeriods.Any(p => p.UserId == userId && p.SensorId == s.Id
-                                && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))))));
-        }
+            => query.WithinSwitchOwnership(_context, User.UserId(), IsSwitchAdmin());
 
         /// <summary>
         /// Retrieves all available switches.

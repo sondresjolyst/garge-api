@@ -51,31 +51,13 @@ namespace garge_api.Controllers
         // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
         // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
         private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
-        {
-            if (IsAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(bh => _context.SensorOwnershipPeriods.Any(p =>
-                p.UserId == userId && p.SensorId == bh.SensorId
-                && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)));
-        }
+            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         private IQueryable<BatteryChargeEvent> WithinOwnershipWindow(IQueryable<BatteryChargeEvent> query)
-        {
-            if (IsAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(e => _context.SensorOwnershipPeriods.Any(p =>
-                p.UserId == userId && p.SensorId == e.SensorId
-                && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.StartedAt < p.EndedAt)));
-        }
+            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
-        {
-            if (IsAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(sd => _context.SensorOwnershipPeriods.Any(p =>
-                p.UserId == userId && p.SensorId == sd.SensorId
-                && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
-        }
+            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         /// <summary>True when the caller has this owned sensor suspended (turned off / over quota). Admins are never suspended.</summary>
         private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)

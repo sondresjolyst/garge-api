@@ -298,35 +298,25 @@ namespace garge_api.Controllers
                 .ToListAsync();
 
             // Bound to the user's own ownership window(s): they export the data from periods they
-            // owned, not a previous owner's readings on a re-claimed sensor.
+            // owned, not a previous owner's readings on a re-claimed device. Same boundary as the read
+            // endpoints — see OwnershipWindowQueryExtensions.
             var sensorReadings = await _context.SensorData
-                .Where(sd => sensorIds.Contains(sd.SensorId)
-                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == sd.SensorId
-                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))
+                .Where(sd => sensorIds.Contains(sd.SensorId))
+                .WithinSensorOwnership(_context, id)
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SensorId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
-            // Bound to the user's own switch ownership window(s): a direct ownership period, or — for
-            // indirect access via the discovered-device chain — the period of an owned sensor that
-            // maps to the switch. They export the data from windows they owned, not a previous owner's.
             var switchHistory = await _context.SwitchData
-                .Where(sd => switchIds.Contains(sd.SwitchId)
-                    && (_context.SwitchOwnershipPeriods.Any(p => p.UserId == id && p.SwitchId == sd.SwitchId
-                            && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
-                        || _context.Switches.Any(sw => sw.Id == sd.SwitchId
-                            && _context.DiscoveredDevices.Any(dd => dd.Target == sw.Name
-                                && _context.Sensors.Any(s => s.ParentName == dd.DiscoveredBy
-                                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == s.Id
-                                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))))))
+                .Where(sd => switchIds.Contains(sd.SwitchId))
+                .WithinSwitchOwnership(_context, id)
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SwitchId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
             var batteryHealth = await _context.BatteryHealthData
-                .Where(bh => sensorIds.Contains(bh.SensorId)
-                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == bh.SensorId
-                        && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)))
+                .Where(bh => sensorIds.Contains(bh.SensorId))
+                .WithinSensorOwnership(_context, id)
                 .OrderBy(bh => bh.Timestamp)
                 .ToListAsync();
 

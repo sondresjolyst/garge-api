@@ -1,6 +1,7 @@
 using garge_api.Constants;
 using garge_api.Controllers.Common;
 using garge_api.Dtos.Common;
+using garge_api.Helpers;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
@@ -65,15 +66,7 @@ namespace garge_api.Controllers
         /// whether the sensor is visible at all; this bounds the time window of the data returned.
         /// </summary>
         private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
-        {
-            if (IsAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(sd => _context.SensorOwnershipPeriods.Any(p =>
-                p.UserId == userId
-                && p.SensorId == sd.SensorId
-                && sd.Timestamp >= p.StartedAt
-                && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
-        }
+            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         /// <summary>
         /// True when the caller has this owned sensor suspended (turned off / over quota). Suspended
