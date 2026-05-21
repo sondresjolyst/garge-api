@@ -4,10 +4,13 @@ using Microsoft.EntityFrameworkCore;
 namespace garge_api.Services
 {
     /// <summary>
-    /// Enforces the retention cap on suspended sensors. A sensor an owner has kept suspended for more
-    /// than 6 months is force-unclaimed and its telemetry is moved into the anonymized ML store (or
-    /// deleted if nothing is exclusive). This is the storage-limitation safeguard required by the GDPR
-    /// review: personal data is not kept indefinitely just because the owner left a device off.
+    /// Enforces the retention cap on suspended sensors of users who have opted out of long-term
+    /// retention. By default Garge keeps a claimed sensor's history for the lifetime of the claim
+    /// (legitimate interest, disclosed in the privacy policy) so a returning seasonal subscriber keeps
+    /// their year-over-year data. A user can object (GDPR Art. 21) via the data-retention opt-out; once
+    /// such a user has no subscription coverage, a sensor they have kept suspended for more than
+    /// 6 months is force-unclaimed and its telemetry is moved into the anonymized ML store (or deleted
+    /// if nothing is exclusive). Paying users are never purged here.
     /// </summary>
     public class SuspendedSensorPurgeService : BackgroundService
     {
@@ -33,7 +36,8 @@ namespace garge_api.Services
                     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                     var anonymizer = scope.ServiceProvider.GetRequiredService<IAnonymizationService>();
                     var ownership = scope.ServiceProvider.GetRequiredService<IDeviceOwnershipService>();
-                    var purged = await PurgeExpiredAsync(db, anonymizer, ownership, Retention, stoppingToken);
+                    var capacity = scope.ServiceProvider.GetRequiredService<ISubscriptionCapacityService>();
+                    var purged = await PurgeExpiredAsync(db, anonymizer, ownership, capacity, Retention, stoppingToken);
                     if (purged > 0)
                         _logger.LogInformation("Purged {Count} sensors suspended beyond the {Days}-day cap", purged, Retention.TotalDays);
                 }
@@ -48,26 +52,43 @@ namespace garge_api.Services
         }
 
         /// <summary>
-        /// For every owned sensor suspended longer than <paramref name="retention"/>: anonymize the
-        /// owner's exclusive telemetry and force-unclaim the sensor (removing their ownership and
-        /// personal rows for it). Returns the number of sensors purged.
+        /// For every owned sensor suspended longer than <paramref name="retention"/> whose owner has
+        /// opted out of retention AND no longer has subscription coverage: anonymize the owner's
+        /// exclusive telemetry and force-unclaim the sensor (removing their ownership and personal rows
+        /// for it). Sensors of users who have not opted out, or who still have an active/grace
+        /// subscription, are left untouched. Returns the number of sensors purged.
         /// </summary>
         internal static async Task<int> PurgeExpiredAsync(
             ApplicationDbContext db,
             IAnonymizationService anonymizer,
             IDeviceOwnershipService ownership,
+            ISubscriptionCapacityService capacity,
             TimeSpan retention,
             CancellationToken ct = default)
         {
             var cutoff = DateTime.UtcNow - retention;
+            // Only users who have actively objected to retention (Art. 21 opt-out) are in scope; the
+            // default is to keep history for the lifetime of the claim under legitimate interest.
             var expired = await db.UserSensors
-                .Where(us => us.IsOwner && us.SuspendedAt != null && us.SuspendedAt < cutoff)
+                .Where(us => us.IsOwner && us.SuspendedAt != null && us.SuspendedAt < cutoff
+                          && db.Users.Any(u => u.Id == us.UserId && u.DataRetentionOptOutAt != null))
                 .Select(us => new { us.UserId, us.SensorId })
                 .ToListAsync(ct);
 
+            var coverageCache = new Dictionary<string, bool>();
             var purged = 0;
             foreach (var item in expired)
             {
+                // A paying user (active or paid-period grace) keeps their data even if opted out — the
+                // opt-out only takes effect once there is no subscription left to honour.
+                if (!coverageCache.TryGetValue(item.UserId, out var hasCoverage))
+                {
+                    hasCoverage = await capacity.GetCapacityAsync(item.UserId, ct) > 0;
+                    coverageCache[item.UserId] = hasCoverage;
+                }
+                if (hasCoverage)
+                    continue;
+
                 // Move this owner's exclusive telemetry to the ML store and delete its period(s).
                 var periodIds = await db.SensorOwnershipPeriods
                     .Where(p => p.UserId == item.UserId && p.SensorId == item.SensorId)

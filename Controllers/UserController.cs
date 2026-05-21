@@ -553,5 +553,67 @@ namespace garge_api.Controllers
             _logger.LogInformation("Profile updated for user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
         }
+
+        /// <summary>
+        /// Gets the caller's sensor-data retention preference.
+        /// </summary>
+        [HttpGet("{id}/data-retention")]
+        [SwaggerOperation(Summary = "Gets the caller's sensor-data retention opt-out state.")]
+        [SwaggerResponse(200, "Retention preference.", typeof(DataRetentionDto))]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> GetDataRetention(string id)
+        {
+            if (!User.IsCallerOf(id)) return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            return Ok(new DataRetentionDto
+            {
+                OptOut = user.DataRetentionOptOutAt != null,
+                OptedOutAt = user.DataRetentionOptOutAt
+            });
+        }
+
+        /// <summary>
+        /// Sets or clears the caller's sensor-data retention opt-out (GDPR Art. 21 objection). When
+        /// opted out, suspended sensors are purged after the 6-month cap once the user has no
+        /// subscription coverage; the default keeps history for the lifetime of the claim.
+        /// </summary>
+        [HttpPut("{id}/data-retention")]
+        [SwaggerOperation(Summary = "Sets or clears the caller's sensor-data retention opt-out.")]
+        [SwaggerResponse(200, "Updated retention preference.", typeof(DataRetentionDto))]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> UpdateDataRetention(string id, [FromBody] UpdateDataRetentionDto dto)
+        {
+            if (!User.IsCallerOf(id)) return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            // Idempotent: only stamp when the state actually changes so the original opt-out time is kept.
+            if (dto.OptOut && user.DataRetentionOptOutAt == null)
+                user.DataRetentionOptOutAt = DateTime.UtcNow;
+            else if (!dto.OptOut)
+                user.DataRetentionOptOutAt = null;
+
+            var result = await _userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("UpdateDataRetention failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
+                return BadRequest(result.Errors);
+            }
+
+            _logger.LogInformation("Data-retention opt-out set to {OptOut} for user {UserId}", dto.OptOut, LogSanitizer.Sanitize(id));
+            return Ok(new DataRetentionDto
+            {
+                OptOut = user.DataRetentionOptOutAt != null,
+                OptedOutAt = user.DataRetentionOptOutAt
+            });
+        }
     }
 }
