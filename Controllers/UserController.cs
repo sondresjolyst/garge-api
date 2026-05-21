@@ -32,6 +32,7 @@ namespace garge_api.Controllers
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubConnectionTracker _hubConnections;
         private readonly IHubContext<DeviceHub> _hub;
+        private readonly IAnonymizationService _anonymizer;
 
         public UserController(
             ApplicationDbContext context,
@@ -40,7 +41,8 @@ namespace garge_api.Controllers
             ILogger<UserController> logger,
             IDeviceOwnershipService ownership,
             IHubConnectionTracker hubConnections,
-            IHubContext<DeviceHub> hub)
+            IHubContext<DeviceHub> hub,
+            IAnonymizationService anonymizer)
         {
             _context = context;
             _userManager = userManager;
@@ -49,6 +51,7 @@ namespace garge_api.Controllers
             _ownership = ownership;
             _hubConnections = hubConnections;
             _hub = hub;
+            _anonymizer = anonymizer;
         }
 
         /// <summary>
@@ -115,6 +118,7 @@ namespace garge_api.Controllers
             // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
             // a valid FK for the 5-year retention window required by the Norwegian
             // Bookkeeping Act (bokføringsloven §13).
+            await AnonymizeUserTelemetryAsync(id);
             ClearUserOwnedRows(id);
             await ScrubUserPiiAsync(user);
 
@@ -149,6 +153,7 @@ namespace garge_api.Controllers
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
+            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId));
             _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
             _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
             _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
@@ -156,6 +161,25 @@ namespace garge_api.Controllers
 
             foreach (var sid in sensorIds) _ownership.InvalidateSensor(sid);
             foreach (var sid in switchIds) _ownership.InvalidateSwitch(sid);
+        }
+
+        /// <summary>
+        /// Moves the user's exclusive telemetry into the anonymized ML store before their ownership
+        /// rows are removed. This is the GDPR-erasure path: the readings leave personal scope (no link
+        /// back to the user/device) while co-owned ranges are preserved for the other owner. Each call
+        /// consumes (deletes) the ownership period it processes. Run before <see cref="ClearUserOwnedRows"/>.
+        /// </summary>
+        private async Task AnonymizeUserTelemetryAsync(string userId)
+        {
+            var sensorPeriodIds = await _context.SensorOwnershipPeriods
+                .Where(p => p.UserId == userId).Select(p => p.Id).ToListAsync();
+            foreach (var periodId in sensorPeriodIds)
+                await _anonymizer.AnonymizeSensorPeriodAsync(periodId);
+
+            var switchPeriodIds = await _context.SwitchOwnershipPeriods
+                .Where(p => p.UserId == userId).Select(p => p.Id).ToListAsync();
+            foreach (var periodId in switchPeriodIds)
+                await _anonymizer.AnonymizeSwitchPeriodAsync(periodId);
         }
 
         /// <summary>
