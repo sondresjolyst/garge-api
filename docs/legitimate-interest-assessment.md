@@ -2,12 +2,12 @@
 
 **Subject:** Retention of suspended-sensor telemetry, and anonymization of telemetry for long-term ML use, in the Garge platform.
 
-> **DRAFT — requires DPO / legal counsel sign-off before launch.** This is an engineering-prepared assessment to support that review; it is not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Frameworks used: GDPR Arts. 5, 6, 13, 14, 17, 25, 30; Recital 26; WP29 Opinion 05/2014 on Anonymisation Techniques; EDPB guidance on legitimate interest.
+> **DRAFT — requires DPO / legal counsel sign-off before launch.** This is an engineering-prepared assessment to support that review; it is not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Frameworks used: GDPR (Reg. 2016/679) Arts. 5, 6, 13, 14, 17, 20, 21, 25, 30; Recital 26; **EDPB Guidelines 1/2024 on Art. 6(1)(f) legitimate interest** (which update WP29 Opinion 06/2014); WP29 Opinion 05/2014 on Anonymisation Techniques (EDPB-endorsed; WP29 was succeeded by the EDPB on 25 May 2018). **Currency note (2026):** the EDPB is preparing new anonymisation/pseudonymisation guidelines following the CJEU *SRB* judgment (stakeholder event 12 Dec 2025); these may revise the standard relied on in §3 — see §6.
 
 | | |
 |---|---|
 | **Prepared** | 2026-05-20 |
-| **Revised** | 2026-05-21 — Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out |
+| **Revised** | 2026-05-21 — (a) Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out; (b) citation currency pass — named EDPB Guidelines 1/2024, flagged the post-*SRB* EDPB anonymisation guidance in progress |
 | **Prepared by** | Engineering (garge-api) |
 | **Status** | Draft — pending DPO sign-off |
 | **Next review** | 2027-05-20 (or on any change to the retention/anonymization design) |
@@ -70,6 +70,8 @@ Because **absolute timestamps** and a **per-device** (not aggregated) series are
 
 If the DPO judges residual singling-out risk too high, fall back to **aggregate-at-cap** (cohort statistics, drop per-device rows) — the schema supports this without migration.
 
+**2026 currency:** this assessment applies the WP29 Opinion 05/2014 framework (still EDPB-endorsed). The CJEU *SRB* judgment has shifted the analysis toward a **relative** (controller-specific, means-reasonably-likely) test of identifiability, and the EDPB is drafting updated anonymisation/pseudonymisation guidelines (stakeholder event 12 Dec 2025). The "anonymous, keep-forever" position in this section must be re-checked against that final guidance before launch — it may raise the bar for treating the per-device series as anonymous (favouring the aggregate-at-cap fallback).
+
 ---
 
 ## 4. Retention schedule
@@ -105,3 +107,4 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 5. Confirm whether **active-sensor** default retention ("until unclaim") needs an Art. 25 ceiling.
 6. Confirm the **opt-out is the correct mechanism** (right to object under Art. 21) rather than consent, given retention is default-on and disclosed in the privacy policy.
 7. Update the **Art. 30 Records of Processing** to include "suspended-telemetry retention", "claim-lifetime retention with opt-out", and "anonymization for ML" as activities.
+8. **Track forthcoming EDPB anonymisation/pseudonymisation guidelines** (post-*SRB*, stakeholder event 12 Dec 2025) and re-validate the Activity B "anonymous" claim against the final text; check the legitimate-interest analysis against **EDPB Guidelines 1/2024** as adopted.
