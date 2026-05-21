@@ -2,16 +2,23 @@
 
 **Subject:** Retention of suspended-sensor telemetry, and anonymization of telemetry for long-term ML use, in the Garge platform.
 
-> **DRAFT — requires DPO / legal counsel sign-off before launch.** This is an engineering-prepared assessment to support that review; it is not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Frameworks used: GDPR (Reg. 2016/679) Arts. 5, 6, 13, 14, 17, 20, 21, 25, 30; Recital 26; **EDPB Guidelines 1/2024 on Art. 6(1)(f) legitimate interest** (which update WP29 Opinion 06/2014); WP29 Opinion 05/2014 on Anonymisation Techniques (EDPB-endorsed; WP29 was succeeded by the EDPB on 25 May 2018). **Currency note (2026):** the EDPB is preparing new anonymisation/pseudonymisation guidelines following the CJEU *SRB* judgment (stakeholder event 12 Dec 2025); these may revise the standard relied on in §3 — see §6.
+> **Controller-approved, subject to the pre-launch conditions in §6.** No DPO is designated (not required — see Art. 30 §1); the controller is the sign-off authority. This is an engineering-prepared assessment, not legal advice. Garge is operated for users in Norway / the EEA; the relevant supervisory authority is **Datatilsynet**. Frameworks used: GDPR (Reg. 2016/679) Arts. 5, 6, 13, 14, 17, 20, 21, 25, 30; Recital 26; **EDPB Guidelines 1/2024 on Art. 6(1)(f) legitimate interest** (which update WP29 Opinion 06/2014); WP29 Opinion 05/2014 on Anonymisation Techniques (EDPB-endorsed; WP29 was succeeded by the EDPB on 25 May 2018). **Currency note (2026):** the EDPB is preparing new anonymisation/pseudonymisation guidelines following the CJEU *SRB* judgment (stakeholder event 12 Dec 2025); these may revise the standard relied on in §3 — see §6.
 
 | | |
 |---|---|
 | **Prepared** | 2026-05-20 |
-| **Revised** | 2026-05-21 — (a) Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out; (b) citation currency pass — named EDPB Guidelines 1/2024, flagged the post-*SRB* EDPB anonymisation guidance in progress |
+| **Revised** | 2026-05-21 — (a) Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out; (b) citation currency pass — named EDPB Guidelines 1/2024, flagged the post-*SRB* EDPB anonymisation guidance in progress; (c) finalized with controller decisions (§ Decisions), controller identity, and the updated backup policy |
 | **Prepared by** | Engineering (garge-api) |
-| **Status** | Draft — pending DPO sign-off |
+| **Status** | Controller-approved; pre-launch conditions in §6 outstanding |
 | **Next review** | 2027-05-20 (or on any change to the retention/anonymization design) |
-| **Controller** | Garge (self-hosted; no upstream cloud processor for telemetry) |
+| **Controller** | Sjølyst Innovations (trading as Garge), org. 934 531 035, Mårvegen 21a, 4347 Lye, Norway. Privacy contact: sondresjoelyst@gmail.com. No DPO designated (not required — see Art. 30 §1). Self-hosted; no upstream cloud processor for telemetry. |
+| **Related docs** | DPIA `garge-app/docs/dpia-sensor-data.md`; Records of Processing `garge-app/docs/article30.md` |
+
+### Decisions (controller, 2026-05-21)
+- **Activity B anonymisation:** keep **per-device series, indefinitely** (max ML utility). This makes the §3.5 motivated-intruder test and the post-*SRB* guidance re-check **required pre-launch conditions**, not optional.
+- **Claim-lifetime retention:** **no dormancy ceiling** — data is kept for as long as the user owns the device; the Art. 21 opt-out is the only off-switch.
+- **Active-device telemetry:** **no Art. 25 time cap** — retained until unclaim / account deletion (matches the live dashboard/history product expectation).
+- **DPIA:** existing DPIA updated to v2 to cover this processing (see Related docs).
 
 ---
 
@@ -59,16 +66,16 @@ No profiling or inference about individuals is performed on the anonymized set; 
 
 ### 3.4 Out-of-database vectors (must be controlled — see §5)
 - **Application logs** pair `CallerUserId + SensorId + RegistrationCode` (claim/unclaim). These reconstruct the mapping if retained past the analytics horizon → **log retention must be ≤ 6 months** (current policy: 90 days — compliant).
-- **Database backups** taken before anonymization still contain the mapping → backup retention must be bounded and restores must re-run anonymization. (Current backup policy retains a yearly snapshot up to 12 months — **flagged for DPO**: this exceeds the 6-month mapping horizon; either shorten, or document that restored backups are re-anonymized.)
+- **Database backups** taken before anonymization still contain the mapping → backup retention must be bounded. Backup policy is **3 daily / 4 weekly / 6 monthly (no yearly)** → maximum residual age ≈ **6 months**, which sits within the mapping horizon. **Resolved** (the earlier 12-month yearly-snapshot concern no longer applies); a disaster restore re-applies the anonymization sweeps on next run.
 
 ### 3.5 Residual risk & required controls
 Because **absolute timestamps** and a **per-device** (not aggregated) series are retained for ML utility, the data is best characterised as **strongly pseudonymized trending toward anonymous**, not trivially anonymous. To defend the "anonymous, keep-forever" position, the following must hold and be documented:
 - fresh surrogate key, no reverse map (**implemented**);
 - independent series, no cross-linking (**implemented**);
-- logs + backups within the mapping horizon (**logs OK; backups flagged**);
-- a documented **motivated-intruder test** concluding re-identification is not reasonably likely (**DPO to confirm**).
+- logs (90d) + backups (≤6mo) within the mapping horizon (**both OK**);
+- a documented **motivated-intruder test** concluding re-identification is not reasonably likely (**REQUIRED pre-launch** — the controller chose per-device keep-forever; see Decisions).
 
-If the DPO judges residual singling-out risk too high, fall back to **aggregate-at-cap** (cohort statistics, drop per-device rows) — the schema supports this without migration.
+If the motivated-intruder test fails (or the forthcoming EDPB guidance raises the bar), the documented fallback is **aggregate-at-cap** (cohort statistics, drop per-device rows) — the schema supports this without migration.
 
 **2026 currency:** this assessment applies the WP29 Opinion 05/2014 framework (still EDPB-endorsed). The CJEU *SRB* judgment has shifted the analysis toward a **relative** (controller-specific, means-reasonably-likely) test of identifiability, and the EDPB is drafting updated anonymisation/pseudonymisation guidelines (stakeholder event 12 Dec 2025). The "anonymous, keep-forever" position in this section must be re-checked against that final guidance before launch — it may raise the bar for treating the per-device series as anonymous (favouring the aggregate-at-cap fallback).
 
@@ -84,7 +91,7 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 | Anonymized telemetry (ML store) | Anonymized | Indefinite | Out of scope (anonymous) — *contingent on §3* |
 | Derived battery health/charge events | — | Regenerated from raw voltage; not separately retained in ML store | — |
 | Application logs | — | 90 days | Legitimate interest |
-| Database backups | — | up to 12 months (yearly snapshot) | **flagged §3.4** |
+| Database backups | — | ≤ ~6 months (3 daily / 4 weekly / 6 monthly; no yearly) | Legitimate interest |
 
 ---
 
@@ -99,12 +106,25 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 - **Erasure** — account deletion anonymizes the user's exclusive telemetry and removes all per-user rows (incl. photos; orphan bug fixed).
 - **Transparency** — privacy policy retention clause + legal-basis section updated; just-in-time notice in cancel/downgrade flows.
 
-## 6. Outstanding actions for DPO / counsel
-1. **Sign off** the legitimate-interest basis (A) and the anonymization claim (B), or direct the fallback to aggregate-at-cap.
-2. **Weigh the claim-lifetime default (§2.3):** confirm that *claim-bounded retention + Art. 21 opt-out + export/delete* is sufficient to keep the balance, now that retention defaults to the lifetime of the claim rather than a fixed 6-month cap. If not, set a maximum dormancy ceiling (e.g. anonymize after N years of no active subscription even without opt-out).
-3. **Backup retention (§3.4):** reconcile the 12-month yearly snapshot with the anonymization (mapping) horizon (shorten, or document re-anonymization on restore).
-4. **Motivated-intruder test (§3.5):** confirm residual singling-out risk is acceptable given absolute timestamps + per-device series.
-5. Confirm whether **active-sensor** default retention ("until unclaim") needs an Art. 25 ceiling.
-6. Confirm the **opt-out is the correct mechanism** (right to object under Art. 21) rather than consent, given retention is default-on and disclosed in the privacy policy.
-7. Update the **Art. 30 Records of Processing** to include "suspended-telemetry retention", "claim-lifetime retention with opt-out", and "anonymization for ML" as activities.
-8. **Track forthcoming EDPB anonymisation/pseudonymisation guidelines** (post-*SRB*, stakeholder event 12 Dec 2025) and re-validate the Activity B "anonymous" claim against the final text; check the legitimate-interest analysis against **EDPB Guidelines 1/2024** as adopted.
+## 6. Status of actions
+
+### Decided / resolved
+- ✅ **Legitimate-interest basis (A)** — approved; balancing rests on claim-bounded retention + Art. 21 opt-out + export/delete (§2.3).
+- ✅ **Claim-lifetime default** — no dormancy ceiling (controller decision); opt-out is the off-switch.
+- ✅ **Active-sensor retention** — no Art. 25 time cap (controller decision); kept until unclaim/deletion.
+- ✅ **Opt-out vs consent** — confirmed legitimate interest + Art. 21 objection (default-on, disclosed), not consent.
+- ✅ **Backup retention (§3.4)** — resolved: 3 daily / 4 weekly / 6 monthly (no yearly) ≈ ≤6 months, within the mapping horizon.
+- ✅ **Art. 30 Records of Processing** — updated to v2 to cover suspended/claim-lifetime retention + the anonymized ML store (`garge-app/docs/article30.md`).
+- ✅ **DPIA** — updated to v2 for this processing (`garge-app/docs/dpia-sensor-data.md`).
+
+### Required pre-launch conditions (gate go-live)
+1. **Motivated-intruder test (§3.5):** because per-device series are kept indefinitely with absolute timestamps, run and document a motivated-intruder test concluding re-identification is not reasonably likely. If it fails → switch to the **aggregate-at-cap** fallback.
+2. **EDPB anonymisation guidance (§3 currency note):** re-validate the Activity B "anonymous" claim against the forthcoming post-*SRB* EDPB anonymisation/pseudonymisation guidelines, and the LI analysis against **EDPB Guidelines 1/2024** as adopted.
+
+## 7. Sign-off
+
+| Role | Name | Date |
+|---|---|---|
+| Controller | Sondre Sjølyst | 2026-05-21 |
+
+Re-review on any change to the retention/anonymization design, when the EDPB anonymisation guidelines are published, or annually (see header).
