@@ -43,6 +43,7 @@ namespace garge_api.Models
         public DbSet<UserSensor> UserSensors { get; set; }
         public DbSet<SensorOwnershipPeriod> SensorOwnershipPeriods { get; set; }
         public DbSet<UserSwitch> UserSwitches { get; set; }
+        public DbSet<SwitchOwnershipPeriod> SwitchOwnershipPeriods { get; set; }
         public DbSet<StoredElectricityPrice> StoredElectricityPrices { get; set; }
         public DbSet<SensorPhoto> SensorPhotos { get; set; }
         public DbSet<PushSubscription> PushSubscriptions { get; set; }
@@ -211,6 +212,24 @@ namespace garge_api.Models
 
             modelBuilder.Entity<UserSwitch>()
                 .HasKey(x => new { x.UserId, x.SwitchId });
+
+            modelBuilder.Entity<SwitchOwnershipPeriod>()
+                .HasIndex(p => new { p.UserId, p.SwitchId });
+
+            modelBuilder.Entity<SwitchOwnershipPeriod>()
+                .HasIndex(p => new { p.SwitchId, p.StartedAt });
+
+            modelBuilder.Entity<SwitchOwnershipPeriod>()
+                .HasOne(p => p.User)
+                .WithMany()
+                .HasForeignKey(p => p.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SwitchOwnershipPeriod>()
+                .HasOne(p => p.Switch)
+                .WithMany()
+                .HasForeignKey(p => p.SwitchId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<UserSwitch>()
                 .HasOne(x => x.User)

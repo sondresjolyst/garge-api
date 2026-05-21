@@ -283,8 +283,18 @@ namespace garge_api.Controllers
                 .Select(sd => new { sd.SensorId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
+            // Bound to the user's own switch ownership window(s): a direct ownership period, or — for
+            // indirect access via the discovered-device chain — the period of an owned sensor that
+            // maps to the switch. They export the data from windows they owned, not a previous owner's.
             var switchHistory = await _context.SwitchData
-                .Where(sd => switchIds.Contains(sd.SwitchId))
+                .Where(sd => switchIds.Contains(sd.SwitchId)
+                    && (_context.SwitchOwnershipPeriods.Any(p => p.UserId == id && p.SwitchId == sd.SwitchId
+                            && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
+                        || _context.Switches.Any(sw => sw.Id == sd.SwitchId
+                            && _context.DiscoveredDevices.Any(dd => dd.Target == sw.Name
+                                && _context.Sensors.Any(s => s.ParentName == dd.DiscoveredBy
+                                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == s.Id
+                                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))))))
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SwitchId, sd.Value, sd.Timestamp })
                 .ToListAsync();

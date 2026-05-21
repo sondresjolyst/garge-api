@@ -56,6 +56,27 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Bounds switch telemetry to the caller's own ownership window(s): a direct ownership period
+        /// OR — for indirect access via the discovered-device chain — the period of an owned sensor
+        /// that maps to this switch (switch name -> DiscoveredDevice.Target, DiscoveredBy ->
+        /// Sensor.ParentName). A new owner of a re-claimed/resold switch never sees the previous
+        /// owner's history. Admins see everything; the access check still gates visibility overall.
+        /// </summary>
+        private IQueryable<SwitchData> WithinOwnershipWindow(IQueryable<SwitchData> query)
+        {
+            if (IsSwitchAdmin()) return query;
+            var userId = User.UserId();
+            return query.Where(sd =>
+                _context.SwitchOwnershipPeriods.Any(p => p.UserId == userId && p.SwitchId == sd.SwitchId
+                    && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
+                || _context.Switches.Any(sw => sw.Id == sd.SwitchId
+                    && _context.DiscoveredDevices.Any(dd => dd.Target == sw.Name
+                        && _context.Sensors.Any(s => s.ParentName == dd.DiscoveredBy
+                            && _context.SensorOwnershipPeriods.Any(p => p.UserId == userId && p.SensorId == s.Id
+                                && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))))));
+        }
+
+        /// <summary>
         /// Retrieves all available switches.
         /// </summary>
         [HttpGet]
@@ -271,9 +292,8 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var query = _context.SwitchData
-                .Where(sd => sd.SwitchId == switchId)
-                .AsQueryable();
+            var query = WithinOwnershipWindow(
+                _context.SwitchData.Where(sd => sd.SwitchId == switchId));
 
             if (!string.IsNullOrEmpty(timeRange))
             {
@@ -322,8 +342,8 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var query = await _context.SwitchData
-                .Where(sd => sd.SwitchId == switchId)
+            var query = await WithinOwnershipWindow(
+                    _context.SwitchData.Where(sd => sd.SwitchId == switchId))
                 .OrderByDescending(sd => sd.Timestamp)
                 .FirstOrDefaultAsync();
 
@@ -414,9 +434,8 @@ namespace garge_api.Controllers
                 }
             }
 
-            var query = _context.SwitchData
-                .Where(sd => switchIds.Contains(sd.SwitchId))
-                .AsQueryable();
+            var query = WithinOwnershipWindow(
+                _context.SwitchData.Where(sd => switchIds.Contains(sd.SwitchId)));
 
             if (!string.IsNullOrEmpty(timeRange))
             {
@@ -679,6 +698,19 @@ namespace garge_api.Controllers
             if (!alreadyClaimed)
             {
                 _context.UserSwitches.Add(new UserSwitch { UserId = userId!, SwitchId = switchEntity.Id });
+
+                // Open a direct ownership period that bounds which telemetry this user may read. The
+                // first-ever owner starts at the epoch sentinel (sees all history); every later
+                // (resale) owner starts now, so they never see the previous owner's readings.
+                var firstEverOwner = !await _context.SwitchOwnershipPeriods.AnyAsync(p => p.SwitchId == switchEntity.Id);
+                _context.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod
+                {
+                    UserId = userId!,
+                    SwitchId = switchEntity.Id,
+                    StartedAt = firstEverOwner ? SwitchOwnershipPeriod.FirstOwnerStart : DateTime.UtcNow,
+                    EndedAt = null
+                });
+
                 await _context.SaveChangesAsync();
                 _ownership.InvalidateSwitch(switchEntity.Id);
                 await _hub.Clients.Group(DeviceHub.UserGroup(userId!)).SendAsync("device-created", new { kind = "switch", id = switchEntity.Id });
@@ -701,6 +733,15 @@ namespace garge_api.Controllers
             if (userSwitch != null)
             {
                 _context.UserSwitches.Remove(userSwitch);
+
+                // Close this user's open direct ownership period so a future owner of the same switch
+                // cannot see this user's history.
+                var openPeriods = await _context.SwitchOwnershipPeriods
+                    .Where(p => p.UserId == userId && p.SwitchId == id && p.EndedAt == null)
+                    .ToListAsync();
+                foreach (var period in openPeriods)
+                    period.EndedAt = DateTime.UtcNow;
+
                 await _context.SaveChangesAsync();
                 _ownership.InvalidateSwitch(id);
             }
