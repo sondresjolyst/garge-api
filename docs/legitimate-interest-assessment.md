@@ -7,6 +7,7 @@
 | | |
 |---|---|
 | **Prepared** | 2026-05-20 |
+| **Revised** | 2026-05-21 — Activity A retention changed from a fixed 6-month cap to claim-lifetime retention under legitimate interest with an Art. 21 opt-out |
 | **Prepared by** | Engineering (garge-api) |
 | **Status** | Draft — pending DPO sign-off |
 | **Next review** | 2027-05-20 (or on any change to the retention/anonymization design) |
@@ -18,8 +19,8 @@
 
 Two processing activities are assessed:
 
-- **A — Suspended-sensor retention.** When a user cancels/downgrades and owns more sensors than their plan covers, access to the excess sensors is suspended, but their telemetry continues to be collected and stored, **for up to 6 months**, so the user's full history can be restored instantly if they re-subscribe.
-- **B — Anonymization for ML.** At the 6-month cap (and on GDPR erasure / account deletion), the relevant telemetry is moved into an **anonymized store** with no link back to the user or device, and retained indefinitely for analytics / model development (e.g. battery-health algorithms).
+- **A — Suspended-sensor retention.** When a user cancels/downgrades and owns more sensors than their plan covers, access to the excess sensors is suspended, but their telemetry continues to be collected and stored. By **default it is kept for the lifetime of the claim** (for as long as the user still owns the sensor), so a returning subscriber — e.g. a seasonal motorcyclist who cancels each summer — regains their full year-over-year history. The user may **object at any time** via a data-retention opt-out (Art. 21); once a user has opted out *and* no longer has any subscription coverage, the data is purged after a **6-month** grace.
+- **B — Anonymization for ML.** On the opt-out purge, on GDPR erasure, and on account deletion, the relevant telemetry is moved into an **anonymized store** with no link back to the user or device, and retained indefinitely for analytics / model development (e.g. battery-health algorithms).
 
 **Data categories:** environmental/device telemetry — temperature, humidity, battery voltage, switch on/off state — with timestamps. Low sensitivity: no special-category data (Art. 9), no location, no direct profiling of individuals. Personal only by virtue of being linked to a user via the `UserSensor` / `SensorOwnershipPeriod` mapping (the raw `SensorData`/`SwitchData` rows contain no user identifier).
 
@@ -28,18 +29,18 @@ Two processing activities are assessed:
 ## 2. Activity A — Legitimate Interest Assessment (suspended-sensor retention)
 
 ### 2.1 Purpose test
-**Interest:** Retain a suspended sensor's recent telemetry for a bounded period so a returning subscriber regains their full history immediately, reducing churn friction and avoiding irreversible data loss for users who lapse briefly (failed payment, temporary downgrade). This is a real, specific, present interest of the controller and a benefit to the user. **Lawful basis: Art. 6(1)(f) legitimate interest** — *not* contract (6(1)(b)), because during suspension the service for that sensor is withheld, so retention is not "necessary to perform the contract".
+**Interest:** Retain a suspended sensor's telemetry while the user still owns the sensor, so a returning subscriber regains their full history — including **year-over-year comparison** across seasonal usage gaps — and so no irreversible data loss occurs for users who lapse briefly (failed payment, temporary downgrade) or seasonally (a motorcyclist who cancels each off-season). This is a real, specific, present interest of the controller **and a direct benefit to the user** (it is their own history). **Lawful basis: Art. 6(1)(f) legitimate interest** — *not* contract (6(1)(b)), because during suspension the service for that sensor is withheld, so retention is not "necessary to perform the contract"; and *not* consent, because a default-on retention disclosed in the privacy policy with a withdrawal/opt-out is the legitimate-interest + Art. 21 model, not the opt-in, unbundled, affirmative-act model that valid consent requires.
 
 ### 2.2 Necessity test
-Instant restore is not possible without retaining the rows; deleting on suspension and re-collecting later cannot reconstruct history. Retention is therefore necessary for the stated purpose — but only for a **bounded** window, which is what keeps it proportionate. No less-intrusive alternative delivers the same outcome.
+Restoring a user's history is not possible without retaining the rows; deleting on suspension and re-collecting later cannot reconstruct it, and year-over-year comparison is inherently long-horizon, so a short fixed cap would defeat the purpose for the very users it benefits. Retention is therefore necessary for the stated purpose. Proportionality is preserved not by a blanket time cap but by **binding retention to the ownership claim** (it ends when the user unclaims/sells or deletes their account) and by an **opt-out** for users who do not want it. No less-intrusive alternative delivers the same outcome.
 
 ### 2.3 Balancing test
 - **Nature of data:** low sensitivity (environmental/device), no special categories, no profiling.
-- **Reasonable expectations:** the user is told at the point of cancel/downgrade (just-in-time notice) and in the privacy policy that suspended-device data is kept for 6 months then deleted/anonymized. Processing is therefore **not a surprise**.
-- **Impact on the individual:** minimal — the data is not used against them; it sits dormant pending possible restore.
-- **Safeguards (decisive):** a hard **6-month cap** with automated purge; the user can **export or delete** the data at any time during suspension; access controls unchanged; the cap-driven purge is what makes the balance pass. **Indefinite retention of identifiable suspended data would NOT pass** — the cap is load-bearing.
+- **Reasonable expectations:** the user is told in the privacy policy, and at the point of cancel/downgrade (just-in-time notice), that their sensor history is kept so they can resume/compare later, and that they can switch this off. Processing is therefore **not a surprise** and matches what an owner of the physical device would expect.
+- **Impact on the individual:** minimal — the data is not used against them; it sits dormant pending possible restore, and the data subject controls it.
+- **Safeguards (decisive):** retention is **bounded to the lifetime of the claim** (unclaim/sale/account-deletion all end it and trigger anonymization); the user has an **opt-out / right to object** (Art. 21) that, once exercised, makes their suspended data eligible for a **6-month-then-anonymize** purge after coverage lapses; the user can **export or delete** the data at any time. The combination of *claim-bounded retention + opt-out + export/delete* is what makes the balance pass and is **load-bearing** — an unbounded retention with no opt-out and no claim boundary would NOT pass.
 
-**Conclusion (A):** Legitimate interest is an appropriate basis **provided** the 6-month cap and the export/delete affordances are genuinely in place (they are — see §5).
+**Conclusion (A):** Legitimate interest is an appropriate basis **provided** the opt-out, the claim-boundary anonymization, and the export/delete affordances are genuinely in place (they are — see §5). Because retention now defaults to the lifetime of the claim rather than a short cap, the **balancing rests on the opt-out and the claim boundary**, which the DPO should weigh explicitly (see §6).
 
 ---
 
@@ -76,7 +77,8 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 | Data | State | Retention | Basis |
 |---|---|---|---|
 | Sensor/switch telemetry | Active device | Until unclaim / account deletion | Contract 6(1)(b) |
-| Sensor/switch telemetry | Suspended (over-quota) | ≤ 6 months, then deleted or anonymized | Legitimate interest 6(1)(f) |
+| Sensor/switch telemetry | Suspended (over-quota), user **not** opted out | Lifetime of the claim (until unclaim/sale/account deletion), then anonymized | Legitimate interest 6(1)(f) |
+| Sensor/switch telemetry | Suspended, user **opted out** + no coverage | ≤ 6 months from the later of opt-out / coverage lapse, then anonymized | Legitimate interest ends on objection (Art. 21) |
 | Anonymized telemetry (ML store) | Anonymized | Indefinite | Out of scope (anonymous) — *contingent on §3* |
 | Derived battery health/charge events | — | Regenerated from raw voltage; not separately retained in ML store | — |
 | Application logs | — | 90 days | Legitimate interest |
@@ -86,7 +88,9 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 
 ## 5. Safeguards & technical measures (implemented)
 
-- **6-month cap purge** — `SuspendedSensorPurgeService` (daily) force-unclaims and anonymizes sensors suspended > 180 days.
+- **Right to object (opt-out)** — `User.DataRetentionOptOutAt` set/cleared via `GET`/`PUT /api/users/{id}/data-retention`; surfaced as a profile toggle and at cancel/downgrade. This is the Art. 21 control the balancing test relies on.
+- **Opt-out cap purge** — `SuspendedSensorPurgeService` (daily) force-unclaims and anonymizes sensors suspended > 180 days **only** for owners who have opted out **and** have no subscription coverage. Default (not opted out) sensors are kept for the lifetime of the claim.
+- **Claim-boundary anonymization** — unclaim/sale (`SensorOwnershipPeriod` close) and account deletion move the user's exclusive telemetry into the anonymized store, so personal data does not outlive the claim.
 - **Anonymization routine** — `AnonymizationService`: surrogate-keyed series, no reverse map, exclusive-window only (co-owners preserved), regenerable battery data dropped.
 - **Resale/ownership window** — `SensorOwnershipPeriod` / `SwitchOwnershipPeriod` bound reads to the caller's ownership window; a new owner cannot see a previous owner's history.
 - **Data-subject rights decoupled from suspension** — export (`ExportData`) and unclaim/delete are **never** gated by the suspension 403; suspended data remains exportable and erasable.
@@ -95,7 +99,9 @@ If the DPO judges residual singling-out risk too high, fall back to **aggregate-
 
 ## 6. Outstanding actions for DPO / counsel
 1. **Sign off** the legitimate-interest basis (A) and the anonymization claim (B), or direct the fallback to aggregate-at-cap.
-2. **Backup retention (§3.4):** reconcile the 12-month yearly snapshot with the 6-month mapping horizon (shorten, or document re-anonymization on restore).
-3. **Motivated-intruder test (§3.5):** confirm residual singling-out risk is acceptable given absolute timestamps + per-device series.
-4. Confirm whether **active-sensor** default retention ("until unclaim") needs an Art. 25 ceiling.
-5. Update the **Art. 30 Records of Processing** to include "suspended-telemetry retention" and "anonymization for ML" as activities.
+2. **Weigh the claim-lifetime default (§2.3):** confirm that *claim-bounded retention + Art. 21 opt-out + export/delete* is sufficient to keep the balance, now that retention defaults to the lifetime of the claim rather than a fixed 6-month cap. If not, set a maximum dormancy ceiling (e.g. anonymize after N years of no active subscription even without opt-out).
+3. **Backup retention (§3.4):** reconcile the 12-month yearly snapshot with the anonymization (mapping) horizon (shorten, or document re-anonymization on restore).
+4. **Motivated-intruder test (§3.5):** confirm residual singling-out risk is acceptable given absolute timestamps + per-device series.
+5. Confirm whether **active-sensor** default retention ("until unclaim") needs an Art. 25 ceiling.
+6. Confirm the **opt-out is the correct mechanism** (right to object under Art. 21) rather than consent, given retention is default-on and disclosed in the privacy policy.
+7. Update the **Art. 30 Records of Processing** to include "suspended-telemetry retention", "claim-lifetime retention with opt-out", and "anonymization for ML" as activities.
