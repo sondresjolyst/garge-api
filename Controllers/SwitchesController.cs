@@ -732,6 +732,10 @@ namespace garge_api.Controllers
                 foreach (var period in openPeriods)
                     period.EndedAt = DateTime.UtcNow;
 
+                // Remove any custom name the user set for this switch so unclaim leaves nothing orphaned.
+                _context.UserSwitchCustomNames.RemoveRange(
+                    _context.UserSwitchCustomNames.Where(x => x.UserId == userId && x.SwitchId == id));
+
                 await _context.SaveChangesAsync();
                 _ownership.InvalidateSwitch(id);
             }

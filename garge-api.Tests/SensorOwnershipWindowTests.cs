@@ -2,6 +2,7 @@ using garge_api.Controllers;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Push;
 using garge_api.Models.Sensor;
 using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -163,5 +164,38 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         Assert.NotEqual(SensorOwnershipPeriod.FirstOwnerStart, bPeriod.StartedAt);
         Assert.True(bPeriod.StartedAt >= before); // resale owner starts at claim time
         Assert.Null(bPeriod.EndedAt);
+    }
+
+    [Fact]
+    public async Task UnclaimSensor_RemovesAllOfTheUsersPersonalRows()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(new Sensor
+        {
+            Id = SensorId, Name = "garge_volt", Type = "voltage", Role = "sensor",
+            RegistrationCode = "rc-1", DefaultName = "Battery", ParentName = "garge_test"
+        });
+        db.UserSensors.Add(new UserSensor { UserId = "user-A", SensorId = SensorId, IsOwner = true });
+        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod
+        {
+            UserId = "user-A", SensorId = SensorId, StartedAt = SensorOwnershipPeriod.FirstOwnerStart, EndedAt = null
+        });
+        db.UserSensorCustomNames.Add(new UserSensorCustomName { UserId = "user-A", SensorId = SensorId, CustomName = "My Bike" });
+        db.SensorActivities.Add(new SensorActivity { UserId = "user-A", SensorId = SensorId, Title = "Oil change", ActivityDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow });
+        db.SensorPhotos.Add(new SensorPhoto { UserId = "user-A", SensorId = SensorId, Data = "AQID", ContentType = "image/png" });
+        db.SensorOfflineNotifications.Add(new SensorOfflineNotification { UserId = "user-A", SensorId = SensorId });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "user-A", isAdmin: false).UnclaimSensor(SensorId);
+
+        Assert.IsType<OkObjectResult>(result);
+        // Nothing the user owned for this sensor is left orphaned...
+        Assert.Empty(db.UserSensors);
+        Assert.Empty(db.UserSensorCustomNames);
+        Assert.Empty(db.SensorActivities);
+        Assert.Empty(db.SensorPhotos);
+        Assert.Empty(db.SensorOfflineNotifications);
+        // ...but the period is closed (not deleted), so a future owner still can't see this history.
+        Assert.NotNull(db.SensorOwnershipPeriods.Single(p => p.UserId == "user-A").EndedAt);
     }
 }

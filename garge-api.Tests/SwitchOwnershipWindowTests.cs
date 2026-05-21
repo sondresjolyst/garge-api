@@ -147,4 +147,25 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
         Assert.True(bPeriod.StartedAt >= before);
         Assert.Null(bPeriod.EndedAt);
     }
+
+    [Fact]
+    public async Task UnclaimSwitch_RemovesCustomName_AndClosesPeriod()
+    {
+        using var db = CreateDbContext();
+        db.Switches.Add(MakeSwitch());
+        db.UserSwitches.Add(new UserSwitch { UserId = "user-A", SwitchId = SwitchId });
+        db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod
+        {
+            UserId = "user-A", SwitchId = SwitchId, StartedAt = SwitchOwnershipPeriod.FirstOwnerStart, EndedAt = null
+        });
+        db.UserSwitchCustomNames.Add(new UserSwitchCustomName { UserId = "user-A", SwitchId = SwitchId, CustomName = "Heater" });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "user-A", isAdmin: false).UnclaimSwitch(SwitchId);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Empty(db.UserSwitches);
+        Assert.Empty(db.UserSwitchCustomNames);              // no orphaned custom name
+        Assert.NotNull(db.SwitchOwnershipPeriods.Single(p => p.UserId == "user-A").EndedAt);
+    }
 }

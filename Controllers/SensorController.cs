@@ -690,6 +690,12 @@ namespace garge_api.Controllers
                 _context.UserSensorCustomNames.Remove(customName);
             }
 
+            // Remove the user's remaining personal rows for this sensor so unclaim leaves nothing
+            // orphaned (same per-sensor set the account-deletion and 6-month purge paths clean up).
+            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == id));
+            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == id));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId && n.SensorId == id));
+
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id });
