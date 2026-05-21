@@ -1,6 +1,7 @@
 using garge_api.Constants;
 using garge_api.Controllers.Common;
 using garge_api.Dtos.Common;
+using garge_api.Helpers;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
@@ -65,15 +66,7 @@ namespace garge_api.Controllers
         /// whether the sensor is visible at all; this bounds the time window of the data returned.
         /// </summary>
         private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
-        {
-            if (IsAdmin()) return query;
-            var userId = User.UserId();
-            return query.Where(sd => _context.SensorOwnershipPeriods.Any(p =>
-                p.UserId == userId
-                && p.SensorId == sd.SensorId
-                && sd.Timestamp >= p.StartedAt
-                && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
-        }
+            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         /// <summary>
         /// True when the caller has this owned sensor suspended (turned off / over quota). Suspended
@@ -696,6 +689,12 @@ namespace garge_api.Controllers
             {
                 _context.UserSensorCustomNames.Remove(customName);
             }
+
+            // Remove the user's remaining personal rows for this sensor so unclaim leaves nothing
+            // orphaned (same per-sensor set the account-deletion and 6-month purge paths clean up).
+            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == id));
+            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == id));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId && n.SensorId == id));
 
             await _context.SaveChangesAsync();
 

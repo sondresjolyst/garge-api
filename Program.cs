@@ -185,6 +185,7 @@ namespace garge_api
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
             builder.Services.AddHostedService<QuotaReconciliationService>();
+            builder.Services.AddHostedService<SuspendedSensorPurgeService>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddScoped<IAnonymizationService, AnonymizationService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();

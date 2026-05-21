@@ -298,35 +298,25 @@ namespace garge_api.Controllers
                 .ToListAsync();
 
             // Bound to the user's own ownership window(s): they export the data from periods they
-            // owned, not a previous owner's readings on a re-claimed sensor.
+            // owned, not a previous owner's readings on a re-claimed device. Same boundary as the read
+            // endpoints — see OwnershipWindowQueryExtensions.
             var sensorReadings = await _context.SensorData
-                .Where(sd => sensorIds.Contains(sd.SensorId)
-                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == sd.SensorId
-                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))
+                .Where(sd => sensorIds.Contains(sd.SensorId))
+                .WithinSensorOwnership(_context, id)
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SensorId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
-            // Bound to the user's own switch ownership window(s): a direct ownership period, or — for
-            // indirect access via the discovered-device chain — the period of an owned sensor that
-            // maps to the switch. They export the data from windows they owned, not a previous owner's.
             var switchHistory = await _context.SwitchData
-                .Where(sd => switchIds.Contains(sd.SwitchId)
-                    && (_context.SwitchOwnershipPeriods.Any(p => p.UserId == id && p.SwitchId == sd.SwitchId
-                            && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
-                        || _context.Switches.Any(sw => sw.Id == sd.SwitchId
-                            && _context.DiscoveredDevices.Any(dd => dd.Target == sw.Name
-                                && _context.Sensors.Any(s => s.ParentName == dd.DiscoveredBy
-                                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == s.Id
-                                        && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)))))))
+                .Where(sd => switchIds.Contains(sd.SwitchId))
+                .WithinSwitchOwnership(_context, id)
                 .OrderBy(sd => sd.Timestamp)
                 .Select(sd => new { sd.SwitchId, sd.Value, sd.Timestamp })
                 .ToListAsync();
 
             var batteryHealth = await _context.BatteryHealthData
-                .Where(bh => sensorIds.Contains(bh.SensorId)
-                    && _context.SensorOwnershipPeriods.Any(p => p.UserId == id && p.SensorId == bh.SensorId
-                        && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)))
+                .Where(bh => sensorIds.Contains(bh.SensorId))
+                .WithinSensorOwnership(_context, id)
                 .OrderBy(bh => bh.Timestamp)
                 .ToListAsync();
 
@@ -552,6 +542,60 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Profile updated for user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
+        }
+
+        /// <summary>
+        /// Gets the caller's sensor-data retention preference.
+        /// </summary>
+        [HttpGet("{id}/data-retention")]
+        [SwaggerOperation(Summary = "Gets the caller's sensor-data retention opt-out state.")]
+        [SwaggerResponse(200, "Retention preference.", typeof(DataRetentionDto))]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> GetDataRetention(string id)
+        {
+            if (!User.IsCallerOf(id)) return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            return Ok(DataRetentionDto.From(user.DataRetentionOptOutAt));
+        }
+
+        /// <summary>
+        /// Sets or clears the caller's sensor-data retention opt-out (GDPR Art. 21 objection). When
+        /// opted out, suspended sensors are purged after the 6-month cap once the user has no
+        /// subscription coverage; the default keeps history for the lifetime of the claim.
+        /// </summary>
+        [HttpPut("{id}/data-retention")]
+        [SwaggerOperation(Summary = "Sets or clears the caller's sensor-data retention opt-out.")]
+        [SwaggerResponse(200, "Updated retention preference.", typeof(DataRetentionDto))]
+        [SwaggerResponse(403, "Forbidden.")]
+        [SwaggerResponse(404, "User not found.")]
+        public async Task<IActionResult> UpdateDataRetention(string id, [FromBody] UpdateDataRetentionDto dto)
+        {
+            if (!User.IsCallerOf(id)) return Forbid();
+
+            var user = await _userManager.FindByIdAsync(id);
+            if (user == null || user.IsDeleted)
+                return NotFound(new { message = "User not found!" });
+
+            // Idempotent: only stamp when the state actually changes so the original opt-out time is kept.
+            if (dto.OptOut && user.DataRetentionOptOutAt == null)
+                user.DataRetentionOptOutAt = DateTime.UtcNow;
+            else if (!dto.OptOut)
+                user.DataRetentionOptOutAt = null;
+
+            var result = await _userManager.UpdateAsync(user);
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("UpdateDataRetention failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
+                return BadRequest(result.Errors);
+            }
+
+            _logger.LogInformation("Data-retention opt-out set to {OptOut} for user {UserId}", dto.OptOut, LogSanitizer.Sanitize(id));
+            return Ok(DataRetentionDto.From(user.DataRetentionOptOutAt));
         }
     }
 }

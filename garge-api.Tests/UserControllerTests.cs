@@ -203,4 +203,64 @@ public class UserControllerTests : ControllerTestBase
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
+
+    [Fact]
+    public async Task GetDataRetention_ReflectsOptOutState()
+    {
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        user.DataRetentionOptOutAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+
+        var result = await CreateUserController(db, callerId: user.Id).GetDataRetention(user.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<DataRetentionDto>(ok.Value);
+        Assert.True(dto.OptOut);
+        Assert.Equal(user.DataRetentionOptOutAt, dto.OptedOutAt);
+    }
+
+    [Fact]
+    public async Task UpdateDataRetention_OptOut_StampsTimestamp()
+    {
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        var result = await CreateUserController(db, callerId: user.Id)
+            .UpdateDataRetention(user.Id, new UpdateDataRetentionDto { OptOut = true });
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<DataRetentionDto>(ok.Value);
+        Assert.True(dto.OptOut);
+        Assert.NotNull(user.DataRetentionOptOutAt);
+    }
+
+    [Fact]
+    public async Task UpdateDataRetention_OptIn_ClearsTimestamp()
+    {
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        user.DataRetentionOptOutAt = DateTime.UtcNow;
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        var result = await CreateUserController(db, callerId: user.Id)
+            .UpdateDataRetention(user.Id, new UpdateDataRetentionDto { OptOut = false });
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<DataRetentionDto>(ok.Value);
+        Assert.False(dto.OptOut);
+        Assert.Null(user.DataRetentionOptOutAt);
+    }
+
+    [Fact]
+    public async Task UpdateDataRetention_OtherUser_ReturnsForbidden()
+    {
+        using var db = CreateDbContext();
+        var result = await CreateUserController(db, callerId: "user-1")
+            .UpdateDataRetention("user-2", new UpdateDataRetentionDto { OptOut = true });
+        Assert.IsType<ForbidResult>(result);
+    }
 }
