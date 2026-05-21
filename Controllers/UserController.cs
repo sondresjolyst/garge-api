@@ -570,11 +570,7 @@ namespace garge_api.Controllers
             if (user == null || user.IsDeleted)
                 return NotFound(new { message = "User not found!" });
 
-            return Ok(new DataRetentionDto
-            {
-                OptOut = user.DataRetentionOptOutAt != null,
-                OptedOutAt = user.DataRetentionOptOutAt
-            });
+            return Ok(DataRetentionDto.From(user.DataRetentionOptOutAt));
         }
 
         /// <summary>
@@ -609,11 +605,7 @@ namespace garge_api.Controllers
             }
 
             _logger.LogInformation("Data-retention opt-out set to {OptOut} for user {UserId}", dto.OptOut, LogSanitizer.Sanitize(id));
-            return Ok(new DataRetentionDto
-            {
-                OptOut = user.DataRetentionOptOutAt != null,
-                OptedOutAt = user.DataRetentionOptOutAt
-            });
+            return Ok(DataRetentionDto.From(user.DataRetentionOptOutAt));
         }
     }
 }

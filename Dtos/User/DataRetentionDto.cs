@@ -13,6 +13,13 @@ namespace garge_api.Dtos.User
 
         /// <summary>When the opt-out was set, or null if the user has not opted out.</summary>
         public DateTime? OptedOutAt { get; set; }
+
+        /// <summary>Builds the DTO from the user's stored opt-out timestamp (null = retaining).</summary>
+        public static DataRetentionDto From(DateTime? optedOutAt) => new()
+        {
+            OptOut = optedOutAt != null,
+            OptedOutAt = optedOutAt
+        };
     }
 
     /// <summary>
