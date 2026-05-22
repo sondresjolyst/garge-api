@@ -117,7 +117,12 @@ namespace garge_api.Controllers
 
             // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
             // a valid FK for the 5-year retention window required by the Norwegian
-            // Bookkeeping Act (bokføringsloven §13).
+            // Bookkeeping Act (bokføringsloven §13). Anonymizing telemetry is irreversible
+            // and AnonymizeUserTelemetryAsync commits as it goes, so the whole sequence runs
+            // in one transaction: if the Identity update fails (e.g. validation), the
+            // anonymization and row removals roll back rather than leaving a half-deleted user.
+            await using var tx = await _context.Database.BeginTransactionAsync();
+
             await AnonymizeUserTelemetryAsync(id);
             ClearUserOwnedRows(id);
             await ScrubUserPiiAsync(user);
@@ -130,6 +135,7 @@ namespace garge_api.Controllers
             }
 
             await _context.SaveChangesAsync();
+            await tx.CommitAsync();
 
             await ForceDisconnectHubAsync(id);
 
@@ -211,8 +217,12 @@ namespace garge_api.Controllers
         {
             user.FirstName = "Deleted";
             user.LastName = "User";
-            user.Email = null;
-            user.NormalizedEmail = null;
+            // A valid, unique placeholder — not null. Identity is configured with
+            // RequireUniqueEmail, so UpdateAsync rejects a null/empty email (this previously
+            // made account deletion fail with InvalidEmail). The .invalid TLD (RFC 2606) is
+            // reserved and never routable, so this address carries no recoverable PII.
+            user.Email = $"deleted-{user.Id}@deleted.invalid";
+            user.NormalizedEmail = user.Email.ToUpperInvariant();
             user.PhoneNumber = null;
             user.UserName = $"deleted-{user.Id}";
             user.NormalizedUserName = $"DELETED-{user.Id}".ToUpperInvariant();
