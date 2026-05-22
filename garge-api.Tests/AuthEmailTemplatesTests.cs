@@ -8,11 +8,11 @@ public class AuthEmailTemplatesTests
 {
     private static AppSettings Settings() => new()
     {
-        CompanyName = "Garge",
-        CompanyLegalName = "Sjølyst Innovations",
-        CompanyOrgNumber = "934 531 035",
-        CompanyAddress = "Mårvegen 21a, 4347 Lye",
-        CompanyEmail = "post@garge.example",
+        CompanyName = "Test Co",
+        CompanyLegalName = "Test Co AS",
+        CompanyOrgNumber = "000 000 000",
+        CompanyAddress = "1 Example Street, 0000 Testby",
+        CompanyEmail = "test@example.com",
     };
 
     [Fact]
@@ -21,7 +21,7 @@ public class AuthEmailTemplatesTests
         var html = AuthEmailTemplates.VerificationCode(Settings(), "Sondre", "ABC123");
 
         Assert.Contains("<!DOCTYPE html>", html);     // shared layout shell, not plain text
-        Assert.Contains("Garge", html);               // brand header band
+        Assert.Contains("Test Co", html);             // brand header band (from settings)
         Assert.Contains("Confirm your email", html);  // heading
         Assert.Contains("EMAIL VERIFICATION", html);  // meta subtitle
         Assert.Contains("ABC123", html);              // the code
