@@ -129,8 +129,22 @@ namespace garge_api.Controllers
             }
 
             _logger.LogError("Register failed: {@Errors}", result.Errors);
-            return BadRequest(result.Errors);
+
+            // Return the field-keyed shape the client parses (parseValidationErrors) so a
+            // server-only failure like a taken username surfaces on its field instead of a
+            // generic "failed to register". Identity emits username / email / password codes.
+            var fieldErrors = result.Errors
+                .GroupBy(e => RegisterErrorField(e.Code))
+                .ToDictionary(g => g.Key, g => g.Select(e => e.Description).ToArray());
+            return BadRequest(new { errors = fieldErrors });
         }
+
+        /// <summary>Maps an ASP.NET Identity error code to the registration form field it belongs to.</summary>
+        private static string RegisterErrorField(string code) =>
+            code.Contains("UserName", StringComparison.OrdinalIgnoreCase) ? "UserName"
+            : code.Contains("Email", StringComparison.OrdinalIgnoreCase) ? "Email"
+            : code.Contains("Password", StringComparison.OrdinalIgnoreCase) ? "Password"
+            : "UserName";
 
         /// <summary>
         /// Logs in a user.
