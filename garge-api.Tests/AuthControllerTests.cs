@@ -328,4 +328,32 @@ public class AuthControllerTests : ControllerTestBase
         Assert.IsType<OkObjectResult>(result);
         MockUserManager.Verify(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
     }
+
+    [Fact]
+    public async Task Register_DuplicateUserName_ReturnsFieldKeyedError()
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockMapper.Setup(m => m.Map<User>(It.IsAny<RegisterUserDto>()))
+            .Returns((RegisterUserDto src) => new User
+            {
+                Id = "u", UserName = src.UserName, Email = src.Email,
+                FirstName = src.FirstName, LastName = src.LastName
+            });
+        MockUserManager.Setup(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityError
+            {
+                Code = "DuplicateUserName",
+                Description = "Username 'user' is already taken."
+            }));
+
+        var result = await CreateAuthController(CreateDbContext()).Register(MakeRegisterDto());
+
+        // Field-keyed shape the client can map to the username field (issue #75),
+        // not the raw Identity array that surfaced as a generic "failed to register".
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        var errorsObj = bad.Value!.GetType().GetProperty("errors")!.GetValue(bad.Value);
+        var errors = Assert.IsAssignableFrom<IDictionary<string, string[]>>(errorsObj);
+        Assert.True(errors.ContainsKey("UserName"));
+        Assert.Contains("already taken", errors["UserName"][0]);
+    }
 }
