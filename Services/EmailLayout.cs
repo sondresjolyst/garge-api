@@ -114,6 +114,20 @@ namespace garge_api.Services
                   .body h1, .body h2 { color: #1a1a1a; margin-bottom: 8px; }
                   .body h1 { font-size: 18px; }
 
+                  .code-label {
+                    text-align: center;
+                    font-size: 9px; font-weight: 700; text-transform: uppercase;
+                    letter-spacing: .1em; color: #0284c7; margin: 20px 0 6px;
+                  }
+                  .code-box {
+                    text-align: center;
+                    font-family: 'Courier New', Courier, monospace;
+                    font-size: 32px; font-weight: 700; letter-spacing: .3em;
+                    color: #182232; background: #f1f5f9;
+                    border: 1px solid #cbd5e1; border-radius: 8px;
+                    padding: 18px 12px; margin: 0 0 20px;
+                  }
+
                   table.parties { width: 100%; margin-bottom: 24px; border-collapse: separate; border-spacing: 0; }
                   table.parties td { width: 50%; padding: 0 20px 0 0; vertical-align: top; border: none; background: transparent; }
                   table.parties td.r { padding: 0 0 0 20px; text-align: right; }

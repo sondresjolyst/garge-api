@@ -2,7 +2,9 @@
 using garge_api.Dtos.Auth;
 using garge_api.Helpers;
 using garge_api.Models;
+using garge_api.Models.Admin;
 using garge_api.Models.Auth;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
@@ -118,7 +120,9 @@ namespace garge_api.Controllers
                 user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
                 await _userManager.UpdateAsync(user);
 
-                await _emailService.SendEmailAsync(user.Email!, "Confirm your email", $"Your verification code is: {verificationCode}");
+                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
+                await _emailService.SendEmailAsync(user.Email!, "Confirm your email",
+                    AuthEmailTemplates.VerificationCode(settings, user.FirstName, verificationCode));
 
                 _logger.LogInformation("User registered successfully {UserId}", user.Id);
                 return Ok(new { message = genericResponse });
@@ -194,7 +198,9 @@ namespace garge_api.Controllers
                 user.EmailVerificationCodeHash = HashText(verificationCode);
                 user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
                 await _userManager.UpdateAsync(user);
-                await _emailService.SendEmailAsync(user.Email!, "Verify your email", $"Your verification code is: {verificationCode}");
+                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
+                await _emailService.SendEmailAsync(user.Email!, "Verify your email",
+                    AuthEmailTemplates.VerificationCode(settings, user.FirstName, verificationCode));
                 _logger.LogInformation("Verification code resent for user {UserId}", user.Id);
             }
 
@@ -407,7 +413,9 @@ namespace garge_api.Controllers
                 user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
                 user.PasswordResetAttempts = 0;
                 await _userManager.UpdateAsync(user);
-                await _emailService.SendEmailAsync(user.Email!, "Password Reset Code", $"Your password reset code is: {code}");
+                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
+                await _emailService.SendEmailAsync(user.Email!, "Password Reset Code",
+                    AuthEmailTemplates.PasswordReset(settings, user.FirstName, code));
                 _logger.LogInformation("Password reset code sent for user {UserId}", user.Id);
             }
 
