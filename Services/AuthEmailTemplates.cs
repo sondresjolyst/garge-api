@@ -12,7 +12,9 @@ namespace garge_api.Services
     {
         public static string VerificationCode(AppSettings s, string? firstName, string code) =>
             Build(s,
-                subtitle: "EMAIL VERIFICATION",
+                metaWord: "VERIFY",
+                subtitleLabel: "EMAIL VERIFICATION",
+                codeLabel: "Verification code",
                 heading: "Confirm your email",
                 intro: $"welcome to {H(s.CompanyName)}. Enter the code below to verify your email address and activate your account.",
                 firstName: firstName,
@@ -22,7 +24,9 @@ namespace garge_api.Services
 
         public static string PasswordReset(AppSettings s, string? firstName, string code) =>
             Build(s,
-                subtitle: "PASSWORD RESET",
+                metaWord: "RESET",
+                subtitleLabel: "PASSWORD RESET",
+                codeLabel: "Reset code",
                 heading: "Reset your password",
                 intro: $"we received a request to reset your {H(s.CompanyName)} password. Enter the code below to continue.",
                 firstName: firstName,
@@ -33,21 +37,26 @@ namespace garge_api.Services
         private static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
         private static string Build(
-            AppSettings s, string subtitle, string heading, string intro,
-            string? firstName, string code, string expiry, string ignoreNote)
+            AppSettings s, string metaWord, string subtitleLabel, string codeLabel, string heading,
+            string intro, string? firstName, string code, string expiry, string ignoreNote)
         {
             var greeting = string.IsNullOrWhiteSpace(firstName) ? "Hi there," : $"Hi {H(firstName)},";
 
             var body = $$"""
                 <h1>{{H(heading)}}</h1>
                 <p>{{greeting}} {{intro}}</p>
+                <div class="code-label">{{H(codeLabel)}}</div>
                 <div class="code-box">{{H(code)}}</div>
                 <div class="footer">
                   <p>This code expires in {{expiry}}. {{ignoreNote}}</p>
                 </div>
                 """;
 
-            return EmailLayout.Render(s, new EmailLayout.Meta { Subtitle = subtitle }, body);
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = metaWord,
+                Subtitle = $"{subtitleLabel}  ·  {DateTime.UtcNow:yyyy-MM-dd}"
+            }, body);
         }
     }
 }

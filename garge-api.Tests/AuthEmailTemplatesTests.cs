@@ -23,7 +23,9 @@ public class AuthEmailTemplatesTests
         Assert.Contains("<!DOCTYPE html>", html);     // shared layout shell, not plain text
         Assert.Contains("Test Co", html);             // brand header band (from settings)
         Assert.Contains("Confirm your email", html);  // heading
+        Assert.Contains("VERIFY", html);              // bold meta word in header
         Assert.Contains("EMAIL VERIFICATION", html);  // meta subtitle
+        Assert.Contains("Verification code", html);   // blue accent code label
         Assert.Contains("ABC123", html);              // the code
         Assert.Contains("Hi Sondre,", html);          // personalised greeting
         Assert.Contains("1 hour", html);              // verification expiry
