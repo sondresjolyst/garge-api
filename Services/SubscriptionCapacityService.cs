@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
@@ -18,6 +19,13 @@ namespace garge_api.Services
     {
         Task<int> GetCapacityAsync(string userId, CancellationToken ct = default);
         Task<int> GetActiveOwnedSensorCountAsync(string userId, CancellationToken ct = default);
+
+        /// <summary>
+        /// True when the user holds a role that grants service access without a subscription
+        /// (see <see cref="RoleNames.SubscriptionBypassRoles"/>, e.g. ComplimentaryUser, DeviceBridge,
+        /// admins). Such users have no capacity limit and must never be auto-suspended or purged.
+        /// </summary>
+        Task<bool> HasSubscriptionBypassAsync(string userId, CancellationToken ct = default);
     }
 
     public class SubscriptionCapacityService : ISubscriptionCapacityService
@@ -34,6 +42,14 @@ namespace garge_api.Services
 
         public Task<int> GetActiveOwnedSensorCountAsync(string userId, CancellationToken ct = default)
             => _db.UserSensors.CountAsync(us => us.UserId == userId && us.IsOwner && us.SuspendedAt == null, ct);
+
+        public Task<bool> HasSubscriptionBypassAsync(string userId, CancellationToken ct = default)
+        {
+            var roleIds = _db.UserRoles.Where(ur => ur.UserId == userId).Select(ur => ur.RoleId);
+            return _db.Roles
+                .Where(r => roleIds.Contains(r.Id) && r.Name != null && RoleNames.SubscriptionBypassRoles.Contains(r.Name))
+                .AnyAsync(ct);
+        }
 
         public async Task<int> GetCapacityAsync(string userId, CancellationToken ct = default)
         {

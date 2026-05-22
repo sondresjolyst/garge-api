@@ -3,6 +3,7 @@ using garge_api.Models.Admin;
 using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
 using garge_api.Services;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Caching.Memory;
 using Xunit;
 
@@ -74,5 +75,29 @@ public class QuotaReconciliationServiceTests : ControllerTestBase
 
         Assert.Equal(2, suspended);
         Assert.All(db.UserSensors.ToList(), us => Assert.NotNull(us.SuspendedAt));
+    }
+
+    [Fact]
+    public async Task Reconcile_SubscriptionBypassRole_DoesNotSuspend()
+    {
+        // A ComplimentaryUser (or service account / admin) has no capacity limit, even with no subscription.
+        using var db = CreateDbContext();
+        db.AppSettings.Add(new AppSettings { Id = 1 }); // no Primary → capacity 0
+        GrantRole(db, "u", "ComplimentaryUser");
+        var t0 = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        db.UserSensors.AddRange(Owned("u", 1, t0), Owned("u", 2, t0.AddDays(1)));
+        await db.SaveChangesAsync();
+
+        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db));
+
+        Assert.Equal(0, suspended);
+        Assert.All(db.UserSensors.ToList(), us => Assert.Null(us.SuspendedAt));
+    }
+
+    private static void GrantRole(ApplicationDbContext db, string userId, string roleName)
+    {
+        var roleId = $"role-{roleName}";
+        db.Roles.Add(new IdentityRole { Id = roleId, Name = roleName, NormalizedName = roleName.ToUpperInvariant() });
+        db.UserRoles.Add(new IdentityUserRole<string> { UserId = userId, RoleId = roleId });
     }
 }

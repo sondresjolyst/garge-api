@@ -69,6 +69,33 @@ namespace garge_api.Controllers
             => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         /// <summary>
+        /// Returns the caller's sensor capacity and whether they can claim another sensor — the single
+        /// source of truth for the claim button and capacity meter, so the client never re-derives
+        /// capacity or the subscription-bypass role list.
+        /// </summary>
+        [HttpGet("capacity")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Gets the caller's sensor capacity and claim eligibility.")]
+        [SwaggerResponse(200, "Capacity returned.", typeof(SensorCapacityDto))]
+        public async Task<IActionResult> GetMyCapacity()
+        {
+            var userId = User.UserId();
+            if (string.IsNullOrEmpty(userId)) return Unauthorized();
+
+            var bypass = await _capacity.HasSubscriptionBypassAsync(userId);
+            var capacity = await _capacity.GetCapacityAsync(userId);
+            var used = await _capacity.GetActiveOwnedSensorCountAsync(userId);
+
+            return Ok(new SensorCapacityDto
+            {
+                Capacity = capacity,
+                Used = used,
+                Bypass = bypass,
+                CanClaim = bypass || used < capacity,
+            });
+        }
+
+        /// <summary>
         /// True when the caller has this owned sensor suspended (turned off / over quota). Suspended
         /// sensors stay visible in the list but their dashboard/history reads are blocked. Admins are
         /// never suspended. Export and unclaim/delete must never use this gate (GDPR rights).
