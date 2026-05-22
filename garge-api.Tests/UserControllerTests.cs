@@ -71,8 +71,11 @@ public class UserControllerTests : ControllerTestBase
         Assert.NotNull(user.DeletedAt);
         Assert.Equal("Deleted", user.FirstName);
         Assert.Equal("User", user.LastName);
-        Assert.Null(user.Email);
-        Assert.Null(user.NormalizedEmail);
+        // Email must remain a valid, unique, non-PII value — Identity's RequireUniqueEmail
+        // rejects null/empty (regression: account deletion used to 400 with InvalidEmail).
+        Assert.Equal($"deleted-{user.Id}@deleted.invalid", user.Email);
+        Assert.Equal(user.Email!.ToUpperInvariant(), user.NormalizedEmail);
+        Assert.DoesNotContain("user@test.com", user.Email!);
         Assert.Null(user.PhoneNumber);
         Assert.False(user.EmailConfirmed);
         Assert.Equal(DateTimeOffset.MaxValue, user.LockoutEnd);
@@ -137,6 +140,33 @@ public class UserControllerTests : ControllerTestBase
         Assert.Empty(db.SensorPhotos);
         Assert.Empty(db.SensorOwnershipPeriods);
         Assert.Empty(db.UserSensors);
+    }
+
+    [Fact]
+    public async Task DeleteOwnAccount_ScrubbedUser_PassesRealIdentityValidation()
+    {
+        // Regression: ScrubUserPiiAsync used to null out the email, which Identity's
+        // RequireUniqueEmail validator rejects — DeleteOwnAccount then 400'd, and because
+        // anonymization had already committed it left the account half-deleted. Here the mock
+        // UpdateAsync delegates to the real UserValidator so the scrubbed user is genuinely
+        // validated: this fails (BadRequest) on a null email and passes on the placeholder.
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Object.Options = new IdentityOptions { User = { RequireUniqueEmail = true } };
+        MockUserManager.Setup(m => m.GetUserNameAsync(user)).ReturnsAsync(() => user.UserName);
+        MockUserManager.Setup(m => m.GetEmailAsync(user)).ReturnsAsync(() => user.Email);
+        MockUserManager.Setup(m => m.FindByNameAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockUserManager.Setup(m => m.UpdateAsync(user))
+            .Returns(() => new UserValidator<User>().ValidateAsync(MockUserManager.Object, user));
+
+        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.True(user.IsDeleted);
+        Assert.EndsWith("@deleted.invalid", user.Email);
     }
 
     [Fact]
