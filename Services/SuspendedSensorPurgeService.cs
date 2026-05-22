@@ -79,11 +79,13 @@ namespace garge_api.Services
             var purged = 0;
             foreach (var item in expired)
             {
-                // A paying user (active or paid-period grace) keeps their data even if opted out — the
-                // opt-out only takes effect once there is no subscription left to honour.
+                // A paying user (active or paid-period grace), or one with a subscription-bypass role
+                // (complimentary, service account, admin), keeps their data even if opted out — the
+                // opt-out only takes effect once there is no coverage left to honour.
                 if (!coverageCache.TryGetValue(item.UserId, out var hasCoverage))
                 {
-                    hasCoverage = await capacity.GetCapacityAsync(item.UserId, ct) > 0;
+                    hasCoverage = await capacity.HasSubscriptionBypassAsync(item.UserId, ct)
+                        || await capacity.GetCapacityAsync(item.UserId, ct) > 0;
                     coverageCache[item.UserId] = hasCoverage;
                 }
                 if (hasCoverage)

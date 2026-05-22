@@ -62,6 +62,9 @@ namespace garge_api.Services
 
             foreach (var userId in ownerIds)
             {
+                // Complimentary / service-account / admin roles have no capacity limit — never suspend them.
+                if (await capacity.HasSubscriptionBypassAsync(userId, ct)) continue;
+
                 var cap = await capacity.GetCapacityAsync(userId, ct);
 
                 var activeOwned = await db.UserSensors

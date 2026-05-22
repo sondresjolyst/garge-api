@@ -3,6 +3,7 @@ using garge_api.Models.Admin;
 using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
 using garge_api.Services;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -131,5 +132,30 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);
+    }
+
+    [Fact]
+    public async Task Purge_OptedOutBypassRole_PastCap_LeftAlone()
+    {
+        // A ComplimentaryUser (or service account / admin) has coverage by role — never purged,
+        // even opted out, with no subscription, past the cap.
+        using var db = CreateDbContext();
+        AddUser(db, "u", optedOut: true);
+        GrantRole(db, "u", "ComplimentaryUser");
+        db.Sensors.Add(MakeSensor(1));
+        db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-200) });
+        await db.SaveChangesAsync();
+
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+
+        Assert.Equal(0, purged);
+        Assert.Single(db.UserSensors);
+    }
+
+    private static void GrantRole(ApplicationDbContext db, string userId, string roleName)
+    {
+        var roleId = $"role-{roleName}";
+        db.Roles.Add(new IdentityRole { Id = roleId, Name = roleName, NormalizedName = roleName.ToUpperInvariant() });
+        db.UserRoles.Add(new IdentityUserRole<string> { UserId = userId, RoleId = roleId });
     }
 }
