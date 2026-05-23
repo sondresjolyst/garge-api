@@ -122,7 +122,9 @@ namespace garge_api.Services
             var snapshots = await db.DailyStatSnapshots.OrderBy(s => s.Date).ToListAsync(ct);
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
-            var todayStart = today.ToDateTime(TimeOnly.MinValue);
+            // Kind must be UTC: these bounds are compared against timestamptz columns, and Npgsql
+            // rejects a DateTime with Kind=Unspecified.
+            var todayStart = today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var tomorrow = todayStart.AddDays(1);
 
             // Carry from the last completed day (yesterday after EnsureUpToDate), then apply today's
