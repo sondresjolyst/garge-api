@@ -72,6 +72,14 @@ namespace garge_api.Services
             var switchCreated = await CountByDayAsync(db.Switches.Select(s => s.CreatedAt), ct);
             var automationCreated = await CountByDayAsync(db.AutomationRules.Select(a => a.CreatedAt), ct);
 
+            // Sensors, switches and automations are hard-deleted, so a row's removal leaves no trace and
+            // a cumulative created-count can never dip. Sample the live counts and stamp them on the
+            // latest completed day, so the series reflects removals from this point forward. Older
+            // backfilled days keep the cumulative (created-only) estimate — the past cannot be rebuilt.
+            var sensorsLive = await db.Sensors.CountAsync(ct);
+            var switchesLive = await db.Switches.CountAsync(ct);
+            var automationsLive = await db.AutomationRules.CountAsync(ct);
+
             var last = await db.DailyStatSnapshots
                 .OrderByDescending(s => s.Date)
                 .FirstOrDefaultAsync(ct);
@@ -102,7 +110,16 @@ namespace garge_api.Services
             for (var date = from; date <= yesterday; date = date.AddDays(1))
             {
                 running.Apply(date, userCreated, userDeleted, sensorCreated, switchCreated, automationCreated);
-                newRows.Add(running.ToSnapshot(date));
+                var snapshot = running.ToSnapshot(date);
+                if (date == yesterday)
+                {
+                    // Latest completed day: use the live counts so removals are reflected. Carry these
+                    // forward so the next run continues from the actual figures.
+                    snapshot.TotalSensors = running.Sensors = sensorsLive;
+                    snapshot.TotalSwitches = running.Switches = switchesLive;
+                    snapshot.TotalAutomations = running.Automations = automationsLive;
+                }
+                newRows.Add(snapshot);
             }
 
             db.DailyStatSnapshots.AddRange(newRows);
@@ -127,15 +144,16 @@ namespace garge_api.Services
             var todayStart = today.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
             var tomorrow = todayStart.AddDays(1);
 
-            // Carry from the last completed day (yesterday after EnsureUpToDate), then apply today's
-            // live deltas. Recomputed every read, so later same-day activity is always reflected.
+            // Today's live row. Users carry from the last completed day plus today's signups minus
+            // today's deletions (soft-delete keeps the full record). Sensors, switches and automations
+            // are hard-deleted, so use their live counts directly — that is what makes them dip.
             var running = snapshots.Count > 0 ? Totals.From(snapshots[^1]) : new Totals();
             running.Users += await db.Users.CountAsync(u => u.CreatedAt >= todayStart && u.CreatedAt < tomorrow, ct);
             running.Users -= await db.Users.CountAsync(
                 u => u.IsDeleted && u.DeletedAt != null && u.DeletedAt >= todayStart && u.DeletedAt < tomorrow, ct);
-            running.Sensors += await db.Sensors.CountAsync(s => s.CreatedAt >= todayStart && s.CreatedAt < tomorrow, ct);
-            running.Switches += await db.Switches.CountAsync(s => s.CreatedAt >= todayStart && s.CreatedAt < tomorrow, ct);
-            running.Automations += await db.AutomationRules.CountAsync(a => a.CreatedAt >= todayStart && a.CreatedAt < tomorrow, ct);
+            running.Sensors = await db.Sensors.CountAsync(ct);
+            running.Switches = await db.Switches.CountAsync(ct);
+            running.Automations = await db.AutomationRules.CountAsync(ct);
 
             // Don't fabricate a lone zero row when nothing has ever happened.
             if (snapshots.Count == 0 && running.IsZero) return snapshots;

@@ -1,5 +1,6 @@
 using garge_api.Models;
 using garge_api.Models.Admin;
+using garge_api.Models.Sensor;
 using garge_api.Services;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -18,6 +19,13 @@ public class StatsSnapshotServiceTests
         CreatedAt = created.ToDateTime(new TimeOnly(12, 0)),
         IsDeleted = deleted != null,
         DeletedAt = deleted?.ToDateTime(new TimeOnly(12, 0)),
+    };
+
+    private static Sensor MakeSensor(int id, DateOnly created) => new()
+    {
+        Id = id, Name = $"s{id}", Type = "voltage", Role = "sensor",
+        RegistrationCode = $"rc{id}", DefaultName = "D", ParentName = "gw",
+        CreatedAt = created.ToDateTime(new TimeOnly(12, 0)),
     };
 
     private static DailyStatSnapshot? Frozen(ApplicationDbContext db, DateOnly date) =>
@@ -140,6 +148,29 @@ public class StatsSnapshotServiceTests
 
         Assert.Equal(0, second);
         Assert.Equal(count, db.DailyStatSnapshots.Count());
+    }
+
+    [Fact]
+    public async Task Sensors_UseLiveCount_AndDipWhenRemoved()
+    {
+        // Sensors are hard-deleted, so the series tracks the live count: today reflects removals, and
+        // the latest frozen day is stamped with the live count too.
+        using var db = NewDb();
+        var twoDaysAgo = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-2);
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1);
+        db.Sensors.AddRange(MakeSensor(1, twoDaysAgo), MakeSensor(2, twoDaysAgo), MakeSensor(3, twoDaysAgo));
+        await db.SaveChangesAsync(Ct);
+
+        var before = await StatsSnapshotService.GetHistoryAsync(db, Ct);
+        Assert.Equal(3, before[^1].TotalSensors);              // today = live count
+        Assert.Equal(3, Frozen(db, yesterday)!.TotalSensors);  // latest frozen day stamped live
+
+        db.Sensors.Remove(db.Sensors.Single(s => s.Id == 3));  // hard delete
+        await db.SaveChangesAsync(Ct);
+
+        var after = await StatsSnapshotService.GetHistoryAsync(db, Ct);
+        Assert.Equal(2, after[^1].TotalSensors);               // today dips
+        Assert.Equal(3, Frozen(db, yesterday)!.TotalSensors);  // frozen day unchanged
     }
 
     [Fact]
