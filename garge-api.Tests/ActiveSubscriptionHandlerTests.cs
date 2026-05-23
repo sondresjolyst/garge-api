@@ -5,6 +5,7 @@ using garge_api.Services;
 using garge_api.Models.Sensor;
 using garge_api.Models.Subscription;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
@@ -46,13 +47,19 @@ public class ActiveSubscriptionHandlerTests
         return (handler, db);
     }
 
-    private static AuthorizationHandlerContext MakeContext(string userId, params string[] roles)
+    private static AuthorizationHandlerContext MakeContext(string userId)
     {
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId) };
-        foreach (var role in roles)
-            claims.Add(new(ClaimTypes.Role, role));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"));
         return new AuthorizationHandlerContext([new ActiveSubscriptionRequirement()], principal, null);
+    }
+
+    // Bypass is resolved from the DB (UserRoles), not the JWT — seed the role the same way.
+    private static void GrantRole(ApplicationDbContext db, string userId, string roleName)
+    {
+        var roleId = $"role-{roleName}";
+        db.Roles.Add(new IdentityRole { Id = roleId, Name = roleName, NormalizedName = roleName.ToUpperInvariant() });
+        db.UserRoles.Add(new IdentityUserRole<string> { UserId = userId, RoleId = roleId });
     }
 
     private static Subscription Primary(string userId, SubscriptionStatus status = SubscriptionStatus.Active, int quantity = 1, bool isTest = false)
@@ -76,11 +83,17 @@ public class ActiveSubscriptionHandlerTests
     [InlineData("Admin")]
     [InlineData("SensorAdmin")]
     [InlineData("MqttAdmin")]
-    public async Task BypassRole_Succeeds_WithoutCheckingDb(string role)
+    [InlineData("ComplimentaryUser")]
+    public async Task BypassRole_Succeeds(string role)
     {
-        var (handler, _) = Create();
-        var ctx = MakeContext("user-1", role);
+        // A subscription-bypass role grants claim access with no capacity. The role lives in the DB
+        // and is NOT in the token (MakeContext adds no role claim) — proving the handler resolves
+        // bypass from the DB, so a freshly granted role works without forcing a re-login.
+        var (handler, db) = Create();
+        GrantRole(db, "user-1", role);
+        await db.SaveChangesAsync();
 
+        var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
 
         Assert.True(ctx.HasSucceeded);

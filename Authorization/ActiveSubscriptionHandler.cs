@@ -1,4 +1,3 @@
-using garge_api.Constants;
 using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,14 +34,18 @@ namespace garge_api.Authorization
             var userId = context.User.UserId();
             if (userId == null) return;
 
-            if (RoleNames.SubscriptionBypassRoles.Any(r => context.User.IsInRole(r)))
+            using var scope = _scopeFactory.CreateScope();
+            var capacityService = scope.ServiceProvider.GetRequiredService<ISubscriptionCapacityService>();
+
+            // Subscription-bypass roles (complimentary / service-account / admin) have no capacity
+            // limit. Resolve from the DB — not the JWT (context.User.IsInRole) — so this matches
+            // GET /sensors/capacity exactly and works even when the role was granted after the
+            // user's token was issued (otherwise the meter shows access but the claim 403s).
+            if (await capacityService.HasSubscriptionBypassAsync(userId))
             {
                 context.Succeed(requirement);
                 return;
             }
-
-            using var scope = _scopeFactory.CreateScope();
-            var capacityService = scope.ServiceProvider.GetRequiredService<ISubscriptionCapacityService>();
 
             var capacity = await capacityService.GetCapacityAsync(userId);
             var activeOwned = await capacityService.GetActiveOwnedSensorCountAsync(userId);
