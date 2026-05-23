@@ -2,7 +2,9 @@ using garge_api.Controllers;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Mqtt;
 using garge_api.Models.Sensor;
+using garge_api.Models.Switch;
 using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -176,6 +178,49 @@ public class SensorSharingTests : ControllerTestBase
         Assert.IsType<OkObjectResult>(result);
         Assert.DoesNotContain(db.UserSensors, us => us.SensorId == 1);          // owner + viewer both gone
         Assert.All(db.SensorOwnershipPeriods.Where(p => p.SensorId == 1), p => Assert.NotNull(p.EndedAt));
+    }
+
+    [Fact]
+    public async Task UnclaimSensor_OrphansDiscoveredSocket_RevokesItsShares()
+    {
+        // Owner indirectly owns socket-a via sensor 1's gateway, and shared it. Unclaiming the sensor
+        // leaves socket-a with no owner, so its share must be revoked (the discovery edge).
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("owner", "owner@x"), MakeUser("viewer", "viewer@x"));
+        db.Sensors.Add(MakeSensor(1)); // ParentName "gw"
+        db.UserSensors.Add(new UserSensor { UserId = "owner", SensorId = 1, IsOwner = true });
+        db.Switches.Add(new Switch { Id = 10, Name = "socket-a", Type = "socket", Role = "switch" });
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
+        db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
+        db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "viewer", SwitchId = 10, StartedAt = DateTime.UtcNow, EndedAt = null });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "owner").UnclaimSensor(1);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.DoesNotContain(db.UserSwitches, us => us.SwitchId == 10);
+        Assert.NotNull(db.SwitchOwnershipPeriods.Single(p => p.SwitchId == 10).EndedAt);
+    }
+
+    [Fact]
+    public async Task UnclaimSensor_SocketStillOwned_KeepsItsShares()
+    {
+        // A second owner still owns the socket indirectly, so unclaiming one sensor keeps the share.
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("owner", "owner@x"), MakeUser("other", "other@x"), MakeUser("viewer", "viewer@x"));
+        db.Sensors.Add(MakeSensor(1)); // gw
+        db.Sensors.Add(new Sensor { Id = 2, Name = "garge_volt_2", Type = "voltage", Role = "sensor", RegistrationCode = "rc2", DefaultName = "Battery", ParentName = "gw" });
+        db.UserSensors.AddRange(
+            new UserSensor { UserId = "owner", SensorId = 1, IsOwner = true },
+            new UserSensor { UserId = "other", SensorId = 2, IsOwner = true });
+        db.Switches.Add(new Switch { Id = 10, Name = "socket-a", Type = "socket", Role = "switch" });
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
+        db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
+        await db.SaveChangesAsync();
+
+        await CreateController(db, "owner").UnclaimSensor(1);
+
+        Assert.Contains(db.UserSwitches, us => us.SwitchId == 10 && us.UserId == "viewer"); // still owned by "other"
     }
 
     [Fact]

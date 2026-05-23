@@ -78,13 +78,23 @@ shared onward** — not the owner's earlier private history (same model used for
 - If the owner lets a sensor get suspended (over quota), reads are paused for everyone, including
   recipients — there is simply no data being shown while it is off.
 
+### Switches and the discovery edge
+Switches (shown as "sockets" in the app) share the same model. A switch *owner* is a direct owner (who
+claimed it) **or** an indirect owner — a user who owns the parent sensor whose gateway discovered the
+switch. Either can share it; Edit gates the only user-reachable switch mutation (deleting telemetry),
+since toggling is admin/operator-only or via automations (already gated).
+
+When a sensor discovers a new socket, only the sensor's **owner** gains access to it automatically;
+people the sensor is *shared* with do not (a sensor share is not a switch share). Because indirect
+owners can share, unclaiming a sensor could leave a discovered socket with no owner — so sensor unclaim
+also revokes shares on any socket that is left ownerless, keeping socket-share lifetime tied to
+ownership.
+
 ## Status / scope
 
 Implemented: capacity model, claim gating, auto-suspension, suspended-data retention + opt-out purge,
-the capacity endpoint, and bypass-role handling.
+the capacity endpoint, bypass-role handling, and **sensor + switch sharing** (Read/Edit tiers,
+share/revoke/list, viewer history window, owner-unclaim cascade, orphaned-socket-share cleanup, and
+Edit/owner gating of automations, calibration and switch-telemetry deletion).
 
-Sharing is delivered in phases:
-- **Phase 1 (this record):** sensor sharing — Read/Edit tiers, share/revoke/list, viewer read access +
-  history window, owner-unclaim cascade, and Edit/owner gating of automations and calibration. To avoid
-  leaking switch control, the indirect sensor→switch access path is restricted to owners until phase 2.
-- **Phase 2 (planned):** direct switch sharing with a read/control split, and the frontend share UI.
+Remaining: the frontend share UI for switches/sockets (sensor share UI shipped first).

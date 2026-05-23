@@ -725,8 +725,62 @@ namespace garge_api.Controllers
             _ownership.InvalidateSensor(id);
             await _context.SaveChangesAsync();
 
+            // Losing an owned sensor can leave a socket it discovered with no owner. Revoke any shares
+            // on now-ownerless sockets so socket access never outlives ownership (the discovery edge).
+            if (callerWasOwner)
+            {
+                await RevokeOrphanedSwitchSharesAsync(sensor.ParentName);
+                await _context.SaveChangesAsync();
+            }
+
             _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id, CascadedViewers = callerWasOwner });
             return Ok(new { message = "Sensor removed from your account." });
+        }
+
+        /// <summary>
+        /// After an owned sensor is removed, revoke shares on any socket its gateway discovered that now
+        /// has no remaining owner (no direct owner row, no other owned sensor under the gateway). Keeps
+        /// socket-share lifetime tied to ownership without needing to track who created each share.
+        /// </summary>
+        private async Task RevokeOrphanedSwitchSharesAsync(string? parentName)
+        {
+            if (string.IsNullOrEmpty(parentName)) return;
+
+            var socketNames = await _context.DiscoveredDevices
+                .Where(dd => dd.DiscoveredBy == parentName)
+                .Select(dd => dd.Target)
+                .Distinct()
+                .ToListAsync();
+            if (socketNames.Count == 0) return;
+
+            var switches = await _context.Switches.Where(s => socketNames.Contains(s.Name)).ToListAsync();
+            foreach (var sw in switches)
+            {
+                var hasDirectOwner = await _context.UserSwitches.AnyAsync(us => us.SwitchId == sw.Id && us.IsOwner);
+                var hasIndirectOwner = await _context.DiscoveredDevices
+                    .Where(dd => dd.Target == sw.Name)
+                    .Join(_context.Sensors, dd => dd.DiscoveredBy, s => s.ParentName, (dd, s) => s.Id)
+                    .Join(_context.UserSensors.Where(us => us.IsOwner), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
+                    .AnyAsync();
+                if (hasDirectOwner || hasIndirectOwner) continue; // still owned — keep its shares
+
+                var viewers = await _context.UserSwitches
+                    .Where(us => us.SwitchId == sw.Id && !us.IsOwner)
+                    .ToListAsync();
+                if (viewers.Count == 0) continue;
+
+                foreach (var viewer in viewers)
+                {
+                    _context.UserSwitches.Remove(viewer);
+                    var periods = await _context.SwitchOwnershipPeriods
+                        .Where(p => p.UserId == viewer.UserId && p.SwitchId == sw.Id && p.EndedAt == null)
+                        .ToListAsync();
+                    foreach (var p in periods) p.EndedAt = DateTime.UtcNow;
+                    _context.UserSwitchCustomNames.RemoveRange(
+                        _context.UserSwitchCustomNames.Where(x => x.UserId == viewer.UserId && x.SwitchId == sw.Id));
+                }
+                _ownership.InvalidateSwitch(sw.Id);
+            }
         }
 
         /// <summary>
