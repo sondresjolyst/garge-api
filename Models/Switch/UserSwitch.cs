@@ -11,6 +11,14 @@ namespace garge_api.Models.Switch
         [Required]
         public int SwitchId { get; set; }
 
+        public bool IsOwner { get; set; } = true;
+
+        /// <summary>
+        /// For a shared row (<see cref="IsOwner"/> = false), what the recipient may do. Ignored for the
+        /// owner's own row. Defaults to <see cref="SharePermission.Read"/>.
+        /// </summary>
+        public SharePermission Permission { get; set; } = SharePermission.Read;
+
         /// <summary>
         /// When set, the owner has turned this switch off (or it was auto-suspended for being over
         /// quota). Reads are blocked while suspended, but telemetry keeps flowing. Null = active.

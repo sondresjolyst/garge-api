@@ -48,6 +48,19 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
+        /// <summary>
+        /// True when the caller may edit shared state on this sensor — owner, an Edit-tier share, or
+        /// admin. Calibration writes a global per-sensor offset, so a read-only share must not change it.
+        /// </summary>
+        private async Task<bool> UserCanEditSensorAsync(int sensorId)
+        {
+            if (IsAdmin()) return true;
+            var userId = User.UserId();
+            return await _context.UserSensors.AnyAsync(us =>
+                us.UserId == userId && us.SensorId == sensorId &&
+                (us.IsOwner || us.Permission == SharePermission.Edit));
+        }
+
         // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
         // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
         private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
@@ -137,7 +150,7 @@ namespace garge_api.Controllers
         {
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null) return NotFound(new { message = "Sensor not found!" });
-            if (!await UserCanAccessSensorAsync(sensor.Id)) return Forbid();
+            if (!await UserCanEditSensorAsync(sensor.Id)) return Forbid();
 
             var latest = await WithinOwnershipWindow(
                     _context.SensorData.Where(sd => sd.SensorId == sensor.Id))
@@ -164,7 +177,7 @@ namespace garge_api.Controllers
         {
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null) return NotFound(new { message = "Sensor not found!" });
-            if (!await UserCanAccessSensorAsync(sensor.Id)) return Forbid();
+            if (!await UserCanEditSensorAsync(sensor.Id)) return Forbid();
 
             sensor.CalibrationOffsetV = null;
             await _context.SaveChangesAsync();

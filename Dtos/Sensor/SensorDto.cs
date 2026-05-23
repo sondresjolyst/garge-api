@@ -1,3 +1,5 @@
+using garge_api.Models;
+
 namespace garge_api.Dtos.Sensor
 {
     public class SensorDto
@@ -13,5 +15,11 @@ namespace garge_api.Dtos.Sensor
 
         /// <summary>True when the caller has this owned sensor turned off / over-quota suspended. Data reads are blocked while suspended.</summary>
         public bool Suspended { get; set; }
+
+        /// <summary>
+        /// The caller's relationship to this sensor: <c>owner</c> (or admin), <c>edit</c> (Edit share),
+        /// or <c>read</c> (Read share). Drives which controls the client shows.
+        /// </summary>
+        public string Access { get; set; } = DeviceAccess.Owner;
     }
 }

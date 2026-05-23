@@ -14,6 +14,12 @@ namespace garge_api.Models.Sensor
         public bool IsOwner { get; set; } = true;
 
         /// <summary>
+        /// For a shared row (<see cref="IsOwner"/> = false), what the recipient may do. Ignored for the
+        /// owner's own row, which always has full rights. Defaults to <see cref="SharePermission.Read"/>.
+        /// </summary>
+        public SharePermission Permission { get; set; } = SharePermission.Read;
+
+        /// <summary>
         /// When set, the owner has turned this sensor off (or it was auto-suspended for being over
         /// quota). Suspended owned sensors do not count toward subscription capacity and their
         /// dashboard/history reads are blocked, but telemetry keeps flowing. Null = active.
