@@ -210,17 +210,21 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Gets all users with their roles.
+        /// Gets all users with their roles. Soft-deleted (scrubbed) accounts are hidden by default;
+        /// pass includeDeleted=true to include them (e.g. an admin "Show deleted" toggle).
         /// </summary>
+        /// <param name="includeDeleted">When true, also returns soft-deleted accounts.</param>
         /// <returns>A list of all users.</returns>
         [HttpGet("/api/users")]
         [SwaggerOperation(Summary = "Gets all users.")]
         [SwaggerResponse(200, "Users retrieved successfully.", typeof(IEnumerable<UserDto>))]
-        public async Task<IActionResult> GetUsers()
+        public async Task<IActionResult> GetUsers([FromQuery] bool includeDeleted = false)
         {
-            _logger.LogInformation("GetUsers called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetUsers called by {@LogData}", new { CallerUserId = User.UserId(), IncludeDeleted = includeDeleted });
 
-            var users = _userManager.Users.ToList();
+            var query = _userManager.Users;
+            if (!includeDeleted) query = query.Where(u => !u.IsDeleted);
+            var users = query.ToList();
             var dtos = new List<UserDto>();
             foreach (var user in users)
             {
@@ -247,7 +251,7 @@ namespace garge_api.Controllers
             // Monday-start ISO week.
             var weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
 
-            var totalUsers = await _userManager.Users.CountAsync();
+            var totalUsers = await _userManager.Users.CountAsync(u => !u.IsDeleted);
             var totalSensors = await _context.Sensors.CountAsync();
             var totalSwitches = await _context.Switches.CountAsync();
             var activeAutomations = await _context.AutomationRules.CountAsync(r => r.IsEnabled);
@@ -349,6 +353,14 @@ namespace garge_api.Controllers
                 .Select(u => u.CreatedAt.Date)
                 .ToListAsync();
 
+            // Account deletions decrement the running total so the line dips on churn, not just climbs.
+            // Scrubbed (soft-deleted) rows keep CreatedAt, so they were counted on signup — subtract
+            // them again on their DeletedAt date.
+            var userDeletedDates = await _userManager.Users
+                .Where(u => u.IsDeleted && u.DeletedAt != null)
+                .Select(u => u.DeletedAt!.Value.Date)
+                .ToListAsync();
+
             var sensorDates = await _context.Sensors
                 .Select(s => s.CreatedAt.Date)
                 .ToListAsync();
@@ -375,7 +387,7 @@ namespace garge_api.Controllers
 
             for (var date = start; date <= today; date = date.AddDays(1))
             {
-                users += userDates.Count(d => d == date);
+                users += userDates.Count(d => d == date) - userDeletedDates.Count(d => d == date);
                 sensors += sensorDates.Count(d => d == date);
                 switches += switchDates.Count(d => d == date);
                 automations += automationDates.Count(d => d == date);
