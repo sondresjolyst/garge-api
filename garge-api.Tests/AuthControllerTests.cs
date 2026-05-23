@@ -285,6 +285,41 @@ public class AuthControllerTests : ControllerTestBase
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    private static string Sha256B64(string t)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToBase64String(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(t)));
+    }
+
+    [Fact]
+    public async Task ResetPassword_Success_ClearsLockout()
+    {
+        // A user who locked themselves out with the old password must be able to sign in with the new
+        // one immediately — the reset clears the lockout.
+        var user = new User
+        {
+            Id = "u1", UserName = "user", Email = "user@test.com", FirstName = "F", LastName = "L",
+            PasswordResetCodeHash = Sha256B64("ABCDEF"),
+            PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10),
+            PasswordResetAttempts = 0,
+            LockoutEnd = DateTimeOffset.UtcNow.AddMinutes(20),
+            AccessFailedCount = 3,
+        };
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.GeneratePasswordResetTokenAsync(user)).ReturnsAsync("token");
+        MockUserManager.Setup(m => m.ResetPasswordAsync(user, "token", It.IsAny<string>())).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        var result = await CreateAuthController().ResetPassword(
+            new ResetPasswordDto { Email = user.Email!, Code = "ABCDEF", NewPassword = "Password1!" });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Null(user.LockoutEnd);
+        Assert.Equal(0, user.AccessFailedCount);
+        Assert.Null(user.PasswordResetCodeHash);
+        Assert.Equal(0, user.PasswordResetAttempts);
+    }
+
     [Fact]
     public async Task Register_PersistsTermsFields()
     {

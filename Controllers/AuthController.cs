@@ -486,6 +486,11 @@ namespace garge_api.Controllers
             user.PasswordResetCodeHash = null;
             user.PasswordResetCodeExpiration = null;
             user.PasswordResetAttempts = 0;
+            // A successful reset proves the user controls the account, so clear any login lockout —
+            // otherwise a user who locked themselves out with the old password still gets 401 with the
+            // new one until the lockout window expires.
+            user.LockoutEnd = null;
+            user.AccessFailedCount = 0;
             await _userManager.UpdateAsync(user);
 
             _logger.LogInformation("Password reset successfully {UserId}", user.Id);
