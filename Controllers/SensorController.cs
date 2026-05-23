@@ -158,7 +158,7 @@ namespace garge_api.Controllers
                 : await _context.UserSensors
                     .Where(us => us.UserId == currentUserId && sensorIds.Contains(us.SensorId))
                     .ToListAsync();
-            var accessById = accessRows.ToDictionary(us => us.SensorId, us => AccessLabel(us.IsOwner, us.Permission));
+            var accessById = accessRows.ToDictionary(us => us.SensorId, us => DeviceAccess.From(us.IsOwner, us.Permission));
 
             // Map sensors and inject the user-specific custom name + suspended + access state
             var dtos = sensors.Select(sensor =>
@@ -167,7 +167,7 @@ namespace garge_api.Controllers
                 if (customNames.TryGetValue(sensor.Id, out var customName))
                     dto.CustomName = customName;
                 dto.Suspended = suspendedIds.Contains(sensor.Id);
-                dto.Access = IsAdmin() ? "owner" : (accessById.TryGetValue(sensor.Id, out var a) ? a : "owner");
+                dto.Access = IsAdmin() ? DeviceAccess.Owner : (accessById.TryGetValue(sensor.Id, out var a) ? a : DeviceAccess.Owner);
                 return dto;
             }).ToList();
 
@@ -776,20 +776,16 @@ namespace garge_api.Controllers
                 (us.IsOwner || us.Permission == SharePermission.Edit));
         }
 
-        /// <summary>Maps an owner flag + share permission to the SensorDto.Access label.</summary>
-        private static string AccessLabel(bool isOwner, SharePermission permission) =>
-            isOwner ? "owner" : permission == SharePermission.Edit ? "edit" : "read";
-
         /// <summary>The caller's relationship to a sensor for SensorDto.Access (admins count as owner).</summary>
         private async Task<string> CallerAccessAsync(int sensorId)
         {
-            if (IsAdmin()) return "owner";
+            if (IsAdmin()) return DeviceAccess.Owner;
             var userId = User.UserId();
             var row = await _context.UserSensors
                 .Where(us => us.UserId == userId && us.SensorId == sensorId)
                 .Select(us => new { us.IsOwner, us.Permission })
                 .FirstOrDefaultAsync();
-            return row == null ? "owner" : AccessLabel(row.IsOwner, row.Permission);
+            return row == null ? DeviceAccess.Owner : DeviceAccess.From(row.IsOwner, row.Permission);
         }
 
         /// <summary>Shares a sensor with another Garge user (Read or Edit). Owner only.</summary>
