@@ -349,15 +349,10 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.UserId() });
 
-            // Snapshots are the source of truth: immutable per-day rows that outlive the per-user data
-            // they were derived from (so the history survives the post-5y purge). Bring them current —
-            // appending any missing days from live data — then return the series. The daily background
-            // job does the same, so this is usually just a no-op append of today.
-            await Services.StatsSnapshotService.EnsureUpToDateAsync(_context);
-
-            var snapshots = await _context.DailyStatSnapshots
-                .OrderBy(s => s.Date)
-                .ToListAsync();
+            // Frozen completed-day snapshots (immutable, so they outlive the per-user data they were
+            // derived from and survive the post-5y purge) plus a live row for today. The daily job
+            // freezes completed days; today is always recomputed here so same-day churn isn't lost.
+            var snapshots = await Services.StatsSnapshotService.GetHistoryAsync(_context);
 
             var result = snapshots.Select(s => (object)new
             {

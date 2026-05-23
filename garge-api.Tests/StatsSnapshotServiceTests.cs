@@ -15,18 +15,21 @@ public class StatsSnapshotServiceTests
     private static User MakeUser(string id, DateOnly created, DateOnly? deleted = null) => new()
     {
         Id = id, UserName = id, Email = $"{id}@test.com", FirstName = "T", LastName = "U",
-        CreatedAt = created.ToDateTime(TimeOnly.MinValue),
+        CreatedAt = created.ToDateTime(new TimeOnly(12, 0)),
         IsDeleted = deleted != null,
-        DeletedAt = deleted?.ToDateTime(TimeOnly.MinValue),
+        DeletedAt = deleted?.ToDateTime(new TimeOnly(12, 0)),
     };
 
-    private static DailyStatSnapshot? Day(ApplicationDbContext db, DateOnly date) =>
+    private static DailyStatSnapshot? Frozen(ApplicationDbContext db, DateOnly date) =>
         db.DailyStatSnapshots.SingleOrDefault(s => s.Date == date);
+
+    private static int UsersOn(List<DailyStatSnapshot> series, DateOnly date) =>
+        series.Single(s => s.Date == date).TotalUsers;
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     [Fact]
-    public async Task Backfill_ClimbsOnSignup_DipsOnDeletion()
+    public async Task History_ClimbsOnSignup_DipsOnDeletion()
     {
         using var db = NewDb();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -38,36 +41,73 @@ public class StatsSnapshotServiceTests
             MakeUser("u3", d1, deleted: d2));
         await db.SaveChangesAsync(Ct);
 
-        var added = await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
+        var series = await StatsSnapshotService.GetHistoryAsync(db, Ct);
 
-        Assert.Equal(4, added); // d1 .. today inclusive
-        Assert.Equal(3, Day(db, d1)!.TotalUsers);
-        Assert.Equal(2, Day(db, d2)!.TotalUsers);
-        Assert.Equal(2, Day(db, today)!.TotalUsers);
+        Assert.Equal(3, UsersOn(series, d1));
+        Assert.Equal(2, UsersOn(series, d2));
+        Assert.Equal(2, UsersOn(series, today));
     }
 
     [Fact]
-    public async Task SecondRun_SameDay_AppendsNothing()
+    public async Task EnsureUpToDate_FreezesCompletedDaysOnly_NotToday()
+    {
+        using var db = NewDb();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        db.Users.Add(MakeUser("u1", today.AddDays(-2)));
+        db.Users.Add(MakeUser("u2", today)); // signed up today
+        await db.SaveChangesAsync(Ct);
+
+        await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
+
+        Assert.NotNull(Frozen(db, today.AddDays(-1)));   // yesterday frozen
+        Assert.Null(Frozen(db, today));                  // today never frozen
+        Assert.Equal(1, Frozen(db, today.AddDays(-1))!.TotalUsers);
+    }
+
+    [Fact]
+    public async Task SameDaySignupAndDelete_NetsToZero_OnThatDay()
+    {
+        // The reported edge: a user signs up and deletes on the same day. They must net to zero — never
+        // bumping the count for that day — whether the day is still live or already frozen.
+        using var db = NewDb();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var pastDay = today.AddDays(-3);
+        db.Users.Add(MakeUser("baseline", today.AddDays(-5)));
+        db.Users.Add(MakeUser("churned-live", today, deleted: today));       // same-day, today (live)
+        db.Users.Add(MakeUser("churned-past", pastDay, deleted: pastDay));   // same-day, completed day
+        await db.SaveChangesAsync(Ct);
+
+        var series = await StatsSnapshotService.GetHistoryAsync(db, Ct);
+
+        Assert.Equal(1, UsersOn(series, pastDay)); // only baseline; the past same-day churn nets out
+        Assert.Equal(1, UsersOn(series, today));   // baseline only; the live same-day churn nets out
+        Assert.Equal(1, Frozen(db, pastDay)!.TotalUsers); // frozen value also nets out
+    }
+
+    [Fact]
+    public async Task TodayIsNeverFrozen_SoLaterSameDayActivityIsReflected()
     {
         using var db = NewDb();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         db.Users.Add(MakeUser("u1", today.AddDays(-1)));
         await db.SaveChangesAsync(Ct);
 
-        await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
-        var countAfterFirst = db.DailyStatSnapshots.Count();
+        var first = await StatsSnapshotService.GetHistoryAsync(db, Ct);
+        Assert.Equal(1, UsersOn(first, today));
 
-        var second = await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
+        // A second signup happens later the same day.
+        db.Users.Add(MakeUser("u2", today));
+        await db.SaveChangesAsync(Ct);
 
-        Assert.Equal(0, second);
-        Assert.Equal(countAfterFirst, db.DailyStatSnapshots.Count());
+        var second = await StatsSnapshotService.GetHistoryAsync(db, Ct);
+        Assert.Equal(2, UsersOn(second, today)); // reflected, not lost to a frozen partial-day row
     }
 
     [Fact]
     public async Task ExistingSnapshots_AreFrozen_OnlyLaterDaysAppended()
     {
-        // A frozen old snapshot whose totals no longer match live data (e.g. its source rows were
-        // purged) must be left untouched; only days after it are appended, carrying its totals forward.
+        // A frozen old snapshot whose totals no longer match live data (its source rows were purged)
+        // must be left untouched; only later completed days are appended, carrying it forward.
         using var db = NewDb();
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var old = today.AddDays(-10);
@@ -75,23 +115,38 @@ public class StatsSnapshotServiceTests
         {
             Date = old, TotalUsers = 500, TotalSensors = 10, TotalSwitches = 2, TotalAutomations = 1,
         });
-        db.Users.Add(MakeUser("u1", today)); // one recent signup; the 500 historical users are "purged"
+        db.Users.Add(MakeUser("u1", today.AddDays(-1))); // a recent completed-day signup
         await db.SaveChangesAsync(Ct);
 
         var added = await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
 
-        Assert.Equal(10, added);                       // old+1 .. today
-        Assert.Equal(500, Day(db, old)!.TotalUsers);   // frozen, not recomputed
-        Assert.Equal(501, Day(db, today)!.TotalUsers); // carried base + today's signup
-        Assert.Null(Day(db, old.AddDays(-1)));         // nothing before the frozen row
+        Assert.Equal(9, added);                          // old+1 .. yesterday
+        Assert.Equal(500, Frozen(db, old)!.TotalUsers);  // frozen, not recomputed
+        Assert.Equal(501, Frozen(db, today.AddDays(-1))!.TotalUsers); // carried base + the signup
+        Assert.Null(Frozen(db, old.AddDays(-1)));        // nothing before the frozen row
     }
 
     [Fact]
-    public async Task NoActivity_AddsNothing()
+    public async Task SecondRun_AppendsNothing()
     {
         using var db = NewDb();
-        var added = await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
-        Assert.Equal(0, added);
-        Assert.Empty(db.DailyStatSnapshots);
+        db.Users.Add(MakeUser("u1", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-2)));
+        await db.SaveChangesAsync(Ct);
+
+        await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
+        var count = db.DailyStatSnapshots.Count();
+
+        var second = await StatsSnapshotService.EnsureUpToDateAsync(db, Ct);
+
+        Assert.Equal(0, second);
+        Assert.Equal(count, db.DailyStatSnapshots.Count());
+    }
+
+    [Fact]
+    public async Task NoActivity_AddsNothing_AndEmptyHistory()
+    {
+        using var db = NewDb();
+        Assert.Equal(0, await StatsSnapshotService.EnsureUpToDateAsync(db, Ct));
+        Assert.Empty(await StatsSnapshotService.GetHistoryAsync(db, Ct));
     }
 }
