@@ -69,9 +69,7 @@ namespace garge_api.Controllers
             => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
 
         /// <summary>
-        /// Returns the caller's sensor capacity and whether they can claim another sensor — the single
-        /// source of truth for the claim button and capacity meter, so the client never re-derives
-        /// capacity or the subscription-bypass role list.
+        /// Returns the caller's sensor capacity, how much is in use, and whether they may claim another.
         /// </summary>
         [HttpGet("capacity")]
         [Authorize]
@@ -944,7 +942,7 @@ namespace garge_api.Controllers
             return Ok(shares);
         }
 
-        /// <summary>Owner turns a sensor off: blocks its data reads and frees a quota slot. Always allowed.</summary>
+        /// <summary>Turns off an owned sensor, hiding its data and freeing its capacity slot.</summary>
         [HttpPost("{id}/suspend")]
         [Authorize]
         [SwaggerOperation(Summary = "Suspend (turn off) an owned sensor.")]
@@ -967,7 +965,7 @@ namespace garge_api.Controllers
             return Ok(new { message = "Sensor turned off.", suspended = true });
         }
 
-        /// <summary>Owner turns a sensor back on. Rejected if it would exceed the current plan capacity.</summary>
+        /// <summary>Turns an owned sensor back on. Returns 400 if it would exceed the caller's capacity.</summary>
         [HttpPost("{id}/activate")]
         [Authorize]
         [SwaggerOperation(Summary = "Activate (turn on) an owned sensor.")]
