@@ -349,58 +349,24 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.UserId() });
 
-            var userDates = await _userManager.Users
-                .Select(u => u.CreatedAt.Date)
+            // Snapshots are the source of truth: immutable per-day rows that outlive the per-user data
+            // they were derived from (so the history survives the post-5y purge). Bring them current —
+            // appending any missing days from live data — then return the series. The daily background
+            // job does the same, so this is usually just a no-op append of today.
+            await Services.StatsSnapshotService.EnsureUpToDateAsync(_context);
+
+            var snapshots = await _context.DailyStatSnapshots
+                .OrderBy(s => s.Date)
                 .ToListAsync();
 
-            // Account deletions decrement the running total so the line dips on churn, not just climbs.
-            // Scrubbed (soft-deleted) rows keep CreatedAt, so they were counted on signup — subtract
-            // them again on their DeletedAt date.
-            var userDeletedDates = await _userManager.Users
-                .Where(u => u.IsDeleted && u.DeletedAt != null)
-                .Select(u => u.DeletedAt!.Value.Date)
-                .ToListAsync();
-
-            var sensorDates = await _context.Sensors
-                .Select(s => s.CreatedAt.Date)
-                .ToListAsync();
-
-            var switchDates = await _context.Switches
-                .Select(s => s.CreatedAt.Date)
-                .ToListAsync();
-
-            var automationDates = await _context.AutomationRules
-                .Select(a => a.CreatedAt.Date)
-                .ToListAsync();
-
-            var sanityFloor = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var allDates = userDates.Concat(sensorDates).Concat(switchDates).Concat(automationDates)
-                .Where(d => d >= sanityFloor)
-                .ToList();
-            if (!allDates.Any()) return Ok(new List<object>());
-
-            var start = allDates.Min();
-            var today = DateTime.UtcNow.Date;
-
-            var result = new List<object>();
-            int users = 0, sensors = 0, switches = 0, automations = 0;
-
-            for (var date = start; date <= today; date = date.AddDays(1))
+            var result = snapshots.Select(s => (object)new
             {
-                users += userDates.Count(d => d == date) - userDeletedDates.Count(d => d == date);
-                sensors += sensorDates.Count(d => d == date);
-                switches += switchDates.Count(d => d == date);
-                automations += automationDates.Count(d => d == date);
-
-                result.Add(new
-                {
-                    date = date.ToString("yyyy-MM-dd"),
-                    totalUsers = users,
-                    totalSensors = sensors,
-                    totalSwitches = switches,
-                    totalAutomations = automations,
-                });
-            }
+                date = s.Date.ToString("yyyy-MM-dd"),
+                totalUsers = s.TotalUsers,
+                totalSensors = s.TotalSensors,
+                totalSwitches = s.TotalSwitches,
+                totalAutomations = s.TotalAutomations,
+            }).ToList();
 
             return Ok(result);
         }
