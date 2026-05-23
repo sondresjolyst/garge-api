@@ -186,6 +186,8 @@ namespace garge_api
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
             builder.Services.AddHostedService<QuotaReconciliationService>();
             builder.Services.AddHostedService<SuspendedSensorPurgeService>();
+            builder.Services.AddHostedService<StatsSnapshotService>();
+            builder.Services.AddHostedService<DeletedUserPurgeService>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddScoped<IAnonymizationService, AnonymizationService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();

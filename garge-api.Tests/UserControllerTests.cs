@@ -45,7 +45,7 @@ public class UserControllerTests : ControllerTestBase
     {
         Id = id, UserName = "userone", Email = "user@test.com",
         FirstName = "First", LastName = "Last", PhoneNumber = "47900000000",
-        EmailConfirmed = true
+        EmailConfirmed = true, TermsAcceptedIp = "203.0.113.7", PasswordHash = "hashed-secret"
     };
 
     [Fact]
@@ -77,6 +77,10 @@ public class UserControllerTests : ControllerTestBase
         Assert.Equal(user.Email!.ToUpperInvariant(), user.NormalizedEmail);
         Assert.DoesNotContain("user@test.com", user.Email!);
         Assert.Null(user.PhoneNumber);
+        // Login credential and the terms-acceptance IP are personal data with no basis to outlive
+        // the account — both must be cleared so the soft-deleted row holds no recoverable PII.
+        Assert.Null(user.PasswordHash);
+        Assert.Null(user.TermsAcceptedIp);
         Assert.False(user.EmailConfirmed);
         Assert.Equal(DateTimeOffset.MaxValue, user.LockoutEnd);
 

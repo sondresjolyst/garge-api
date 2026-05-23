@@ -56,6 +56,7 @@ namespace garge_api.Models
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
+        public DbSet<DailyStatSnapshot> DailyStatSnapshots { get; set; }
         public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
         public DbSet<Anonymized.AnonymizedSeries> AnonymizedSeries { get; set; }
         public DbSet<Anonymized.AnonymizedReading> AnonymizedReadings { get; set; }
@@ -71,6 +72,10 @@ namespace garge_api.Models
 
             modelBuilder.Entity<RolePermission>()
                 .HasIndex(rp => new { rp.RoleName, rp.Permission })
+                .IsUnique();
+
+            modelBuilder.Entity<DailyStatSnapshot>()
+                .HasIndex(s => s.Date)
                 .IsUnique();
 
             modelBuilder.Entity<Sensor.Sensor>()

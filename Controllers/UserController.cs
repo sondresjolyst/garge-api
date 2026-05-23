@@ -232,6 +232,11 @@ namespace garge_api.Controllers
             user.PasswordResetCodeHash = null;
             user.PasswordResetCodeExpiration = null;
             user.PasswordResetAttempts = 0;
+            // Drop the login credential and the IP captured at terms-acceptance. The IP is personal
+            // data with no basis to outlive the account (it is not part of the bokføringsloven
+            // invoice record), so clearing it keeps the row free of recoverable PII.
+            user.PasswordHash = null;
+            user.TermsAcceptedIp = null;
             user.LockoutEnabled = true;
             user.LockoutEnd = DateTimeOffset.MaxValue;
             user.IsDeleted = true;
