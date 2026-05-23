@@ -56,7 +56,6 @@ namespace garge_api.Services
                 var series = new AnonymizedSeries
                 {
                     SourceType = sensor?.Type ?? "unknown",
-                    CalibrationOffsetV = sensor?.Type == "voltage" ? sensor?.CalibrationOffsetV : null,
                     AnonymizedAt = DateTime.UtcNow
                 };
                 _db.AnonymizedSeries.Add(series);
