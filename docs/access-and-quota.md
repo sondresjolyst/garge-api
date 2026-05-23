@@ -1,100 +1,100 @@
-# Access, quota & device sharing
+# Access, quota and device sharing
 
-How device access, subscription capacity, cancellation, and sharing behave. This is the product
-decision record referenced by issue #245.
+This document describes how device access is governed: subscription capacity, what happens when a
+subscription is cancelled, retention of suspended data, and how owners share devices with other users.
+
+Throughout, "switch" and "socket" refer to the same device — the API uses *switch*, the app presents it
+to users as *socket*.
 
 ## Subscription capacity
 
-- **Capacity** = 1 (one active **Primary** subscription) + the summed `Quantity` of every active
-  **AddOn**. Without an active Primary, capacity is 0 — AddOns alone grant nothing.
-- A cancelled subscription (`Stopped`/`Expired`) still counts during its **paid-period grace**: while
-  `NextChargeDate` is in the future, the user keeps the capacity they paid for.
-- Only **active, owned** sensors consume capacity: `UserSensor.IsOwner = true` and `SuspendedAt = null`.
-  Suspended sensors and shared (viewer) sensors do not count.
-- The single source of truth is `SubscriptionCapacityService`; clients read it via `GET /sensors/capacity`.
+Capacity is the number of sensors a user may keep active at once.
 
-### Subscription-bypass roles
-`Admin, SensorAdmin, MqttAdmin, AutomationAdmin, SwitchAdmin, ComplimentaryUser, DeviceBridge` use the
-service with **no capacity limit**. They are never auto-suspended and their data is never purged. The
-check is DB-backed (`HasSubscriptionBypassAsync`) so a role granted to a logged-in user takes effect
-immediately, with no re-login.
+- Capacity equals one active **Primary** subscription plus the combined `Quantity` of every active
+  **AddOn**. Without an active Primary, capacity is zero; AddOns alone grant nothing.
+- A cancelled subscription continues to count for the remainder of the period already paid for: while
+  its `NextChargeDate` is in the future, the user retains that capacity.
+- Only active, owned sensors count against capacity. Suspended sensors and sensors shared with the user
+  do not.
 
-## What happens when an owner cancels (issue #245)
+`SubscriptionCapacityService` is the authority for capacity, and clients read it from
+`GET /sensors/capacity`.
 
-The model is **suspension, not deletion** — data is never lost on cancellation.
+### Roles that bypass capacity
 
-- **New claims** are gated at claim time (`ActiveSubscriptionHandler`): blocked once active owned sensors
-  ≥ capacity (bypass roles exempt). Existing access is never blocked at request time.
-- **Owner cancels Primary** → capacity drops to 0. After the paid-period grace lapses, the nightly
-  `QuotaReconciliationService` auto-suspends the owner's sensors (keeps the oldest `capacity` by claim
-  date, suspends the newest excess). With capacity 0 that is all of them.
-- **Owner cancels an AddOn while over capacity** → only the newest excess is suspended; the oldest stay
-  active.
-- **Suspended sensor**: dashboard/history reads are blocked and the slot is freed, but telemetry keeps
-  flowing. The owner re-picks which sensors are active via the suspend/activate toggle.
-- **Re-subscribe**: capacity is restored, but suspended sensors stay suspended until the owner
-  re-activates them (the user chooses which to bring back).
+`Admin`, `SensorAdmin`, `MqttAdmin`, `AutomationAdmin`, `SwitchAdmin`, `ComplimentaryUser` and
+`DeviceBridge` use the service without a capacity limit. They are never auto-suspended and their data is
+never purged. The role is resolved from the database, so granting it to a signed-in user takes effect
+immediately.
+
+## Cancelling a subscription
+
+Cancellation suspends devices; it never deletes data.
+
+- **Adding devices** is blocked once a user's active owned sensors reach their capacity. Access to
+  devices they already have is never blocked.
+- **Cancelling the Primary** drops capacity to zero. When the paid period ends, the user's sensors are
+  automatically suspended.
+- **Cancelling an AddOn while over capacity** suspends only the excess, keeping the oldest sensors (by
+  claim date) active.
+- A **suspended sensor** stops showing data and frees its capacity slot, while telemetry keeps being
+  recorded. The owner chooses which sensors are active using the on/off toggle.
+- **Resubscribing** restores capacity. Suspended sensors remain off until the owner turns them back on,
+  so the owner decides which to resume.
 
 ### Retention of suspended data
-Suspended-sensor history is kept under legitimate interest so a returning seasonal user keeps their
-year-over-year data. A user may **opt out** (GDPR Art. 21); once opted out and without coverage, their
-suspended sensors become eligible for the 180-day purge (`SuspendedSensorPurgeService`), which moves the
-telemetry into the anonymized ML store and removes the personal rows.
+
+Data from a suspended sensor is retained so a returning seasonal user keeps their year-over-year
+history. A user may object to this retention; once they have opted out and have no remaining coverage,
+their suspended sensors become eligible for purge after six months. Purging moves the telemetry into the
+anonymised analytics store and removes the personal records.
 
 ## Device sharing
 
-An owner can share a device with another Garge user. Two tiers, set per share.
+An owner can share a device with another Garge user at one of two access levels.
 
-### Mechanism
-- Share by the recipient's **email**; they must already have a Garge account.
-- A share is a `UserSensor` row with `IsOwner = false` and a `Permission` of `Read` or `Edit`.
-- Sharing **does not consume the recipient's capacity** (only `IsOwner = true` rows count), and it does
-  not affect the owner's capacity.
+### How a share works
 
-### Permission matrix
+- The owner shares with the recipient's account email; the recipient must already have a Garge account.
+- Sharing does not affect either user's capacity. Only owned devices count against capacity, so a shared
+  device never consumes the recipient's allowance or the owner's.
+
+### Access levels
 
 | Action | Read | Edit | Owner |
 |---|:--:|:--:|:--:|
-| View data, history, battery health, live updates | ✓ | ✓ | ✓ |
-| Set own custom name / activities / photos / alert prefs (per-user, private) | ✓ | ✓ | ✓ |
-| Toggle switches | | ✓ | ✓ |
-| Create / edit automations | | ✓ | ✓ |
-| Battery calibration (global offset) | | ✓ | ✓ |
-| Suspend / activate (capacity) | | | ✓ |
-| Unclaim / delete | | | ✓ |
-| Share / revoke / transfer ownership | | | ✓ |
+| View data, history, battery health and live updates | ✓ | ✓ | ✓ |
+| Set a personal name, activities, photos and alert preferences | ✓ | ✓ | ✓ |
+| Control switches | | ✓ | ✓ |
+| Create and edit automations | | ✓ | ✓ |
+| Calibrate a battery sensor | | ✓ | ✓ |
+| Turn a device on or off (capacity) | | | ✓ |
+| Remove a device | | | ✓ |
+| Share, revoke a share, or transfer ownership | | | ✓ |
 
-Per-user data (custom name, activities, photos, offline-alert preferences) is keyed by user, so a viewer
-editing it only changes **their own** view — it never touches the owner's. That is why it needs no Edit
-tier.
+Personal details such as a custom name, activities, photos and alert preferences are stored per user.
+A recipient editing them changes only their own view, so these remain available at every access level.
 
-### History window
-A share opens an ownership period starting at share time, so the recipient sees data **from when it was
-shared onward** — not the owner's earlier private history (same model used for resold sensors).
+### History visible to a recipient
+
+A recipient sees data from the moment the device was shared with them onward. Earlier history, from
+before the share, stays private to the owner.
 
 ### Lifecycle
-- Viewer access is tied to the **owner's sensor existence**, not the owner's subscription. If the owner
-  unclaims the sensor, all shares are removed (cascade). A recipient can also leave a share themselves.
-- If the owner lets a sensor get suspended (over quota), reads are paused for everyone, including
-  recipients — there is simply no data being shown while it is off.
 
-### Switches and the discovery edge
-Switches (shown as "sockets" in the app) share the same model. A switch *owner* is a direct owner (who
-claimed it) **or** an indirect owner — a user who owns the parent sensor whose gateway discovered the
-switch. Either can share it; Edit gates the only user-reachable switch mutation (deleting telemetry),
-since toggling is admin/operator-only or via automations (already gated).
+- A recipient's access lasts as long as the owner keeps the device, independent of the owner's
+  subscription. When the owner removes the device, every share of it ends. A recipient may also remove
+  their own access at any time.
+- While a sensor is suspended, its data is hidden for everyone, including recipients, until it is turned
+  back on.
 
-When a sensor discovers a new socket, only the sensor's **owner** gains access to it automatically;
-people the sensor is *shared* with do not (a sensor share is not a switch share). Because indirect
-owners can share, unclaiming a sensor could leave a discovered socket with no owner — so sensor unclaim
-also revokes shares on any socket that is left ownerless, keeping socket-share lifetime tied to
-ownership.
+### Switches and discovery
 
-## Status / scope
+A switch may be owned directly, by the user who claimed it, or indirectly, by the owner of the sensor
+whose gateway discovered it. Both can share the switch. Switch control is performed through automations
+or the operator, so the only switch action gated to Edit is deleting telemetry.
 
-Implemented: capacity model, claim gating, auto-suspension, suspended-data retention + opt-out purge,
-the capacity endpoint, bypass-role handling, and **sensor + switch sharing** (Read/Edit tiers,
-share/revoke/list, viewer history window, owner-unclaim cascade, orphaned-socket-share cleanup, and
-Edit/owner gating of automations, calibration and switch-telemetry deletion).
-
-Remaining: the frontend share UI for switches/sockets (sensor share UI shipped first).
+When a sensor's gateway discovers a new socket, only the sensor's owner gains access to it. Sharing the
+sensor does not extend to the sockets behind it. Because an indirect owner can share a socket, removing
+the sensor that provided that ownership would otherwise leave the socket's shares without an owner;
+removing a sensor therefore also ends shares on any socket left without an owner.
