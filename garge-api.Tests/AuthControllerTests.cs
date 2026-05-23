@@ -51,6 +51,22 @@ public class AuthControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Login_LockedOut_ReturnsCooldownMessage()
+    {
+        var user = MakeUser();
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockSignInManager
+            .Setup(m => m.PasswordSignInAsync(user.UserName!, It.IsAny<string>(), false, true))
+            .ReturnsAsync(SignInResult.LockedOut);
+
+        var result = await CreateAuthController().Login(new LoginModel { Email = user.Email!, Password = "wrong" });
+
+        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
+        var message = unauthorized.Value!.GetType().GetProperty("message")!.GetValue(unauthorized.Value) as string;
+        Assert.Contains("temporarily locked", message);
+    }
+
+    [Fact]
     public async Task Login_ValidCredentials_ReturnsOkWithTokenAndRefreshToken()
     {
         var user = MakeUser();

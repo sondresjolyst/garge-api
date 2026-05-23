@@ -172,14 +172,19 @@ namespace garge_api.Controllers
             if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("Login failed: Invalid credentials");
-                return Unauthorized(new { message = "Invalid credentials!" });
+                return Unauthorized(new { message = "Invalid email or password." });
             }
 
             var result = await _signInManager.PasswordSignInAsync(user.UserName ?? string.Empty, login.Password, false, lockoutOnFailure: true);
             if (!result.Succeeded)
             {
+                if (result.IsLockedOut)
+                {
+                    _logger.LogWarning("Login blocked: account locked {UserId}", user.Id);
+                    return Unauthorized(new { message = "Too many failed attempts — this login is temporarily locked. Try again later, or reset your password." });
+                }
                 _logger.LogWarning("Login failed: Invalid credentials");
-                return Unauthorized(new { message = "Invalid credentials!" });
+                return Unauthorized(new { message = "Invalid email or password." });
             }
 
             var userRoles = await _userManager.GetRolesAsync(user);
