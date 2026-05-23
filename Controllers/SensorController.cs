@@ -691,42 +691,180 @@ namespace garge_api.Controllers
                 return Forbid();
             }
 
-            var userId = User.UserId();
+            var userId = User.UserId()!;
 
-            var userSensor = await _context.UserSensors
+            var callerRow = await _context.UserSensors
                 .FirstOrDefaultAsync(us => us.UserId == userId && us.SensorId == id);
-            if (userSensor != null)
-            {
-                _context.UserSensors.Remove(userSensor);
-                _ownership.InvalidateSensor(id);
+            var callerWasOwner = callerRow?.IsOwner == true;
 
-                // Close this user's open ownership period so they no longer read new readings,
-                // and a future owner of the same sensor cannot see this user's history.
-                var openPeriods = await _context.SensorOwnershipPeriods
-                    .Where(p => p.UserId == userId && p.SensorId == id && p.EndedAt == null)
+            await CleanUserSensorDataAsync(id, userId);
+
+            // Owner unclaim cascades to every shared recipient — viewer access is tied to the owner's
+            // ownership, not their own (issue #245). A recipient unclaiming only removes themselves.
+            if (callerWasOwner)
+            {
+                var viewerIds = await _context.UserSensors
+                    .Where(us => us.SensorId == id && !us.IsOwner)
+                    .Select(us => us.UserId)
                     .ToListAsync();
-                foreach (var period in openPeriods)
-                    period.EndedAt = DateTime.UtcNow;
+                foreach (var viewerId in viewerIds)
+                    await CleanUserSensorDataAsync(id, viewerId);
             }
 
-            // Remove any custom name the user has set for this sensor
-            var customName = await _context.UserSensorCustomNames
-                .FirstOrDefaultAsync(x => x.UserId == userId && x.SensorId == id);
-            if (customName != null)
-            {
-                _context.UserSensorCustomNames.Remove(customName);
-            }
-
-            // Remove the user's remaining personal rows for this sensor so unclaim leaves nothing
-            // orphaned (same per-sensor set the account-deletion and 6-month purge paths clean up).
-            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == id));
-            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == id));
-            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId && n.SensorId == id));
-
+            _ownership.InvalidateSensor(id);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id, CascadedViewers = callerWasOwner });
             return Ok(new { message = "Sensor removed from your account." });
+        }
+
+        /// <summary>
+        /// Removes one user's membership and personal rows for a sensor: the UserSensor row, any open
+        /// ownership period (closed now), and their custom name / activities / photos / offline
+        /// notifications. Does not save or invalidate the cache — the caller batches that.
+        /// </summary>
+        private async Task CleanUserSensorDataAsync(int sensorId, string userId)
+        {
+            var membership = await _context.UserSensors
+                .FirstOrDefaultAsync(us => us.UserId == userId && us.SensorId == sensorId);
+            if (membership != null)
+                _context.UserSensors.Remove(membership);
+
+            var openPeriods = await _context.SensorOwnershipPeriods
+                .Where(p => p.UserId == userId && p.SensorId == sensorId && p.EndedAt == null)
+                .ToListAsync();
+            foreach (var period in openPeriods)
+                period.EndedAt = DateTime.UtcNow;
+
+            var customName = await _context.UserSensorCustomNames
+                .FirstOrDefaultAsync(x => x.UserId == userId && x.SensorId == sensorId);
+            if (customName != null)
+                _context.UserSensorCustomNames.Remove(customName);
+
+            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == sensorId));
+            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == sensorId));
+            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId && n.SensorId == sensorId));
+        }
+
+        /// <summary>True when the caller owns this sensor (admins included). Only owners may share/revoke.</summary>
+        private async Task<bool> UserIsSensorOwnerAsync(int sensorId)
+        {
+            if (IsAdmin()) return true;
+            var userId = User.UserId();
+            return userId != null && await _context.UserSensors
+                .AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.IsOwner);
+        }
+
+        /// <summary>True when the caller may edit shared state (owner, Edit-share, or admin).</summary>
+        private async Task<bool> UserCanEditSensorAsync(int sensorId)
+        {
+            if (IsAdmin()) return true;
+            var userId = User.UserId();
+            return userId != null && await _context.UserSensors.AnyAsync(us =>
+                us.UserId == userId && us.SensorId == sensorId &&
+                (us.IsOwner || us.Permission == SharePermission.Edit));
+        }
+
+        /// <summary>Shares a sensor with another Garge user (Read or Edit). Owner only.</summary>
+        [HttpPost("{id}/share")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Shares a sensor with another user by email.")]
+        [SwaggerResponse(200, "Sensor shared.")]
+        [SwaggerResponse(403, "Only the owner can share.")]
+        [SwaggerResponse(404, "Sensor or recipient not found.")]
+        public async Task<IActionResult> ShareSensor(int id, [FromBody] ShareSensorDto dto)
+        {
+            var sensor = await _context.Sensors.FindAsync(id);
+            if (sensor == null) return NotFound(new { message = "Sensor not found." });
+            if (!await UserIsSensorOwnerAsync(id)) return Forbid();
+            if (string.IsNullOrWhiteSpace(dto.Email))
+                return BadRequest(new { message = "Recipient email is required." });
+
+            var normalized = dto.Email.Trim().ToUpperInvariant();
+            var target = await _context.Users
+                .FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.IsDeleted);
+            if (target == null)
+                return NotFound(new { message = "No Garge account with that email." });
+            if (target.Id == User.UserId())
+                return BadRequest(new { message = "You already own this sensor." });
+
+            var existing = await _context.UserSensors
+                .FirstOrDefaultAsync(us => us.UserId == target.Id && us.SensorId == id);
+            if (existing != null)
+            {
+                if (existing.IsOwner)
+                    return BadRequest(new { message = "That user already owns this sensor." });
+                existing.Permission = dto.Permission; // re-share updates the tier
+            }
+            else
+            {
+                _context.UserSensors.Add(new UserSensor
+                {
+                    UserId = target.Id, SensorId = id, IsOwner = false, Permission = dto.Permission,
+                });
+                // The recipient sees data from now on, not the owner's earlier private history.
+                _context.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod
+                {
+                    UserId = target.Id, SensorId = id, StartedAt = DateTime.UtcNow, EndedAt = null,
+                });
+            }
+
+            await _context.SaveChangesAsync();
+            _ownership.InvalidateSensor(id);
+            await _hub.Clients.Group(DeviceHub.UserGroup(target.Id))
+                .SendAsync("device-created", new { kind = "sensor", id });
+
+            _logger.LogInformation("Sensor shared {@LogData}", new { id, OwnerUserId = User.UserId(), dto.Permission });
+            return Ok(new { message = "Sensor shared." });
+        }
+
+        /// <summary>Revokes a user's share of a sensor. Owner only.</summary>
+        [HttpDelete("{id}/share/{shareUserId}")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Revokes a user's share of a sensor.")]
+        [SwaggerResponse(200, "Share revoked.")]
+        [SwaggerResponse(403, "Only the owner can revoke.")]
+        [SwaggerResponse(404, "Share not found.")]
+        public async Task<IActionResult> RevokeShare(int id, string shareUserId)
+        {
+            if (!await UserIsSensorOwnerAsync(id)) return Forbid();
+
+            var share = await _context.UserSensors
+                .FirstOrDefaultAsync(us => us.UserId == shareUserId && us.SensorId == id && !us.IsOwner);
+            if (share == null) return NotFound(new { message = "Share not found." });
+
+            await CleanUserSensorDataAsync(id, shareUserId);
+            await _context.SaveChangesAsync();
+            _ownership.InvalidateSensor(id);
+
+            _logger.LogInformation("Sensor share revoked {@LogData}", new { id, OwnerUserId = User.UserId(), shareUserId });
+            return Ok(new { message = "Share revoked." });
+        }
+
+        /// <summary>Lists the users a sensor is shared with. Owner only.</summary>
+        [HttpGet("{id}/shares")]
+        [Authorize]
+        [SwaggerOperation(Summary = "Lists who a sensor is shared with.")]
+        [SwaggerResponse(200, "Shares.", typeof(IEnumerable<SensorShareDto>))]
+        [SwaggerResponse(403, "Only the owner can view shares.")]
+        public async Task<IActionResult> ListShares(int id)
+        {
+            if (!await UserIsSensorOwnerAsync(id)) return Forbid();
+
+            var shares = await _context.UserSensors
+                .Where(us => us.SensorId == id && !us.IsOwner)
+                .Join(_context.Users, us => us.UserId, u => u.Id, (us, u) => new SensorShareDto
+                {
+                    UserId = u.Id,
+                    Email = u.Email!,
+                    FirstName = u.FirstName,
+                    LastName = u.LastName,
+                    Permission = us.Permission,
+                    SharedAt = us.CreatedAt,
+                })
+                .ToListAsync();
+
+            return Ok(shares);
         }
 
         /// <summary>Owner turns a sensor off: blocks its data reads and frees a quota slot. Always allowed.</summary>

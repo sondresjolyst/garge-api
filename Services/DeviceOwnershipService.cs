@@ -84,10 +84,13 @@ namespace garge_api.Services
             var indirectOwners = new List<string>();
             if (switchEntity != null)
             {
+                // Only sensor OWNERS gain switch access via the parent-device link. A read/edit share of
+                // a sensor does not grant control of the garage's switches — direct switch sharing is a
+                // separate feature (see docs/access-and-quota.md, phase 2).
                 indirectOwners = await db.DiscoveredDevices
                     .Where(dd => dd.Target == switchEntity.Name)
                     .Join(db.Sensors, dd => dd.DiscoveredBy, s => s.ParentName, (dd, s) => s.Id)
-                    .Join(db.UserSensors, sid => sid, us => us.SensorId, (sid, us) => us.UserId)
+                    .Join(db.UserSensors.Where(us => us.IsOwner), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
                     .Distinct()
                     .ToListAsync(ct);
             }

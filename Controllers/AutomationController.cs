@@ -37,9 +37,10 @@ namespace garge_api.Controllers
 
             var userId = User.UserId();
 
-            // Get accessible parent names from sensors the user owns
+            // Sensors the user can act on: owned, or shared with Edit. A read-only share must not let
+            // the recipient create or change automations on the owner's garage.
             var accessibleParentNames = await _context.UserSensors
-                .Where(us => us.UserId == userId)
+                .Where(us => us.UserId == userId && (us.IsOwner || us.Permission == garge_api.Models.SharePermission.Edit))
                 .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
                 .ToListAsync();
 
