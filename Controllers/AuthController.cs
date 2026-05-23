@@ -96,7 +96,7 @@ namespace garge_api.Controllers
                 return Ok(new { message = genericResponse });
             }
 
-            // Use AutoMapper to map DTO to User
+            // Map the registration DTO to the User entity.
             var user = _mapper.Map<User>(registerUserDto);
             user.TermsAcceptedAt = DateTime.UtcNow;
             user.TermsVersion = registerUserDto.TermsVersion;
@@ -130,9 +130,9 @@ namespace garge_api.Controllers
 
             _logger.LogError("Register failed: {@Errors}", result.Errors);
 
-            // Return the field-keyed shape the client parses (parseValidationErrors) so a
-            // server-only failure like a taken username surfaces on its field instead of a
-            // generic "failed to register". Identity emits username / email / password codes.
+            // Return the field-keyed error shape the client parses so a server-only failure such as
+            // a taken username surfaces on its field instead of a generic "failed to register".
+            // Identity emits username, email, and password error codes.
             var fieldErrors = result.Errors
                 .GroupBy(e => RegisterErrorField(e.Code))
                 .ToDictionary(g => g.Key, g => g.Select(e => e.Description).ToArray());
@@ -414,7 +414,7 @@ namespace garge_api.Controllers
         [HttpPost("request-password-reset")]
         [AllowAnonymous]
         [SwaggerOperation(Summary = "Request a password reset code via email.")]
-        [SwaggerResponse(200, "Reset code sent (always, to prevent email enumeration).")]
+        [SwaggerResponse(200, "Always returns 200; a reset code is sent only if the email is registered.")]
         public async Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetDto model)
         {
             _logger.LogInformation("RequestPasswordReset called");

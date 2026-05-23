@@ -54,7 +54,7 @@ namespace garge_api.Controllers
             _logger = logger;
         }
 
-        /// <summary>Admin: list every subscription with the user's name + email, plus invoice count for the in-app subscriptions admin page.</summary>
+        /// <summary>Lists every subscription with the owner's name, email, and invoice count. Admin only.</summary>
         [HttpGet("all")]
         [Authorize(Policy = "Admin")]
         public async Task<IActionResult> GetAllSubscriptions()
@@ -131,7 +131,7 @@ namespace garge_api.Controllers
                 $"invoice-{invoice.Id:D4}.pdf");
         }
 
-        /// <summary>Returns the current user's subscriptions. Stopped/Expired hidden once next-charge date passed (grace period).</summary>
+        /// <summary>Returns the current user's subscriptions. Stopped or expired subscriptions are hidden once their next-charge date has passed.</summary>
         [HttpGet("my")]
         public async Task<IActionResult> GetMySubscriptions()
         {
@@ -314,7 +314,7 @@ namespace garge_api.Controllers
             return Ok();
         }
 
-        /// <summary>Updates the quantity of an active AddOn subscription. Increases PATCH the Vipps agreement ceiling (user reconfirms in Vipps); decreases are DB-only.</summary>
+        /// <summary>Updates the quantity of an active add-on subscription. Increasing the quantity raises the Vipps charge ceiling and requires reconfirmation in Vipps.</summary>
         [HttpPatch("{id:int}/quantity")]
         public async Task<IActionResult> UpdateSubscriptionQuantity(int id, [FromBody] UpdateSubscriptionQuantityDto dto)
         {

@@ -94,9 +94,10 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// True when the caller has this owned sensor suspended (turned off / over quota). Suspended
-        /// sensors stay visible in the list but their dashboard/history reads are blocked. Admins are
-        /// never suspended. Export and unclaim/delete must never use this gate (GDPR rights).
+        /// Returns true when the caller has this owned sensor suspended (turned off or over quota).
+        /// Suspended sensors remain visible in the list, but their dashboard and history reads are
+        /// blocked. Admins are never suspended. Export and unclaim/delete must not use this gate, as
+        /// those are GDPR rights.
         /// </summary>
         private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
         {
@@ -105,7 +106,7 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null);
         }
 
-        /// <summary>Of the given sensor ids, the subset the caller has suspended (empty for admins).</summary>
+        /// <summary>Returns the subset of the given sensor ids that the caller has suspended (empty for admins).</summary>
         private async Task<HashSet<int>> CallerSuspendedSensorIdsAsync(IEnumerable<int> sensorIds)
         {
             if (IsAdmin()) return new HashSet<int>();
@@ -150,7 +151,7 @@ namespace garge_api.Controllers
             var sensorIds = sensors.Select(s => s.Id).ToList();
             var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds);
 
-            // The caller's owner/edit/read relationship per sensor (admins are treated as owner).
+            // The caller's owner, edit, or read relationship per sensor (admins are treated as owner).
             var accessRows = IsAdmin()
                 ? new List<UserSensor>()
                 : await _context.UserSensors
@@ -158,7 +159,7 @@ namespace garge_api.Controllers
                     .ToListAsync();
             var accessById = accessRows.ToDictionary(us => us.SensorId, us => DeviceAccess.From(us.IsOwner, us.Permission));
 
-            // Map sensors and inject the user-specific custom name + suspended + access state
+            // Map sensors and apply the user-specific custom name, suspended flag, and access state.
             var dtos = sensors.Select(sensor =>
             {
                 var dto = _mapper.Map<SensorDto>(sensor);
@@ -424,7 +425,7 @@ namespace garge_api.Controllers
             if (effectiveStart.HasValue) { whereClauses.Add("sd.\"Timestamp\" >= @startDate"); parameters.Add(new("startDate", effectiveStart.Value)); }
             if (effectiveEnd.HasValue) { whereClauses.Add("sd.\"Timestamp\" <= @endDate"); parameters.Add(new("endDate", effectiveEnd.Value)); }
 
-            // Bound to the caller's own ownership window(s) — see WithinOwnershipWindow. Admins see all.
+            // Bound to the caller's own ownership window(s); see WithinOwnershipWindow. Admins see all data.
             if (!isAdmin)
             {
                 whereClauses.Add(@"EXISTS (SELECT 1 FROM ""SensorOwnershipPeriods"" p
@@ -708,8 +709,8 @@ namespace garge_api.Controllers
 
             await CleanUserSensorDataAsync(id, userId);
 
-            // Owner unclaim cascades to every shared recipient — viewer access is tied to the owner's
-            // ownership, not their own (issue #245). A recipient unclaiming only removes themselves.
+            // An owner unclaim cascades to every shared recipient, because viewer access is tied to the
+            // owner's ownership rather than their own. A recipient unclaim removes only that recipient.
             if (callerWasOwner)
             {
                 var viewerIds = await _context.UserSensors
@@ -724,7 +725,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
 
             // Losing an owned sensor can leave a socket it discovered with no owner. Revoke any shares
-            // on now-ownerless sockets so socket access never outlives ownership (the discovery edge).
+            // on now-ownerless sockets so that socket access never outlives ownership.
             if (callerWasOwner)
             {
                 await RevokeOrphanedSwitchSharesAsync(sensor.ParentName);
@@ -736,9 +737,9 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// After an owned sensor is removed, revoke shares on any socket its gateway discovered that now
-        /// has no remaining owner (no direct owner row, no other owned sensor under the gateway). Keeps
-        /// socket-share lifetime tied to ownership without needing to track who created each share.
+        /// After an owned sensor is removed, revokes shares on any socket its gateway discovered that
+        /// now has no remaining owner (no direct owner row and no other owned sensor under the gateway).
+        /// This keeps socket-share lifetime tied to ownership without tracking who created each share.
         /// </summary>
         private async Task RevokeOrphanedSwitchSharesAsync(string? parentName)
         {
@@ -760,7 +761,7 @@ namespace garge_api.Controllers
                     .Join(_context.Sensors, dd => dd.DiscoveredBy, s => s.ParentName, (dd, s) => s.Id)
                     .Join(_context.UserSensors.Where(us => us.IsOwner), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
                     .AnyAsync();
-                if (hasDirectOwner || hasIndirectOwner) continue; // still owned — keep its shares
+                if (hasDirectOwner || hasIndirectOwner) continue; // Still owned; keep its shares.
 
                 var viewers = await _context.UserSwitches
                     .Where(us => us.SwitchId == sw.Id && !us.IsOwner)
@@ -783,8 +784,8 @@ namespace garge_api.Controllers
 
         /// <summary>
         /// Removes one user's membership and personal rows for a sensor: the UserSensor row, any open
-        /// ownership period (closed now), and their custom name / activities / photos / offline
-        /// notifications. Does not save or invalidate the cache — the caller batches that.
+        /// ownership period (closed now), and their custom name, activities, photos, and offline
+        /// notifications. Does not save changes or invalidate the cache; the caller is responsible for that.
         /// </summary>
         private async Task CleanUserSensorDataAsync(int sensorId, string userId)
         {
@@ -809,7 +810,7 @@ namespace garge_api.Controllers
             _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId && n.SensorId == sensorId));
         }
 
-        /// <summary>True when the caller owns this sensor (admins included). Only owners may share/revoke.</summary>
+        /// <summary>Returns true when the caller owns this sensor (admins included). Only owners may share or revoke.</summary>
         private async Task<bool> UserIsSensorOwnerAsync(int sensorId)
         {
             if (IsAdmin()) return true;
@@ -818,7 +819,7 @@ namespace garge_api.Controllers
                 .AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.IsOwner);
         }
 
-        /// <summary>True when the caller may edit shared state (owner, Edit-share, or admin).</summary>
+        /// <summary>Returns true when the caller may edit shared state (owner, Edit-tier share, or admin).</summary>
         private async Task<bool> UserCanEditSensorAsync(int sensorId)
         {
             if (IsAdmin()) return true;
@@ -828,7 +829,7 @@ namespace garge_api.Controllers
                 (us.IsOwner || us.Permission == SharePermission.Edit));
         }
 
-        /// <summary>The caller's relationship to a sensor for SensorDto.Access (admins count as owner).</summary>
+        /// <summary>Returns the caller's relationship to a sensor for SensorDto.Access (admins count as owner).</summary>
         private async Task<string> CallerAccessAsync(int sensorId)
         {
             if (IsAdmin()) return DeviceAccess.Owner;
@@ -869,7 +870,7 @@ namespace garge_api.Controllers
             {
                 if (existing.IsOwner)
                     return BadRequest(new { message = "That user already owns this sensor." });
-                existing.Permission = dto.Permission; // re-share updates the tier
+                existing.Permission = dto.Permission; // Re-sharing updates the permission tier.
             }
             else
             {

@@ -67,7 +67,7 @@ namespace garge_api.Controllers
 
             var vatRate = ElectricityPriceHelper.GetVatRate(area);
 
-            // Try serving from DB first
+            // Serve from the database when stored data is available.
             var storedEntries = await GetStoredPricesAsync(resolution, area, queryDate);
             if (storedEntries.Count > 0)
             {
@@ -76,7 +76,7 @@ namespace garge_api.Controllers
                 return Ok(dbDto);
             }
 
-            // Fall back to NordPool
+            // Fall back to the NordPool service when no stored data exists.
             _logger.LogInformation("No DB data found, fetching from NordPool {@LogData}", new { type = LogSanitizer.Sanitize(type), area = LogSanitizer.Sanitize(area), date, currency });
             var data = await _nordPoolService.FetchPricesAsync(resolution, queryDate, new List<string> { area }, currency);
 

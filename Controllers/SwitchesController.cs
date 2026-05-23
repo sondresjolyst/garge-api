@@ -45,7 +45,7 @@ namespace garge_api.Controllers
 
         private async Task<bool> UserHasRequiredRoleAsync(Switch switchEntity)
         {
-            // Admins always have access
+            // Admins always have access.
             if (IsSwitchAdmin()) return true;
 
             var userId = User.UserId();
@@ -57,8 +57,8 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// True when the user owns a sensor whose gateway discovered this switch — they own the parent
-        /// device, so they are treated as a switch owner (can share/control it).
+        /// Returns true when the user owns a sensor whose gateway discovered this switch. Owning the
+        /// parent device makes the user a switch owner, so they may share and control it.
         /// </summary>
         private async Task<bool> IsIndirectSwitchOwnerAsync(Switch sw, string userId) =>
             await _context.DiscoveredDevices
@@ -67,7 +67,7 @@ namespace garge_api.Controllers
                 .Join(_context.UserSensors.Where(us => us.IsOwner && us.UserId == userId), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
                 .AnyAsync();
 
-        /// <summary>Owner = admin, a direct owned row, or an indirect (parent-sensor) owner. Only owners may share.</summary>
+        /// <summary>Returns true when the caller is an owner: an admin, a direct owned row, or an indirect (parent-sensor) owner. Only owners may share.</summary>
         private async Task<bool> UserOwnsSwitchAsync(Switch sw)
         {
             if (IsSwitchAdmin()) return true;
@@ -77,7 +77,7 @@ namespace garge_api.Controllers
             return await IsIndirectSwitchOwnerAsync(sw, userId);
         }
 
-        /// <summary>True when the caller may edit shared state (owner or a direct Edit share).</summary>
+        /// <summary>Returns true when the caller may edit shared state (owner or a direct Edit-tier share).</summary>
         private async Task<bool> UserCanEditSwitchAsync(Switch sw)
         {
             if (await UserOwnsSwitchAsync(sw)) return true;
@@ -86,7 +86,7 @@ namespace garge_api.Controllers
                 us.UserId == userId && us.SwitchId == sw.Id && us.Permission == SharePermission.Edit);
         }
 
-        /// <summary>The caller's relationship to a switch for SwitchDto.Access.</summary>
+        /// <summary>Returns the caller's relationship to a switch for SwitchDto.Access.</summary>
         private async Task<string> CallerSwitchAccessAsync(Switch sw)
         {
             if (await UserOwnsSwitchAsync(sw)) return DeviceAccess.Owner;
@@ -99,8 +99,8 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Removes one user's direct membership + personal rows for a switch: the UserSwitch row, any
-        /// open ownership period (closed now), and their custom name. Does not save or invalidate cache.
+        /// Removes one user's direct membership and personal rows for a switch: the UserSwitch row, any
+        /// open ownership period (closed now), and their custom name. Does not save changes or invalidate the cache.
         /// </summary>
         private async Task CleanUserSwitchDataAsync(int switchId, string userId)
         {
@@ -790,7 +790,7 @@ namespace garge_api.Controllers
 
             await CleanUserSwitchDataAsync(id, userId);
 
-            // Owner unclaim cascades to every direct recipient; a recipient's unclaim removes only them.
+            // An owner unclaim cascades to every direct recipient; a recipient unclaim removes only that recipient.
             if (callerWasOwner)
             {
                 var viewerIds = await _context.UserSwitches

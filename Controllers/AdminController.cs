@@ -211,7 +211,7 @@ namespace garge_api.Controllers
 
         /// <summary>
         /// Gets all users with their roles. Soft-deleted (scrubbed) accounts are hidden by default;
-        /// pass includeDeleted=true to include them (e.g. an admin "Show deleted" toggle).
+        /// pass includeDeleted=true to include them.
         /// </summary>
         /// <param name="includeDeleted">When true, also returns soft-deleted accounts.</param>
         /// <returns>A list of all users.</returns>
@@ -349,9 +349,9 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.UserId() });
 
-            // Frozen completed-day snapshots (immutable, so they outlive the per-user data they were
-            // derived from and survive the post-5y purge) plus a live row for today. The daily job
-            // freezes completed days; today is always recomputed here so same-day churn isn't lost.
+            // Frozen completed-day snapshots are immutable, so they outlive the per-user data they
+            // were derived from and survive the 5-year purge. The daily job freezes completed days;
+            // today is always recomputed here so same-day churn is not lost.
             var snapshots = await Services.StatsSnapshotService.GetHistoryAsync(_context);
 
             var result = snapshots.Select(s => (object)new
