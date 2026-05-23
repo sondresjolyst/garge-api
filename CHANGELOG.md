@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.9.0](https://github.com/sondresjolyst/garge-api/compare/v2.8.1...v2.9.0) (2026-05-23)
+
+
+### Features
+
+* anonymize telemetry on account deletion + fix orphan bug ([#252](https://github.com/sondresjolyst/garge-api/issues/252)) ([9c413ca](https://github.com/sondresjolyst/garge-api/commit/9c413ca55ace1a3ad05de634c66450764a74a565))
+* anonymized telemetry store + anonymization routine ([#251](https://github.com/sondresjolyst/garge-api/issues/251)) ([4cc85a2](https://github.com/sondresjolyst/garge-api/commit/4cc85a2902b9e6e09bc3a08264d93ea3f832675a))
+* brand the auth code emails (verification + password reset) ([#261](https://github.com/sondresjolyst/garge-api/issues/261)) ([268a295](https://github.com/sondresjolyst/garge-api/commit/268a29542e856577785a5d599ff0a2fa7ae7d5e7))
+* daily quota reconciliation job ([#255](https://github.com/sondresjolyst/garge-api/issues/255)) ([c009e90](https://github.com/sondresjolyst/garge-api/commit/c009e90ee21f8c85adc7e642948465f36e39ab74))
+* data-retention opt-out + suspension cap purge ([#256](https://github.com/sondresjolyst/garge-api/issues/256)) ([a3cd775](https://github.com/sondresjolyst/garge-api/commit/a3cd775fee40a8850a33e11871776362d2a865b7))
+* device sharing (sensors + switches, Read/Edit) + docs ([#267](https://github.com/sondresjolyst/garge-api/issues/267)) ([6ff3747](https://github.com/sondresjolyst/garge-api/commit/6ff37476ff0cd579c98906fec3db91ed2b329dcf))
+* enforce sensor suspension - read-gating + toggle ([#254](https://github.com/sondresjolyst/garge-api/issues/254)) ([093e4dd](https://github.com/sondresjolyst/garge-api/commit/093e4dd0c310e2c6a14769508ed04574a683f5a9))
+* reflect user churn in admin stats + deleted-user toggle ([#265](https://github.com/sondresjolyst/garge-api/issues/265)) ([eec30d6](https://github.com/sondresjolyst/garge-api/commit/eec30d607127a337a8a45349afa8f83df83dcee8))
+* stat snapshots, deletion PII scrub, and 5y deleted-user purge ([#266](https://github.com/sondresjolyst/garge-api/issues/266)) ([2c6e19b](https://github.com/sondresjolyst/garge-api/commit/2c6e19b3df56771e2c487bc30bfa1bf936036876))
+* suspension state + paid-period grace in capacity ([#253](https://github.com/sondresjolyst/garge-api/issues/253)) ([75d1ce1](https://github.com/sondresjolyst/garge-api/commit/75d1ce1f6deff35db3d0fd1e2f0ca0cae429649b))
+
+
+### Bug Fixes
+
+* clear build warnings; professionalize endpoint docs and comments ([#268](https://github.com/sondresjolyst/garge-api/issues/268)) ([6a0760a](https://github.com/sondresjolyst/garge-api/commit/6a0760a2fa40f7463c789b216778dafbd08f885d))
+* exempt subscription-bypass roles from auto-suspend and ML purge ([#263](https://github.com/sondresjolyst/garge-api/issues/263)) ([f2e2ff1](https://github.com/sondresjolyst/garge-api/commit/f2e2ff176f1e8ade304e3b36435b857afb31b251))
+* make account erasure succeed and run atomically ([#260](https://github.com/sondresjolyst/garge-api/issues/260)) ([6ac6909](https://github.com/sondresjolyst/garge-api/commit/6ac690938f5794f0bdc74b84127bd98e4ece7fce))
+* resolve subscription-bypass from the DB in the claim authz handler ([#264](https://github.com/sondresjolyst/garge-api/issues/264)) ([296ac23](https://github.com/sondresjolyst/garge-api/commit/296ac2358d72fec274f4b0d6f59950532874e03f))
+* scope sensor telemetry reads to the caller's ownership window ([#249](https://github.com/sondresjolyst/garge-api/issues/249)) ([defcf71](https://github.com/sondresjolyst/garge-api/commit/defcf71d1ffab5b60ea82a8f4ef7750c4edcb684))
+* scope switch telemetry reads to the caller's ownership window ([#250](https://github.com/sondresjolyst/garge-api/issues/250)) ([890b43e](https://github.com/sondresjolyst/garge-api/commit/890b43ee56a953fbed46da764daf3a694cd79af2))
+* stats history 500 (UTC bounds for live-today query) ([#270](https://github.com/sondresjolyst/garge-api/issues/270)) ([6ea5f55](https://github.com/sondresjolyst/garge-api/commit/6ea5f5558157f1a544798523ceb356810d60ee21))
+* surface registration field errors (e.g. username taken) ([#262](https://github.com/sondresjolyst/garge-api/issues/262)) ([df64e8a](https://github.com/sondresjolyst/garge-api/commit/df64e8a182a470056031572aa7a5a8e5c75911cb))
+
 ## [2.8.1](https://github.com/sondresjolyst/garge-api/compare/v2.8.0...v2.8.1) (2026-05-20)
 
 
