@@ -273,6 +273,109 @@ public class AdminControllerTests : ControllerTestBase
         Assert.Equal(1, dto.Subscriptions.StoppedThisMonth);
     }
 
+    private static User MakeUser(string id, DateTime createdAt, bool deleted = false, DateTime? deletedAt = null) => new()
+    {
+        Id = id, UserName = id, Email = $"{id}@test.com", FirstName = "Test", LastName = "User",
+        CreatedAt = createdAt, IsDeleted = deleted, DeletedAt = deletedAt,
+    };
+
+    private void SetupUserMapAndRoles()
+    {
+        MockMapper.Setup(m => m.Map<UserDto>(It.IsAny<User>()))
+            .Returns((User u) => new UserDto
+            {
+                Id = u.Id!, UserName = u.UserName ?? "", FirstName = u.FirstName, LastName = u.LastName,
+                Email = u.Email ?? "", IsDeleted = u.IsDeleted,
+            });
+        MockUserManager.Setup(m => m.GetRolesAsync(It.IsAny<User>())).ReturnsAsync(new List<string>());
+    }
+
+    private static int TotalUsersOn(List<object> rows, DateTime date)
+    {
+        var key = date.ToString("yyyy-MM-dd");
+        var row = rows.Single(r => (string)r.GetType().GetProperty("date")!.GetValue(r)! == key);
+        return (int)row.GetType().GetProperty("totalUsers")!.GetValue(row)!;
+    }
+
+    [Fact]
+    public async Task GetStats_TotalUsers_ExcludesDeleted()
+    {
+        var db = CreateDbContext();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+        db.Users.AddRange(
+            MakeUser("u1", DateTime.UtcNow),
+            MakeUser("u2", DateTime.UtcNow),
+            MakeUser("u3", DateTime.UtcNow, deleted: true, deletedAt: DateTime.UtcNow));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetStats();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<AdminStatsDto>(ok.Value);
+        Assert.Equal(2, dto.TotalUsers);
+    }
+
+    [Fact]
+    public async Task GetStatsHistory_SubtractsDeletionsOnDeletedDate()
+    {
+        // Three users sign up on d1; one deletes on d2. The running total climbs to 3, then dips to 2.
+        var db = CreateDbContext();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+        var today = DateTime.UtcNow.Date;
+        var d1 = today.AddDays(-3);
+        var d2 = today.AddDays(-2);
+        db.Users.AddRange(
+            MakeUser("u1", d1),
+            MakeUser("u2", d1),
+            MakeUser("u3", d1, deleted: true, deletedAt: d2));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetStatsHistory();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var rows = Assert.IsType<List<object>>(ok.Value);
+        Assert.Equal(3, TotalUsersOn(rows, d1));
+        Assert.Equal(2, TotalUsersOn(rows, d2));
+        Assert.Equal(2, TotalUsersOn(rows, today));
+    }
+
+    [Fact]
+    public async Task GetUsers_HidesDeletedByDefault()
+    {
+        var db = CreateDbContext();
+        SetupUserMapAndRoles();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+        db.Users.AddRange(
+            MakeUser("u1", DateTime.UtcNow),
+            MakeUser("u2", DateTime.UtcNow, deleted: true, deletedAt: DateTime.UtcNow));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetUsers();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dtos = Assert.IsType<List<UserDto>>(ok.Value);
+        Assert.Equal("u1", Assert.Single(dtos).Id);
+    }
+
+    [Fact]
+    public async Task GetUsers_IncludeDeleted_ReturnsAllWithFlag()
+    {
+        var db = CreateDbContext();
+        SetupUserMapAndRoles();
+        MockUserManager.Setup(m => m.Users).Returns(db.Users);
+        db.Users.AddRange(
+            MakeUser("u1", DateTime.UtcNow),
+            MakeUser("u2", DateTime.UtcNow, deleted: true, deletedAt: DateTime.UtcNow));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAdminController(db).GetUsers(includeDeleted: true);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dtos = Assert.IsType<List<UserDto>>(ok.Value);
+        Assert.Equal(2, dtos.Count);
+        Assert.Contains(dtos, d => d.Id == "u2" && d.IsDeleted);
+    }
+
     [Fact]
     public async Task AssignPermission_UnknownPermission_Returns400()
     {
