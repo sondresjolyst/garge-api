@@ -48,19 +48,6 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
-        /// <summary>
-        /// Returns true when the caller may edit shared state on this sensor (owner, an Edit-tier share,
-        /// or admin). Calibration writes a global per-sensor offset, so a read-only share must not change it.
-        /// </summary>
-        private async Task<bool> UserCanEditSensorAsync(int sensorId)
-        {
-            if (IsAdmin()) return true;
-            var userId = User.UserId();
-            return await _context.UserSensors.AnyAsync(us =>
-                us.UserId == userId && us.SensorId == sensorId &&
-                (us.IsOwner || us.Permission == SharePermission.Edit));
-        }
-
         // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
         // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
         private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
@@ -120,7 +107,6 @@ namespace garge_api.Controllers
             }
 
             var dto = _mapper.Map<BatteryHealthDto>(latest);
-            dto.CalibrationOffsetV = sensor.CalibrationOffsetV;
             return Ok(dto);
         }
 
@@ -140,48 +126,6 @@ namespace garge_api.Controllers
             if (since.HasValue) query = query.Where(e => e.StartedAt >= since.Value);
             var events = await query.OrderByDescending(e => e.StartedAt).ToListAsync();
             return Ok(_mapper.Map<List<BatteryChargeEventDto>>(events));
-        }
-
-        /// <summary>Stores a per-sensor calibration offset based on a multimeter reading at the moment of calibration.</summary>
-        [HttpPost("name/{sensorName}/calibration")]
-        [SwaggerOperation(Summary = "Calibrate a voltage sensor against a multimeter reading.")]
-        [SwaggerResponse(200, "Calibration offset stored.")]
-        public async Task<IActionResult> Calibrate(string sensorName, [FromBody] CalibrationDto dto)
-        {
-            var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
-            if (sensor == null) return NotFound(new { message = "Sensor not found!" });
-            if (!await UserCanEditSensorAsync(sensor.Id)) return Forbid();
-
-            var latest = await WithinOwnershipWindow(
-                    _context.SensorData.Where(sd => sd.SensorId == sensor.Id))
-                .OrderByDescending(sd => sd.Timestamp)
-                .Select(sd => sd.Value)
-                .FirstOrDefaultAsync();
-            if (string.IsNullOrEmpty(latest) ||
-                !float.TryParse(latest, System.Globalization.CultureInfo.InvariantCulture, out var sensorReading))
-                return BadRequest(new { message = "No recent sensor reading to calibrate against." });
-
-            sensor.CalibrationOffsetV = dto.MultimeterVoltage - sensorReading;
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Calibration set for {SensorName}: offset={Offset:F3}V",
-                LogSanitizer.Sanitize(sensorName), sensor.CalibrationOffsetV);
-            return Ok(new { calibrationOffsetV = sensor.CalibrationOffsetV });
-        }
-
-        /// <summary>Clears a sensor's stored calibration offset.</summary>
-        [HttpDelete("name/{sensorName}/calibration")]
-        [SwaggerOperation(Summary = "Clear a voltage sensor's calibration offset.")]
-        [SwaggerResponse(204, "Calibration cleared.")]
-        public async Task<IActionResult> ClearCalibration(string sensorName)
-        {
-            var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
-            if (sensor == null) return NotFound(new { message = "Sensor not found!" });
-            if (!await UserCanEditSensorAsync(sensor.Id)) return Forbid();
-
-            sensor.CalibrationOffsetV = null;
-            await _context.SaveChangesAsync();
-            return NoContent();
         }
 
         /// <summary>

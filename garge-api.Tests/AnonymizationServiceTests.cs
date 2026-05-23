@@ -28,7 +28,7 @@ public class AnonymizationServiceTests : ControllerTestBase
     public async Task AnonymizeSensorPeriod_MovesExclusiveReadings_DeletesOriginalsAndDerived()
     {
         using var db = CreateDbContext();
-        db.Sensors.Add(new Sensor { Id = 1, Name = "garge_volt", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw", CalibrationOffsetV = 0.5f });
+        db.Sensors.Add(new Sensor { Id = 1, Name = "garge_volt", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" });
         var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Jan, EndedAt = Jun };
         db.SensorOwnershipPeriods.Add(period);
         db.SensorData.AddRange(
@@ -44,7 +44,7 @@ public class AnonymizationServiceTests : ControllerTestBase
         Assert.Equal(3, moved);
         var series = Assert.Single(db.AnonymizedSeries);
         Assert.Equal("voltage", series.SourceType);
-        Assert.Equal(0.5f, series.CalibrationOffsetV);
+        Assert.Null(series.CalibrationOffsetV);
         Assert.Equal(3, db.AnonymizedReadings.Count());
         Assert.Contains(db.AnonymizedReadings, r => r.Value == 12.5);
         Assert.Single(db.SensorData); // only the out-of-window Jul row remains

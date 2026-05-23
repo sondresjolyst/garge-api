@@ -17,10 +17,6 @@ namespace garge_api.Dtos.Sensor
         public float? DailyDropPctPerWeek { get; set; }
         public float? ChargeAcceptanceRatio { get; set; }
 
-        // Sensor-level calibration offset (volts). Frontend may add this to
-        // CurrentVoltage to display "actual" voltage.
-        public float? CalibrationOffsetV { get; set; }
-
         public DateTime Timestamp { get; set; }
     }
 
@@ -34,10 +30,5 @@ namespace garge_api.Dtos.Sensor
         public float RestingAtTime { get; set; }
         public float PeakRatio { get; set; }
         public int DurationMinutes { get; set; }
-    }
-
-    public class CalibrationDto
-    {
-        public required float MultimeterVoltage { get; set; }
     }
 }

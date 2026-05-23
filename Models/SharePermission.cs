@@ -9,7 +9,7 @@ namespace garge_api.Models
         /// <summary>View data, history, battery health and live updates. No control or editing.</summary>
         Read = 0,
 
-        /// <summary>Read, plus toggle switches, create/edit automations, and battery calibration.</summary>
+        /// <summary>Read, plus toggle switches and create or edit automations.</summary>
         Edit = 1,
     }
 }

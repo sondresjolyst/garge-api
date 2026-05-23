@@ -20,7 +20,10 @@ namespace garge_api.Models.Anonymized
         [MaxLength(50)]
         public required string SourceType { get; set; }
 
-        /// <summary>Per-sensor voltage calibration offset (voltage series only) so regenerated voltage matches.</summary>
+        /// <summary>
+        /// Legacy per-sensor voltage calibration offset, retained for series anonymized before sensor
+        /// calibration was removed. No longer populated; always null for new series.
+        /// </summary>
         public float? CalibrationOffsetV { get; set; }
 
         public DateTime AnonymizedAt { get; set; } = DateTime.UtcNow;

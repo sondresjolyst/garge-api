@@ -33,12 +33,6 @@ namespace garge_api.Models.Sensor
         [Required]
         public required string ParentName { get; set; }
 
-        // User-supplied additive offset (volts) for voltage sensors with
-        // calibration drift. Frontend displays `value + offset` as the
-        // "actual" voltage; health logic itself is ratio-based so doesn't
-        // use this. Null means uncalibrated.
-        public float? CalibrationOffsetV { get; set; }
-
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

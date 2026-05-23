@@ -7,7 +7,7 @@ namespace garge_api.Dtos.Sensor
     {
         public required string Email { get; set; }
 
-        /// <summary>Read (view only) or Edit (control switches, automations, calibration).</summary>
+        /// <summary>Read (view only) or Edit (control switches and automations).</summary>
         public SharePermission Permission { get; set; } = SharePermission.Read;
     }
 
