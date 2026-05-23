@@ -44,11 +44,11 @@ namespace garge_api.Controllers
                 .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
                 .ToListAsync();
 
-            // Fetch the target name (switch)
+            // Resolve the target switch's name.
             var targetSwitch = await _context.Switches.FindAsync(rule.TargetId);
             var targetName = targetSwitch?.Name;
 
-            // Check if any device the user can access has discovered this target
+            // Allow access only when a device the user can act on has discovered this target.
             var discovered = targetName != null && await _context.DiscoveredDevices
                 .AnyAsync(dd => accessibleParentNames.Contains(dd.DiscoveredBy) && dd.Target == targetName);
 
@@ -115,7 +115,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Marks an automation rule as triggered (called by the operator).
+        /// Records that an automation rule has been triggered.
         /// </summary>
         [HttpPatch("{id}/triggered")]
         [SwaggerOperation(Summary = "Records that an automation rule was triggered.")]
@@ -249,10 +249,10 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Starts the timer on a timed automation rule (called by the operator).
+        /// Starts the timer on a timed automation rule.
         /// </summary>
         [HttpPatch("{id}/timer-start")]
-        [SwaggerOperation(Summary = "Sets TimerActivatedAt to now for a timed rule.")]
+        [SwaggerOperation(Summary = "Starts the timer on a timed automation rule.")]
         [SwaggerResponse(204, "Timer started.")]
         [SwaggerResponse(404, "Rule not found.")]
         public async Task<IActionResult> TimerStart(int id)
@@ -270,10 +270,10 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Clears the timer on a timed automation rule (called by the operator when timer expires).
+        /// Clears the timer on a timed automation rule, re-arming it.
         /// </summary>
         [HttpPatch("{id}/timer-clear")]
-        [SwaggerOperation(Summary = "Clears TimerActivatedAt, re-arming the rule.")]
+        [SwaggerOperation(Summary = "Clears the timer on a timed automation rule, re-arming it.")]
         [SwaggerResponse(204, "Timer cleared.")]
         [SwaggerResponse(404, "Rule not found.")]
         public async Task<IActionResult> TimerClear(int id)

@@ -28,7 +28,7 @@ namespace garge_api.Controllers
         private string GetUserId() => User.UserId()!;
 
         /// <summary>
-        /// Get all groups for the current user, including their sensor and switch IDs.
+        /// Returns all groups for the current user, including their sensor and switch IDs.
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetGroups()
@@ -52,7 +52,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Create a new group.
+        /// Creates a new group for the current user.
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> CreateGroup([FromBody] CreateGroupDto dto)
@@ -81,7 +81,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Update group name/icon.
+        /// Updates the name and icon of a group.
         /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateGroup(int id, [FromBody] UpdateGroupDto dto)
@@ -100,7 +100,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Delete a group and all its sensor and switch associations.
+        /// Deletes a group and all its sensor and switch associations.
         /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteGroup(int id)
@@ -122,7 +122,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Add a sensor to a group.
+        /// Adds a sensor to a group.
         /// </summary>
         [HttpPost("{id}/sensors/{sensorId}")]
         public async Task<IActionResult> AddSensor(int id, int sensorId)
@@ -150,7 +150,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Remove a sensor from a group.
+        /// Removes a sensor from a group.
         /// </summary>
         [HttpDelete("{id}/sensors/{sensorId}")]
         public async Task<IActionResult> RemoveSensor(int id, int sensorId)
@@ -174,7 +174,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Add a switch to a group.
+        /// Adds a switch to a group.
         /// </summary>
         [HttpPost("{id}/switches/{switchId}")]
         public async Task<IActionResult> AddSwitch(int id, int switchId)
@@ -202,7 +202,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Remove a switch from a group.
+        /// Removes a switch from a group.
         /// </summary>
         [HttpDelete("{id}/switches/{switchId}")]
         public async Task<IActionResult> RemoveSwitch(int id, int switchId)

@@ -49,8 +49,8 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// True when the caller may edit shared state on this sensor — owner, an Edit-tier share, or
-        /// admin. Calibration writes a global per-sensor offset, so a read-only share must not change it.
+        /// Returns true when the caller may edit shared state on this sensor (owner, an Edit-tier share,
+        /// or admin). Calibration writes a global per-sensor offset, so a read-only share must not change it.
         /// </summary>
         private async Task<bool> UserCanEditSensorAsync(int sensorId)
         {

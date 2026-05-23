@@ -46,7 +46,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Lists activities logged for a sensor (e.g. motorcycle voltmeter), most recent first.
+        /// Lists the activities logged for a sensor, ordered with the most recent first.
         /// </summary>
         [HttpGet]
         [SwaggerOperation(Summary = "Lists activities for a sensor.")]

@@ -10,7 +10,7 @@ namespace garge_api.Services
     /// (PostgresNotificationService) and the request-time access checks in
     /// SwitchesController/SensorController.
     ///
-    /// Caches results for <see cref="OwnershipCacheTtl"/>. Callers that mutate
+    /// Caches results for a short TTL. Callers that mutate
     /// UserSwitches / UserSensors must invalidate via
     /// <see cref="InvalidateSwitch"/> / <see cref="InvalidateSensor"/>.
     /// </summary>

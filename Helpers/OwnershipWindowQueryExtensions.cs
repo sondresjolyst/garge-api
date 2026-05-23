@@ -11,24 +11,24 @@ namespace garge_api.Helpers
     /// <c>timestamp &gt;= period.StartedAt &amp;&amp; (period.EndedAt == null || timestamp &lt; period.EndedAt)</c>,
     /// defined once here and reused by every read endpoint and the data export. All methods are plain
     /// LINQ over <see cref="IQueryable{T}"/>, so EF Core translates them to SQL like an inline predicate.
-    /// Pass <paramref name="isAdmin"/> = true to bypass the window (admins see everything).
+    /// Pass <c>isAdmin</c> = true to bypass the window (admins see everything).
     /// </summary>
     public static class OwnershipWindowQueryExtensions
     {
         public static IQueryable<SensorData> WithinSensorOwnership(
-            this IQueryable<SensorData> query, ApplicationDbContext db, string userId, bool isAdmin = false)
+            this IQueryable<SensorData> query, ApplicationDbContext db, string? userId, bool isAdmin = false)
             => isAdmin ? query : query.Where(sd => db.SensorOwnershipPeriods.Any(p =>
                 p.UserId == userId && p.SensorId == sd.SensorId
                 && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt)));
 
         public static IQueryable<BatteryHealth> WithinSensorOwnership(
-            this IQueryable<BatteryHealth> query, ApplicationDbContext db, string userId, bool isAdmin = false)
+            this IQueryable<BatteryHealth> query, ApplicationDbContext db, string? userId, bool isAdmin = false)
             => isAdmin ? query : query.Where(bh => db.SensorOwnershipPeriods.Any(p =>
                 p.UserId == userId && p.SensorId == bh.SensorId
                 && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)));
 
         public static IQueryable<BatteryChargeEvent> WithinSensorOwnership(
-            this IQueryable<BatteryChargeEvent> query, ApplicationDbContext db, string userId, bool isAdmin = false)
+            this IQueryable<BatteryChargeEvent> query, ApplicationDbContext db, string? userId, bool isAdmin = false)
             => isAdmin ? query : query.Where(e => db.SensorOwnershipPeriods.Any(p =>
                 p.UserId == userId && p.SensorId == e.SensorId
                 && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.StartedAt < p.EndedAt)));
@@ -39,7 +39,7 @@ namespace garge_api.Helpers
         /// Sensor.ParentName → an owned sensor's period). Either path bounds the data to the caller's window.
         /// </summary>
         public static IQueryable<SwitchData> WithinSwitchOwnership(
-            this IQueryable<SwitchData> query, ApplicationDbContext db, string userId, bool isAdmin = false)
+            this IQueryable<SwitchData> query, ApplicationDbContext db, string? userId, bool isAdmin = false)
             => isAdmin ? query : query.Where(sd =>
                 db.SwitchOwnershipPeriods.Any(p => p.UserId == userId && p.SwitchId == sd.SwitchId
                     && sd.Timestamp >= p.StartedAt && (p.EndedAt == null || sd.Timestamp < p.EndedAt))
