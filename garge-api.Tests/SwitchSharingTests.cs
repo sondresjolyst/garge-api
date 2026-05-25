@@ -1,5 +1,5 @@
 using garge_api.Controllers;
-using garge_api.Dtos.Switch;
+using garge_api.Dtos.Common;
 using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Switch;
@@ -54,7 +54,7 @@ public class SwitchSharingTests : ControllerTestBase
         await db.SaveChangesAsync();
     }
 
-    private static ShareSwitchDto Share(string email, SharePermission p = SharePermission.Read) =>
+    private static ShareRequestDto Share(string email, SharePermission p = SharePermission.Read) =>
         new() { Email = email, Permission = p };
 
     [Fact]
@@ -125,7 +125,7 @@ public class SwitchSharingTests : ControllerTestBase
         var result = await CreateController(db, "owner").ListSwitchShares(1);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var shares = Assert.IsAssignableFrom<IEnumerable<SwitchShareDto>>(ok.Value);
+        var shares = Assert.IsAssignableFrom<IEnumerable<ShareRecipientDto>>(ok.Value);
         var s = Assert.Single(shares);
         Assert.Equal("viewer", s.UserId);
         Assert.Equal(SharePermission.Edit, s.Permission);

@@ -47,15 +47,15 @@ public class SubscriptionChargeSchedulerServiceTests
     {
         var (svc, vipps, db) = BuildHarness();
         var dueDate = DateTime.UtcNow.AddDays(3);
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_due", Status = SubscriptionStatus.Active,
             NextChargeDate = dueDate
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
@@ -68,15 +68,15 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_ActiveSubBeyondLookahead_NotCharged()
     {
         var (svc, vipps, db) = BuildHarness();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_far", Status = SubscriptionStatus.Active,
             NextChargeDate = DateTime.UtcNow.AddDays(20)
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
@@ -92,15 +92,15 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_NonActiveStatuses_Skipped(SubscriptionStatus status)
     {
         var (svc, vipps, db) = BuildHarness();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_inactive", Status = status,
             NextChargeDate = DateTime.UtcNow.AddDays(1)
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
@@ -113,7 +113,7 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_TestSubInLiveMode_NotCharged()
     {
         var (svc, vipps, db) = BuildHarness(testMode: false);
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
@@ -121,8 +121,8 @@ public class SubscriptionChargeSchedulerServiceTests
             NextChargeDate = DateTime.UtcNow.AddDays(1),
             IsTest = true
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
@@ -135,7 +135,7 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_LiveSubInTestMode_NotCharged()
     {
         var (svc, vipps, db) = BuildHarness(testMode: true);
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
@@ -143,8 +143,8 @@ public class SubscriptionChargeSchedulerServiceTests
             NextChargeDate = DateTime.UtcNow.AddDays(1),
             IsTest = false
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
@@ -157,7 +157,7 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_OneSubThrows_OthersStillProcessed()
     {
         var (svc, vipps, db) = BuildHarness();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub1 = new Subscription
         {
             UserId = "user-1", ProductId = 1,
@@ -171,7 +171,7 @@ public class SubscriptionChargeSchedulerServiceTests
             NextChargeDate = DateTime.UtcNow.AddDays(2)
         };
         await db.Subscriptions.AddRangeAsync(sub1, sub2);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         vipps.Setup(v => v.CreateChargeAsync("agr_a", It.IsAny<int>(), It.IsAny<DateTime>(),
                 It.IsAny<string>(), It.IsAny<string>()))
@@ -192,15 +192,15 @@ public class SubscriptionChargeSchedulerServiceTests
     public async Task Scheduler_NextChargeDateNull_Skipped()
     {
         var (svc, vipps, db) = BuildHarness();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_null", Status = SubscriptionStatus.Active,
             NextChargeDate = null
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 

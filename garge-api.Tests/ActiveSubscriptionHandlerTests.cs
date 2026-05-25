@@ -91,7 +91,7 @@ public class ActiveSubscriptionHandlerTests
         // bypass from the DB, so a freshly granted role works without forcing a re-login.
         var (handler, db) = Create();
         GrantRole(db, "user-1", role);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -104,8 +104,8 @@ public class ActiveSubscriptionHandlerTests
     {
         // A brand-new user with no Primary cannot claim their first sensor.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -118,9 +118,9 @@ public class ActiveSubscriptionHandlerTests
     {
         // Primary covers the first sensor — claim is allowed.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.Subscriptions.AddAsync(Primary("user-1"));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1"), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -133,10 +133,10 @@ public class ActiveSubscriptionHandlerTests
     {
         // Primary covers exactly one sensor; without AddOn, the next claim is denied.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.UserSensors.AddAsync(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true });
-        await db.Subscriptions.AddAsync(Primary("user-1"));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.UserSensors.AddAsync(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1"), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -149,12 +149,12 @@ public class ActiveSubscriptionHandlerTests
     {
         // Capacity = 1 (Primary) + 2 (AddOn × 2) = 3; with 2 owned the user can claim a third.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
         await db.UserSensors.AddRangeAsync(
             new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true },
             new UserSensor { UserId = "user-1", SensorId = 2, IsOwner = true });
         await db.Subscriptions.AddRangeAsync(Primary("user-1"), AddOn("user-1", quantity: 2));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -167,9 +167,9 @@ public class ActiveSubscriptionHandlerTests
     {
         // AddOn alone does not grant capacity — Primary is required as the base.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.Subscriptions.AddAsync(AddOn("user-1", quantity: 5));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(AddOn("user-1", quantity: 5), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -181,9 +181,9 @@ public class ActiveSubscriptionHandlerTests
     public async Task PendingPrimary_NotCountedAsActive()
     {
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.Subscriptions.AddAsync(Primary("user-1", status: SubscriptionStatus.Pending));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1", status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -197,11 +197,11 @@ public class ActiveSubscriptionHandlerTests
         // User owns 1 sensor (covered by Primary). A shared sensor (IsOwner=false) must not
         // push them over capacity, so the user can still claim another sensor.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
         await db.UserSensors.AddRangeAsync(
             new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = false });
-        await db.Subscriptions.AddAsync(Primary("user-1"));
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(Primary("user-1"), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -213,9 +213,9 @@ public class ActiveSubscriptionHandlerTests
     public async Task TestModeOff_TestSubscription_NotCounted()
     {
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsTestMode = false });
-        await db.Subscriptions.AddAsync(Primary("user-1", isTest: true));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsTestMode = false }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1", isTest: true), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -227,9 +227,9 @@ public class ActiveSubscriptionHandlerTests
     public async Task TestModeOn_TestSubscription_Counted()
     {
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsTestMode = true });
-        await db.Subscriptions.AddAsync(Primary("user-1", isTest: true));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsTestMode = true }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1", isTest: true), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -243,10 +243,10 @@ public class ActiveSubscriptionHandlerTests
         // The user owns one sensor but has turned it off (SuspendedAt set). It must not consume the
         // Primary's single slot, so they can claim a different sensor.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.UserSensors.AddAsync(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow });
-        await db.Subscriptions.AddAsync(Primary("user-1"));
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.UserSensors.AddAsync(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(Primary("user-1"), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -259,11 +259,11 @@ public class ActiveSubscriptionHandlerTests
     {
         // Cancelled (Stopped) but paid through a future NextChargeDate — capacity continues until then.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
         var sub = Primary("user-1", status: SubscriptionStatus.Stopped);
         sub.NextChargeDate = DateTime.UtcNow.AddDays(10);
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);
@@ -276,11 +276,11 @@ public class ActiveSubscriptionHandlerTests
     {
         // Stopped and the paid period has ended — no capacity.
         var (handler, db) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
         var sub = Primary("user-1", status: SubscriptionStatus.Stopped);
         sub.NextChargeDate = DateTime.UtcNow.AddDays(-1);
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctx = MakeContext("user-1");
         await Handle(handler, ctx);

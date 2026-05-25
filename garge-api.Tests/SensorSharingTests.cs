@@ -1,5 +1,5 @@
 using garge_api.Controllers;
-using garge_api.Dtos.Sensor;
+using garge_api.Dtos.Common;
 using garge_api.Hubs;
 using garge_api.Models;
 using garge_api.Models.Mqtt;
@@ -59,7 +59,7 @@ public class SensorSharingTests : ControllerTestBase
         await db.SaveChangesAsync();
     }
 
-    private static ShareSensorDto Share(string email, SharePermission p = SharePermission.Read) =>
+    private static ShareRequestDto Share(string email, SharePermission p = SharePermission.Read) =>
         new() { Email = email, Permission = p };
 
     [Fact]
@@ -159,7 +159,7 @@ public class SensorSharingTests : ControllerTestBase
         var result = await CreateController(db, "owner").ListShares(1);
 
         var ok = Assert.IsType<OkObjectResult>(result);
-        var shares = Assert.IsAssignableFrom<IEnumerable<SensorShareDto>>(ok.Value);
+        var shares = Assert.IsAssignableFrom<IEnumerable<ShareRecipientDto>>(ok.Value);
         var s = Assert.Single(shares);
         Assert.Equal("viewer", s.UserId);
         Assert.Equal(SharePermission.Edit, s.Permission);
@@ -193,7 +193,7 @@ public class SensorSharingTests : ControllerTestBase
         db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
         db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "viewer", SwitchId = 10, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "owner").UnclaimSensor(1);
 
@@ -216,7 +216,7 @@ public class SensorSharingTests : ControllerTestBase
         db.Switches.Add(new Switch { Id = 10, Name = "socket-a", Type = "socket", Role = "switch" });
         db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await CreateController(db, "owner").UnclaimSensor(1);
 

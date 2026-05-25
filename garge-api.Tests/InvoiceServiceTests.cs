@@ -73,7 +73,7 @@ public class InvoiceServiceTests
         var order = await SeedPaidOrderAsync(db);
         var existing = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddMinutes(-5), PdfData = [9, 9, 9] };
         db.Invoices.Add(existing);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var returnedId = await svc.GenerateAndStoreAsync(order.Id);
 
@@ -94,7 +94,7 @@ public class InvoiceServiceTests
 
         var id = await svc.GenerateAndStoreAsync(order.Id);
 
-        var saved = await db.Invoices.SingleAsync();
+        var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(id, saved.Id);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
         pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
@@ -131,7 +131,7 @@ public class InvoiceServiceTests
         var order = await SeedPaidOrderAsync(db);
         var inProgress = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [] };
         db.Invoices.Add(inProgress);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var id = await svc.GenerateAndStoreAsync(order.Id);
 
@@ -152,12 +152,12 @@ public class InvoiceServiceTests
         var order = await SeedPaidOrderAsync(db);
         var existing = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [9, 9, 9] };
         db.Invoices.Add(existing);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var id = await svc.GenerateAndStoreAsync(order.Id, force: true);
 
         Assert.Equal(existing.Id, id);
-        var saved = await db.Invoices.SingleAsync();
+        var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
         pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
@@ -174,13 +174,13 @@ public class InvoiceServiceTests
         var order = await SeedPaidOrderAsync(db);
         var existing = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [9, 9, 9] };
         db.Invoices.Add(existing);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await Assert.ThrowsAsync<Exception>(() => svc.GenerateAndStoreAsync(order.Id, force: true));
 
         // Force regenerate over a complete invoice must NOT throw away the existing
         // PDF bytes when the new render fails.
-        var saved = await db.Invoices.SingleAsync();
+        var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(existing.Id, saved.Id);
         Assert.Equal(new byte[] { 9, 9, 9 }, saved.PdfData);
     }
@@ -231,7 +231,7 @@ public class InvoiceServiceTests
         var id = await svc.GenerateForSubscriptionChargeAsync(
             subscription.Id, "charge-1", amountInOre: 29900, occurredAt: DateTime.UtcNow);
 
-        var saved = await db.Invoices.SingleAsync();
+        var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(id, saved.Id);
         Assert.Equal(subscription.Id, saved.SubscriptionId);
         Assert.Equal("charge-1", saved.VippsChargeId);

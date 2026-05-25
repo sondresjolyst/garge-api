@@ -1,4 +1,5 @@
 ﻿using garge_api.Constants;
+using garge_api.Dtos.Common;
 using garge_api.Dtos.Switch;
 using garge_api.Helpers;
 using garge_api.Hubs;
@@ -40,7 +41,7 @@ namespace garge_api.Controllers
         private bool IsSwitchAdmin() =>
             User.IsInAnyRole(RoleNames.Admin, RoleNames.SwitchAdmin);
 
-        private async Task<bool> UserHasRequiredRoleAsync(Switch switchEntity)
+        private async Task<bool> UserHasRequiredRoleAsync(Switch switchEntity, CancellationToken ct = default)
         {
             // Admins always have access.
             if (IsSwitchAdmin()) return true;
@@ -50,49 +51,63 @@ namespace garge_api.Controllers
 
             // Delegate to the shared ownership service so the request-time access
             // check and the SignalR dispatch path use identical logic.
-            return await _ownership.CanUserAccessSwitchAsync(userId, switchEntity.Id);
+            return await _ownership.CanUserAccessSwitchAsync(userId, switchEntity.Id, ct);
         }
 
         /// <summary>
         /// Returns true when the user owns a sensor whose gateway discovered this switch. Owning the
         /// parent device makes the user a switch owner, so they may share and control it.
         /// </summary>
-        private async Task<bool> IsIndirectSwitchOwnerAsync(Switch sw, string userId) =>
+        private async Task<bool> IsIndirectSwitchOwnerAsync(Switch sw, string userId, CancellationToken ct = default) =>
             await _context.DiscoveredDevices
                 .Where(dd => dd.Target == sw.Name)
                 .Join(_context.Sensors, dd => dd.DiscoveredBy, s => s.ParentName, (dd, s) => s.Id)
                 .Join(_context.UserSensors.Where(us => us.IsOwner && us.UserId == userId), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
-                .AnyAsync();
+                .AnyAsync(ct);
 
         /// <summary>Returns true when the caller is an owner: an admin, a direct owned row, or an indirect (parent-sensor) owner. Only owners may share.</summary>
-        private async Task<bool> UserOwnsSwitchAsync(Switch sw)
+        private async Task<bool> UserOwnsSwitchAsync(Switch sw, CancellationToken ct = default)
         {
             if (IsSwitchAdmin()) return true;
             var userId = User.UserId();
             if (string.IsNullOrEmpty(userId)) return false;
-            if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == sw.Id && us.IsOwner)) return true;
-            return await IsIndirectSwitchOwnerAsync(sw, userId);
+            if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == sw.Id && us.IsOwner, ct)) return true;
+            return await IsIndirectSwitchOwnerAsync(sw, userId, ct);
         }
 
         /// <summary>Returns true when the caller may edit shared state (owner or a direct Edit-tier share).</summary>
-        private async Task<bool> UserCanEditSwitchAsync(Switch sw)
+        private async Task<bool> UserCanEditSwitchAsync(Switch sw, CancellationToken ct = default)
         {
-            if (await UserOwnsSwitchAsync(sw)) return true;
+            if (await UserOwnsSwitchAsync(sw, ct)) return true;
             var userId = User.UserId();
             return userId != null && await _context.UserSwitches.AnyAsync(us =>
-                us.UserId == userId && us.SwitchId == sw.Id && us.Permission == SharePermission.Edit);
+                us.UserId == userId && us.SwitchId == sw.Id && us.Permission == SharePermission.Edit, ct);
         }
 
         /// <summary>Returns the caller's relationship to a switch for SwitchDto.Access.</summary>
-        private async Task<string> CallerSwitchAccessAsync(Switch sw)
+        private async Task<string> CallerSwitchAccessAsync(Switch sw, CancellationToken ct = default)
         {
-            if (await UserOwnsSwitchAsync(sw)) return DeviceAccess.Owner;
+            if (await UserOwnsSwitchAsync(sw, ct)) return DeviceAccess.Owner;
             var userId = User.UserId();
             var perm = await _context.UserSwitches
                 .Where(us => us.UserId == userId && us.SwitchId == sw.Id && !us.IsOwner)
                 .Select(us => (SharePermission?)us.Permission)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
             return perm == SharePermission.Edit ? DeviceAccess.Edit : DeviceAccess.Read;
+        }
+
+        /// <summary>
+        /// In-memory equivalent of <see cref="CallerSwitchAccessAsync"/> for the list endpoint, using the
+        /// caller's direct membership rows and indirect-ownership set precomputed once. Owner == admin,
+        /// a direct owner row, or indirect ownership; otherwise the direct share tier (Edit or Read).
+        /// </summary>
+        private static string CallerSwitchAccess(
+            int switchId, bool isAdmin, IReadOnlyDictionary<int, UserSwitch> directRows, IReadOnlySet<int> indirectOwnedIds)
+        {
+            if (isAdmin) return DeviceAccess.Owner;
+            var hasDirect = directRows.TryGetValue(switchId, out var row);
+            if ((hasDirect && row!.IsOwner) || indirectOwnedIds.Contains(switchId)) return DeviceAccess.Owner;
+            return hasDirect && row!.Permission == SharePermission.Edit ? DeviceAccess.Edit : DeviceAccess.Read;
         }
 
         /// <summary>
@@ -132,36 +147,60 @@ namespace garge_api.Controllers
         [HttpGet]
         [SwaggerOperation(Summary = "Retrieves all available switches.")]
         [SwaggerResponse(200, "A list of all switches.", typeof(IEnumerable<SwitchDto>))]
-        public async Task<IActionResult> GetAllSwitches()
+        public async Task<IActionResult> GetAllSwitches(CancellationToken ct = default)
         {
             _logger.LogInformation("GetAllSwitches called by {@LogData}", new { CallerUserId = User.UserId() });
+
+            var userId = User.UserId()!;
+            var isAdmin = IsSwitchAdmin();
 
             var allSwitches = await _context.Switches
                 .AsNoTracking()
                 .Where(sw => sw.Type.ToLower() == SwitchTypes.Socket)
-                .ToListAsync();
-            var accessibleSwitches = new List<Switch>();
+                .ToListAsync(ct);
 
-            foreach (var sw in allSwitches)
-            {
-                if (await UserHasRequiredRoleAsync(sw))
-                {
-                    accessibleSwitches.Add(sw);
-                }
-            }
+            // Compute the caller's accessible/ownership relationships across all candidate sockets in a
+            // few set queries instead of a per-switch access check. This mirrors the per-row logic that
+            // DeviceOwnershipService.LoadSwitchOwnersAsync / UserOwnsSwitchAsync / CallerSwitchAccessAsync
+            // applied one switch at a time, so the returned set and per-row Access are identical.
+            var candidateIds = allSwitches.Select(s => s.Id).ToList();
 
-            var userId = User.UserId()!;
+            // Direct membership rows (owner or shared) for the caller, keyed by switch id.
+            var directRows = isAdmin
+                ? new Dictionary<int, UserSwitch>()
+                : await _context.UserSwitches
+                    .Where(us => us.UserId == userId && candidateIds.Contains(us.SwitchId))
+                    .ToDictionaryAsync(us => us.SwitchId, us => us, ct);
+
+            // Switch ids the caller owns indirectly via an owned sensor whose gateway discovered the switch.
+            var indirectOwnedIds = isAdmin
+                ? new HashSet<int>()
+                : (await _context.Switches
+                    .Where(sw => candidateIds.Contains(sw.Id))
+                    .Where(sw => _context.DiscoveredDevices
+                        .Where(dd => dd.Target == sw.Name)
+                        .Join(_context.Sensors, dd => dd.DiscoveredBy, s => s.ParentName, (dd, s) => s.Id)
+                        .Join(_context.UserSensors.Where(us => us.IsOwner && us.UserId == userId), sid => sid, us => us.SensorId, (sid, us) => us.UserId)
+                        .Any())
+                    .Select(sw => sw.Id)
+                    .ToListAsync(ct)).ToHashSet();
+
+            // Access (visibility) == admin, or a direct row, or indirect ownership — matching UserHasRequiredRoleAsync.
+            var accessibleSwitches = isAdmin
+                ? allSwitches
+                : allSwitches.Where(sw => directRows.ContainsKey(sw.Id) || indirectOwnedIds.Contains(sw.Id)).ToList();
+
             var switchIds = accessibleSwitches.Select(s => s.Id).ToList();
             var customNames = await _context.UserSwitchCustomNames
                 .Where(x => x.UserId == userId && switchIds.Contains(x.SwitchId))
-                .ToDictionaryAsync(x => x.SwitchId, x => x.CustomName);
+                .ToDictionaryAsync(x => x.SwitchId, x => x.CustomName, ct);
 
             var dtos = new List<SwitchDto>();
             foreach (var sw in accessibleSwitches)
             {
                 var dto = _mapper.Map<SwitchDto>(sw);
                 dto.CustomName = customNames.TryGetValue(sw.Id, out var cn) ? cn : null;
-                dto.Access = await CallerSwitchAccessAsync(sw);
+                dto.Access = CallerSwitchAccess(sw.Id, isAdmin, directRows, indirectOwnedIds);
                 dtos.Add(dto);
             }
 
@@ -177,18 +216,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The switch with the specified ID.", typeof(SwitchDto))]
         [SwaggerResponse(404, "Switch not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSwitch(int id)
+        public async Task<IActionResult> GetSwitch(int id, CancellationToken ct = default)
         {
             _logger.LogInformation("GetSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
-            var switchEntity = await _context.Switches.FindAsync(id);
+            var switchEntity = await _context.Switches.FindAsync(new object[] { id }, ct);
             if (switchEntity == null)
             {
                 _logger.LogWarning("GetSwitch not found: {@LogData}", new { id });
                 return NotFound(new { message = "Switch not found!" });
             }
 
-            if (!await UserHasRequiredRoleAsync(switchEntity))
+            if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
                 _logger.LogWarning("GetSwitch forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
                 return Forbid();
@@ -198,11 +237,11 @@ namespace garge_api.Controllers
             var customName = await _context.UserSwitchCustomNames
                 .Where(x => x.UserId == userId && x.SwitchId == id)
                 .Select(x => x.CustomName)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
 
             var dto = _mapper.Map<SwitchDto>(switchEntity);
             dto.CustomName = customName;
-            dto.Access = await CallerSwitchAccessAsync(switchEntity);
+            dto.Access = await CallerSwitchAccessAsync(switchEntity, ct);
 
             _logger.LogInformation("Returning switch {@LogData}", new { id, CallerUserId = User.UserId() });
             return Ok(dto);
@@ -312,42 +351,28 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The data for the specified switch.", typeof(IEnumerable<SwitchDataDto>))]
         [SwaggerResponse(404, "Switch not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSwitchData(int switchId, string? timeRange, DateTime? startDate, DateTime? endDate)
+        public async Task<IActionResult> GetSwitchData(int switchId, string? timeRange, DateTime? startDate, DateTime? endDate, CancellationToken ct = default)
         {
             _logger.LogInformation("GetSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
 
-            var switchEntity = await _context.Switches.AsNoTracking().FirstOrDefaultAsync(s => s.Id == switchId);
+            var switchEntity = await _context.Switches.AsNoTracking().FirstOrDefaultAsync(s => s.Id == switchId, ct);
             if (switchEntity == null)
             {
                 _logger.LogWarning("GetSwitchData not found: {@LogData}", new { switchId });
                 return NotFound(new { message = "Switch not found!" });
             }
 
-            if (!await UserHasRequiredRoleAsync(switchEntity))
+            if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
                 _logger.LogWarning("GetSwitchData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
                 return Forbid();
             }
 
             var query = WithinOwnershipWindow(
-                _context.SwitchData.Where(sd => sd.SwitchId == switchId));
+                _context.SwitchData.Where(sd => sd.SwitchId == switchId))
+                .ApplyTimeRange(timeRange, startDate, endDate);
 
-            if (!string.IsNullOrEmpty(timeRange))
-            {
-                var now = DateTime.UtcNow;
-                var timeSpan = TimeRangeParser.Parse(timeRange);
-                if (timeSpan.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
-            }
-            else
-            {
-                if (startDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                if (endDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
-            }
-
-            var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
+            var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync(ct);
             var dtos = _mapper.Map<IEnumerable<SwitchDataDto>>(switchDataList);
 
             _logger.LogInformation("Returning {@LogData}", new { Count = switchDataList.Count, switchId });
@@ -362,18 +387,18 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The state for the specified switch, or null if no data exists yet.", typeof(SwitchDataDto))]
         [SwaggerResponse(404, "Switch not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSwitchState(int switchId)
+        public async Task<IActionResult> GetSwitchState(int switchId, CancellationToken ct = default)
         {
             _logger.LogInformation("GetSwitchState called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
 
-            var switchEntity = await _context.Switches.FindAsync(switchId);
+            var switchEntity = await _context.Switches.FindAsync(new object[] { switchId }, ct);
             if (switchEntity == null)
             {
                 _logger.LogWarning("GetSwitchState not found: {@LogData}", new { switchId });
                 return NotFound(new { message = "Switch not found!" });
             }
 
-            if (!await UserHasRequiredRoleAsync(switchEntity))
+            if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
                 _logger.LogWarning("GetSwitchState forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
                 return Forbid();
@@ -382,7 +407,7 @@ namespace garge_api.Controllers
             var query = await WithinOwnershipWindow(
                     _context.SwitchData.Where(sd => sd.SwitchId == switchId))
                 .OrderByDescending(sd => sd.Timestamp)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
 
             if (query == null)
             {
@@ -445,11 +470,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The data for the specified switches.", typeof(IEnumerable<SwitchDataDto>))]
         [SwaggerResponse(404, "One or more switches not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetMultipleSwitchesData([FromQuery] List<int> switchIds, string? timeRange, DateTime? startDate, DateTime? endDate)
+        public async Task<IActionResult> GetMultipleSwitchesData([FromQuery] List<int> switchIds, string? timeRange, DateTime? startDate, DateTime? endDate, CancellationToken ct = default)
         {
             _logger.LogInformation("GetMultipleSwitchesData called by {@LogData}", new { CallerUserId = User.UserId(), switchIds });
 
-            var switches = await _context.Switches.Where(s => switchIds.Contains(s.Id)).ToListAsync();
+            var switches = await _context.Switches.Where(s => switchIds.Contains(s.Id)).ToListAsync(ct);
             if (switches.Count != switchIds.Count)
             {
                 _logger.LogWarning("GetMultipleSwitchesData not found: {@LogData}", new { switchIds });
@@ -458,7 +483,7 @@ namespace garge_api.Controllers
 
             foreach (var switchEntity in switches)
             {
-                if (!await UserHasRequiredRoleAsync(switchEntity))
+                if (!await UserHasRequiredRoleAsync(switchEntity, ct))
                 {
                     _logger.LogWarning("GetMultipleSwitchesData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId = switchEntity.Id });
                     return Forbid();
@@ -466,24 +491,10 @@ namespace garge_api.Controllers
             }
 
             var query = WithinOwnershipWindow(
-                _context.SwitchData.Where(sd => switchIds.Contains(sd.SwitchId)));
+                _context.SwitchData.Where(sd => switchIds.Contains(sd.SwitchId)))
+                .ApplyTimeRange(timeRange, startDate, endDate);
 
-            if (!string.IsNullOrEmpty(timeRange))
-            {
-                var now = DateTime.UtcNow;
-                var timeSpan = TimeRangeParser.Parse(timeRange);
-                if (timeSpan.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
-            }
-            else
-            {
-                if (startDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp >= startDate.Value);
-                if (endDate.HasValue)
-                    query = query.Where(sd => sd.Timestamp <= endDate.Value);
-            }
-
-            var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync();
+            var switchDataList = await query.OrderBy(sd => sd.Timestamp).ToListAsync(ct);
             var dtos = _mapper.Map<IEnumerable<SwitchDataDto>>(switchDataList);
 
             _logger.LogInformation("Returning {@LogData}", new { Count = switchDataList.Count, switchIds });
@@ -746,7 +757,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Switch shared.")]
         [SwaggerResponse(403, "Only the owner can share.")]
         [SwaggerResponse(404, "Switch or recipient not found.")]
-        public async Task<IActionResult> ShareSwitch(int id, [FromBody] ShareSwitchDto dto)
+        public async Task<IActionResult> ShareSwitch(int id, [FromBody] ShareRequestDto dto)
         {
             var switchEntity = await _context.Switches.FindAsync(id);
             if (switchEntity == null) return NotFound(new { message = "Switch not found." });
@@ -761,25 +772,18 @@ namespace garge_api.Controllers
             if (target.Id == User.UserId())
                 return BadRequest(new { message = "You already own this switch." });
 
-            var existing = await _context.UserSwitches
-                .FirstOrDefaultAsync(us => us.UserId == target.Id && us.SwitchId == id);
-            if (existing != null)
-            {
-                if (existing.IsOwner)
-                    return BadRequest(new { message = "That user already owns this switch." });
-                existing.Permission = dto.Permission;
-            }
-            else
-            {
-                _context.UserSwitches.Add(new UserSwitch
-                {
-                    UserId = target.Id, SwitchId = id, IsOwner = false, Permission = dto.Permission,
-                });
-                _context.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod
-                {
-                    UserId = target.Id, SwitchId = id, StartedAt = DateTime.UtcNow, EndedAt = null,
-                });
-            }
+            var upsert = await DeviceShareHelper.UpsertShareAsync(
+                _context.UserSwitches,
+                _context.SwitchOwnershipPeriods,
+                dto.Permission,
+                matchesTarget: us => us.UserId == target.Id && us.SwitchId == id,
+                isOwner: us => us.IsOwner,
+                setPermission: (us, p) => us.Permission = p,
+                newMembership: () => new UserSwitch { UserId = target.Id, SwitchId = id, IsOwner = false, Permission = dto.Permission },
+                newPeriod: () => new SwitchOwnershipPeriod { UserId = target.Id, SwitchId = id, StartedAt = DateTime.UtcNow, EndedAt = null });
+
+            if (upsert == ShareUpsertResult.AlreadyOwner)
+                return BadRequest(new { message = "That user already owns this switch." });
 
             await _context.SaveChangesAsync();
             _ownership.InvalidateSwitch(id);
@@ -817,7 +821,7 @@ namespace garge_api.Controllers
         /// <summary>Lists the users a switch is shared with. Owner only.</summary>
         [HttpGet("{id}/shares")]
         [SwaggerOperation(Summary = "Lists who a switch is shared with.")]
-        [SwaggerResponse(200, "Shares.", typeof(IEnumerable<SwitchShareDto>))]
+        [SwaggerResponse(200, "Shares.", typeof(IEnumerable<ShareRecipientDto>))]
         [SwaggerResponse(403, "Only the owner can view shares.")]
         public async Task<IActionResult> ListSwitchShares(int id)
         {
@@ -825,18 +829,12 @@ namespace garge_api.Controllers
             if (switchEntity == null) return NotFound(new { message = "Switch not found." });
             if (!await UserOwnsSwitchAsync(switchEntity)) return Forbid();
 
-            var shares = await _context.UserSwitches
-                .Where(us => us.SwitchId == id && !us.IsOwner)
-                .Join(_context.Users, us => us.UserId, u => u.Id, (us, u) => new SwitchShareDto
-                {
-                    UserId = u.Id,
-                    Email = u.Email!,
-                    FirstName = u.FirstName,
-                    LastName = u.LastName,
-                    Permission = us.Permission,
-                    SharedAt = us.CreatedAt,
-                })
-                .ToListAsync();
+            var shares = await DeviceShareHelper.ListRecipientsAsync(
+                _context.UserSwitches.Where(us => us.SwitchId == id && !us.IsOwner),
+                _context.Users,
+                userIdOf: us => us.UserId,
+                permissionOf: us => us.Permission,
+                sharedAtOf: us => us.CreatedAt);
 
             return Ok(shares);
         }

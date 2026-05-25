@@ -86,7 +86,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         SeedResaleHistory(db);
         var controller = CreateController(db, "user-C", isAdmin: false);
 
-        var result = await controller.GetSensorData(SensorId, null, null, null, groupBy: "");
+        var result = await controller.GetSensorData(SensorId, null, null, null, groupBy: "", ct: TestContext.Current.CancellationToken);
 
         // C must NOT see A's 3 pre-resale readings — only their own 2.
         Assert.Equal(2, TotalCount(result));
@@ -99,7 +99,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         SeedResaleHistory(db);
         var controller = CreateController(db, "admin-1", isAdmin: true);
 
-        var result = await controller.GetSensorData(SensorId, null, null, null, groupBy: "");
+        var result = await controller.GetSensorData(SensorId, null, null, null, groupBy: "", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(5, TotalCount(result));
     }
@@ -113,7 +113,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
             .Returns((SensorData s) => new SensorDataDto { Id = s.Id, SensorId = s.SensorId, Value = s.Value, Timestamp = s.Timestamp });
         var controller = CreateController(db, "user-C", isAdmin: false);
 
-        var result = await controller.GetLatestSensorData(SensorId);
+        var result = await controller.GetLatestSensorData(SensorId, TestContext.Current.CancellationToken);
 
         var dto = Assert.IsType<SensorDataDto>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal("14", dto.Value); // C's latest, not A's old readings
@@ -129,7 +129,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
             RegistrationCode = "rc-1", DefaultName = "Battery", ParentName = "garge_test"
         });
         db.Users.Add(MakeUser("user-A"));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var controller = CreateController(db, "user-A", isAdmin: false);
 
         await controller.ClaimSensor(new ClaimSensorDto { RegistrationCode = "rc-1" });
@@ -150,7 +150,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         });
         db.Users.Add(MakeUser("user-A"));
         db.Users.Add(MakeUser("user-B", "b@example.com"));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var before = DateTime.UtcNow;
         await CreateController(db, "user-A", isAdmin: false).ClaimSensor(new ClaimSensorDto { RegistrationCode = "rc-1" });
@@ -184,7 +184,7 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         db.SensorActivities.Add(new SensorActivity { UserId = "user-A", SensorId = SensorId, Title = "Oil change", ActivityDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow });
         db.SensorPhotos.Add(new SensorPhoto { UserId = "user-A", SensorId = SensorId, Data = "AQID", ContentType = "image/png" });
         db.SensorOfflineNotifications.Add(new SensorOfflineNotification { UserId = "user-A", SensorId = SensorId });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "user-A", isAdmin: false).UnclaimSensor(SensorId);
 

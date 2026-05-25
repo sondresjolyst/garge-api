@@ -58,9 +58,9 @@ public class SensorSuspensionTests : ControllerTestBase
         using var db = CreateDbContext();
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateController(db, "u").GetSensorData(1, null, null, null, groupBy: "");
+        var result = await CreateController(db, "u").GetSensorData(1, null, null, null, groupBy: "", ct: TestContext.Current.CancellationToken);
 
         var obj = Assert.IsType<ObjectResult>(result);
         Assert.Equal(403, obj.StatusCode);
@@ -81,9 +81,9 @@ public class SensorSuspensionTests : ControllerTestBase
             new SensorData { SensorId = 1, Value = "1", Timestamp = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
             new SensorData { SensorId = 1, Value = "2", Timestamp = new DateTime(2021, 1, 2, 0, 0, 0, DateTimeKind.Utc) },
             new SensorData { SensorId = 2, Value = "9", Timestamp = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateController(db, "u").GetMultipleSensorsData(new List<int> { 1, 2 }, null, null, null, groupBy: "");
+        var result = await CreateController(db, "u").GetMultipleSensorsData(new List<int> { 1, 2 }, null, null, null, groupBy: "", ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, TotalCount(result)); // only sensor 1's rows; suspended sensor 2 excluded
     }
@@ -94,7 +94,7 @@ public class SensorSuspensionTests : ControllerTestBase
         using var db = CreateDbContext();
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").SuspendSensor(1);
 
@@ -117,7 +117,7 @@ public class SensorSuspensionTests : ControllerTestBase
         SeedPrimary(db, "u");
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").ActivateSensor(1);
 
@@ -134,7 +134,7 @@ public class SensorSuspensionTests : ControllerTestBase
         db.UserSensors.AddRange(
             new UserSensor { UserId = "u", SensorId = 2, IsOwner = true },                              // active -> uses the 1 slot
             new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow }); // wants to come back on
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").ActivateSensor(1);
 

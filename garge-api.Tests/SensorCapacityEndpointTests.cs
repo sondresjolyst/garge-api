@@ -47,7 +47,7 @@ public class SensorCapacityEndpointTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         db.AppSettings.Add(new AppSettings { Id = 1 });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").GetMyCapacity();
 
@@ -63,7 +63,7 @@ public class SensorCapacityEndpointTests : ControllerTestBase
         using var db = CreateDbContext();
         db.AppSettings.Add(new AppSettings { Id = 1 });
         AddActivePrimary(db, "u"); // capacity 1
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").GetMyCapacity();
 
@@ -79,7 +79,7 @@ public class SensorCapacityEndpointTests : ControllerTestBase
         using var db = CreateDbContext();
         db.AppSettings.Add(new AppSettings { Id = 1 });
         GrantRole(db, "u", "ComplimentaryUser");
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "u").GetMyCapacity();
 

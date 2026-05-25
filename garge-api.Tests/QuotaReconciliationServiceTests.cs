@@ -38,9 +38,9 @@ public class QuotaReconciliationServiceTests : ControllerTestBase
             Owned("u", 1, t0),
             Owned("u", 2, t0.AddDays(1)),
             Owned("u", 3, t0.AddDays(2)));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db));
+        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db), TestContext.Current.CancellationToken);
 
         Assert.Equal(2, suspended);
         Assert.Null(db.UserSensors.Single(x => x.SensorId == 1).SuspendedAt);   // oldest kept
@@ -54,9 +54,9 @@ public class QuotaReconciliationServiceTests : ControllerTestBase
         using var db = CreateDbContext();
         SeedPrimary(db, "u"); // capacity = 1
         db.UserSensors.Add(Owned("u", 1, new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db));
+        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db), TestContext.Current.CancellationToken);
 
         Assert.Equal(0, suspended);
         Assert.Null(db.UserSensors.Single().SuspendedAt);
@@ -69,9 +69,9 @@ public class QuotaReconciliationServiceTests : ControllerTestBase
         db.AppSettings.Add(new AppSettings { Id = 1 }); // capacity = 0 (no Primary)
         var t0 = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         db.UserSensors.AddRange(Owned("u", 1, t0), Owned("u", 2, t0.AddDays(1)));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db));
+        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db), TestContext.Current.CancellationToken);
 
         Assert.Equal(2, suspended);
         Assert.All(db.UserSensors.ToList(), us => Assert.NotNull(us.SuspendedAt));
@@ -86,9 +86,9 @@ public class QuotaReconciliationServiceTests : ControllerTestBase
         GrantRole(db, "u", "ComplimentaryUser");
         var t0 = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         db.UserSensors.AddRange(Owned("u", 1, t0), Owned("u", 2, t0.AddDays(1)));
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db));
+        var suspended = await QuotaReconciliationService.ReconcileAsync(db, Capacity(db), TestContext.Current.CancellationToken);
 
         Assert.Equal(0, suspended);
         Assert.All(db.UserSensors.ToList(), us => Assert.Null(us.SuspendedAt));

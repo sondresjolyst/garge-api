@@ -60,9 +60,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         db.SensorData.AddRange(
             new SensorData { SensorId = 1, Value = "12.5", Timestamp = new DateTime(2021, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
             new SensorData { SensorId = 1, Value = "12.6", Timestamp = new DateTime(2021, 1, 2, 0, 0, 0, DateTimeKind.Utc) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, purged);
         Assert.Empty(db.UserSensors);                 // force-unclaimed
@@ -79,9 +79,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         AddUser(db, "u", optedOut: false);
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-200) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);
@@ -96,9 +96,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         AddActivePrimary(db, "u");
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-200) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);
@@ -111,9 +111,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         AddUser(db, "u", optedOut: true);
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-10) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);
@@ -126,9 +126,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         AddUser(db, "u", optedOut: true);
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);
@@ -144,9 +144,9 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
         GrantRole(db, "u", "ComplimentaryUser");
         db.Sensors.Add(MakeSensor(1));
         db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-200) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths);
+        var purged = await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, purged);
         Assert.Single(db.UserSensors);

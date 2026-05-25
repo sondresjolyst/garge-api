@@ -124,8 +124,8 @@ public class OrderEmailServiceTests
     public async Task SendOrderConfirmedAsync_DoesNotSend_WhenOrderMissing()
     {
         var (svc, db, email) = Create();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1 });
-        await db.SaveChangesAsync();
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await svc.SendOrderConfirmedAsync(orderId: 99999);
 
