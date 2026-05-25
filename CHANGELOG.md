@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.1](https://github.com/sondresjolyst/garge-api/compare/v2.9.0...v2.9.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **api:** ship sensor-data validation fix and access/sharing refactor ([#285](https://github.com/sondresjolyst/garge-api/issues/285)) ([c94adca](https://github.com/sondresjolyst/garge-api/commit/c94adca172f82768708a65ebc498cb3c2bf055cd))
+* clear lockout on reset + show cooldown message on login ([#272](https://github.com/sondresjolyst/garge-api/issues/272)) ([ba1a0d9](https://github.com/sondresjolyst/garge-api/commit/ba1a0d97a9e8c0a3104f5af2819cdf36ccaa6799))
+
 ## [2.9.0](https://github.com/sondresjolyst/garge-api/compare/v2.8.1...v2.9.0) (2026-05-23)
 
 
