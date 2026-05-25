@@ -134,6 +134,58 @@ public class AutomationControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task GetRules_MixedOwnedAndEditShared_ReturnsExactCrossChainSet()
+    {
+        // The caller reaches one target switch as the gateway-sensor owner and a second target switch
+        // through an Edit share of a different gateway sensor. A third target, reachable only by a
+        // stranger, must stay out. The returned set must be exactly the two accessible targets.
+        var db = CreateDbContext();
+
+        // Chain A: caller owns sensor 5 on hub-1, which discovered switch-a (id 10).
+        db.Switches.Add(new Switch { Id = 10, Name = "switch-a", Type = "socket", Role = "switch" });
+        db.Sensors.Add(new Sensor
+        {
+            Id = 5, Name = "sensor-1", Type = "temperature", Role = "sensor",
+            RegistrationCode = "reg-1", DefaultName = "Sensor 1", ParentName = "hub-1"
+        });
+        db.UserSensors.Add(new UserSensor { UserId = "mix", SensorId = 5, IsOwner = true });
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "hub-1", Target = "switch-a", Type = "socket", Timestamp = DateTime.UtcNow });
+
+        // Chain B: caller has an Edit share of sensor 6 on hub-2, which discovered switch-b (id 20).
+        db.Switches.Add(new Switch { Id = 20, Name = "switch-b", Type = "socket", Role = "switch" });
+        db.Sensors.Add(new Sensor
+        {
+            Id = 6, Name = "sensor-2", Type = "voltage", Role = "sensor",
+            RegistrationCode = "reg-2", DefaultName = "Sensor 2", ParentName = "hub-2"
+        });
+        db.UserSensors.Add(new UserSensor { UserId = "mix", SensorId = 6, IsOwner = false, Permission = SharePermission.Edit });
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "hub-2", Target = "switch-b", Type = "socket", Timestamp = DateTime.UtcNow });
+
+        // Chain C: a stranger owns sensor 7 on hub-3, which discovered switch-c (id 30). Off-limits.
+        db.Switches.Add(new Switch { Id = 30, Name = "switch-c", Type = "socket", Role = "switch" });
+        db.Sensors.Add(new Sensor
+        {
+            Id = 7, Name = "sensor-3", Type = "voltage", Role = "sensor",
+            RegistrationCode = "reg-3", DefaultName = "Sensor 3", ParentName = "hub-3"
+        });
+        db.UserSensors.Add(new UserSensor { UserId = "stranger", SensorId = 7, IsOwner = true });
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "hub-3", Target = "switch-c", Type = "socket", Timestamp = DateTime.UtcNow });
+
+        db.AutomationRules.AddRange(
+            MakeRule(targetId: 10, sensorId: 5),   // accessible via owned chain A
+            MakeRule(targetId: 20, sensorId: 6),   // accessible via edit-shared chain B
+            MakeRule(targetId: 30, sensorId: 7),   // stranger-only chain C
+            MakeRule(targetId: 99, sensorId: 99)); // unknown target
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAutomationController(db, userId: "mix", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value).ToList();
+        Assert.Equal(new[] { 10, 20 }, rules.Select(r => r.TargetId).OrderBy(x => x));
+    }
+
+    [Fact]
     public async Task CreateRule_AdminUser_ReturnsCreatedRule()
     {
         var db = CreateDbContext();
