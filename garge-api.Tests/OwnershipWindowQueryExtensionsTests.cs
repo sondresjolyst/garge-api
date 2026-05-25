@@ -33,9 +33,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
             new SensorData { SensorId = 1, Value = "before", Timestamp = Jan.AddDays(-1) },
             new SensorData { SensorId = 1, Value = "inside", Timestamp = Jan.AddDays(5) },
             new SensorData { SensorId = 1, Value = "after", Timestamp = Jan.AddDays(20) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SensorData.WithinSensorOwnership(db, U).ToListAsync();
+        var result = await db.SensorData.WithinSensorOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
         Assert.Equal("inside", result[0].Value);
@@ -50,9 +50,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.SensorData.AddRange(
             new SensorData { SensorId = 1, Value = "before", Timestamp = Jan.AddDays(-1) },
             new SensorData { SensorId = 1, Value = "now", Timestamp = Jan.AddDays(365) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SensorData.WithinSensorOwnership(db, U).ToListAsync();
+        var result = await db.SensorData.WithinSensorOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
         Assert.Equal("now", result[0].Value);
@@ -65,9 +65,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.Sensors.Add(MakeSensor(1));
         db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = U, SensorId = 1, StartedAt = Jan, EndedAt = null });
         db.SensorData.Add(new SensorData { SensorId = 1, Value = "x", Timestamp = Jan.AddDays(1) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SensorData.WithinSensorOwnership(db, "someone-else").ToListAsync();
+        var result = await db.SensorData.WithinSensorOwnership(db, "someone-else").ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(result);
     }
@@ -79,9 +79,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.Sensors.Add(MakeSensor(1));
         // No ownership period at all.
         db.SensorData.Add(new SensorData { SensorId = 1, Value = "x", Timestamp = Jan });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SensorData.WithinSensorOwnership(db, U, isAdmin: true).ToListAsync();
+        var result = await db.SensorData.WithinSensorOwnership(db, U, isAdmin: true).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
     }
@@ -95,9 +95,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.BatteryChargeEvents.AddRange(
             new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(-2), EndedAt = Jan.AddDays(-1), PeakVoltage = 13, RestingAtTime = 12, PeakRatio = 1.08f, DurationMinutes = 60 },
             new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(3), EndedAt = Jan.AddDays(3), PeakVoltage = 13, RestingAtTime = 12, PeakRatio = 1.08f, DurationMinutes = 60 });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.BatteryChargeEvents.WithinSensorOwnership(db, U).ToListAsync();
+        var result = await db.BatteryChargeEvents.WithinSensorOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
         Assert.Equal(Jan.AddDays(3), result[0].StartedAt);
@@ -112,9 +112,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.SwitchData.AddRange(
             new SwitchData { SwitchId = 1, Value = "before", Timestamp = Jan.AddDays(-1) },
             new SwitchData { SwitchId = 1, Value = "on", Timestamp = Jan.AddDays(2) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync();
+        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
         Assert.Equal("on", result[0].Value);
@@ -130,9 +130,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.Sensors.Add(MakeSensor(1, parent: "gw"));
         db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = U, SensorId = 1, StartedAt = Jan, EndedAt = null });
         db.SwitchData.Add(new SwitchData { SwitchId = 1, Value = "on", Timestamp = Jan.AddDays(2) });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync();
+        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(result);
     }
@@ -143,9 +143,9 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         using var db = CreateDbContext();
         db.Switches.Add(new Switch { Id = 1, Name = "sw1", Type = "socket", Role = "switch" });
         db.SwitchData.Add(new SwitchData { SwitchId = 1, Value = "on", Timestamp = Jan });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync();
+        var result = await db.SwitchData.WithinSwitchOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);
 
         Assert.Empty(result);
     }

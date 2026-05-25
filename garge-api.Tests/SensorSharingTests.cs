@@ -193,7 +193,7 @@ public class SensorSharingTests : ControllerTestBase
         db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
         db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "viewer", SwitchId = 10, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "owner").UnclaimSensor(1);
 
@@ -216,7 +216,7 @@ public class SensorSharingTests : ControllerTestBase
         db.Switches.Add(new Switch { Id = 10, Name = "socket-a", Type = "socket", Role = "switch" });
         db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "socket-a", Type = "socket", Timestamp = DateTime.UtcNow });
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 10, IsOwner = false, Permission = SharePermission.Read });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await CreateController(db, "owner").UnclaimSensor(1);
 

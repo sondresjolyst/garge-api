@@ -29,7 +29,7 @@ public class AutomationControllerTests : ControllerTestBase
         db.AutomationRules.AddRange(MakeRule(), MakeRule(targetId: 20, sensorId: 6));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, isAdmin: true).GetRules();
+        var result = await CreateAutomationController(db, isAdmin: true).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value);
@@ -58,7 +58,7 @@ public class AutomationControllerTests : ControllerTestBase
         );
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
+        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value);
@@ -72,7 +72,7 @@ public class AutomationControllerTests : ControllerTestBase
         db.AutomationRules.Add(MakeRule());
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
+        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value);
@@ -90,7 +90,7 @@ public class AutomationControllerTests : ControllerTestBase
             MakeRule(targetId: 99, sensorId: 99));  // unrelated target
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules();
+        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value).ToList();
@@ -107,7 +107,7 @@ public class AutomationControllerTests : ControllerTestBase
         db.AutomationRules.Add(MakeRule(targetId: 10, sensorId: 5));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules();
+        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value);
@@ -125,7 +125,7 @@ public class AutomationControllerTests : ControllerTestBase
             MakeRule(targetId: 99, sensorId: 5));   // not accessible (unknown target switch)
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
+        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules(TestContext.Current.CancellationToken);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value).ToList();

@@ -96,8 +96,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-000001",
             TotalInOre = 10000, Status = OrderStatus.Pending
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new
         {
@@ -115,7 +115,7 @@ public class ShopControllerTests : ControllerTestBase
         var result = await ctrl.Webhook();
 
         Assert.IsType<OkResult>(result);
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(OrderStatus.Reserved, updated!.Status);
     }
 
@@ -128,8 +128,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-email-1",
             TotalInOre = 10000, Status = OrderStatus.Pending
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var orderEmail = new Mock<IOrderEmailService>();
         orderEmail.Setup(o => o.SendOrderConfirmedAsync(order.Id))
@@ -163,8 +163,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-email-2",
             TotalInOre = 10000, Status = OrderStatus.Reserved
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var orderEmail = new Mock<IOrderEmailService>();
 
@@ -196,8 +196,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-cap-recover",
             TotalInOre = 10000, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var invoice = new Mock<IInvoiceService>();
         invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, false))
@@ -234,10 +234,10 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-cap-existing",
             TotalInOre = 10000, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         db.Invoices.Add(new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [1, 2, 3] });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var invoice = new Mock<IInvoiceService>();
         invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, false)).ReturnsAsync(1);
@@ -270,8 +270,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-regen",
             TotalInOre = 10000, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var invoice = new Mock<IInvoiceService>();
         invoice.Setup(i => i.GenerateAndStoreAsync(order.Id, true))
@@ -297,8 +297,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-regen-bad",
             TotalInOre = 10000, Status = OrderStatus.Reserved
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var invoice = new Mock<IInvoiceService>();
         var ctrl = CreateController(db, invoice: invoice.Object,
@@ -319,8 +319,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-000002",
             TotalInOre = 10000, Status = OrderStatus.Pending
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
@@ -354,7 +354,7 @@ public class ShopControllerTests : ControllerTestBase
         var result = await ctrl.Webhook();
 
         Assert.IsType<OkResult>(result);
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal("Mårvegen 21a, 4347 Lye, Norway", updated!.ShippingAddress);
     }
 
@@ -368,8 +368,8 @@ public class ShopControllerTests : ControllerTestBase
             TotalInOre = 10000, Status = OrderStatus.Pending,
             ShippingAddress = "Existing address 1"
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
@@ -391,7 +391,7 @@ public class ShopControllerTests : ControllerTestBase
 
         await ctrl.Webhook();
 
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal("Existing address 1", updated!.ShippingAddress);
         vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>()), Times.Never);
     }
@@ -400,7 +400,7 @@ public class ShopControllerTests : ControllerTestBase
     public async Task Webhook_InvalidHmac_Returns401()
     {
         using var db = CreateDbContext();
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var body = """{"reference":"1","name":"AUTHORIZED"}""";
         var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
@@ -424,8 +424,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var order = new Order { UserId = "u", VippsOrderId = $"garge-order-evt-{eventName}", TotalInOre = 100, Status = OrderStatus.Pending };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var body = JsonSerializer.Serialize(new
         {
@@ -439,7 +439,7 @@ public class ShopControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, body);
         await ctrl.Webhook();
 
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(expected, updated!.Status);
     }
 
@@ -448,8 +448,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var order = new Order { UserId = "u", VippsOrderId = "garge-order-amount", TotalInOre = 10000, Status = OrderStatus.Pending };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var body = JsonSerializer.Serialize(new
         {
@@ -471,8 +471,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var order = new Order { UserId = "u", VippsOrderId = "garge-order-dup", TotalInOre = 100, Status = OrderStatus.Pending };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var body = JsonSerializer.Serialize(new
         {
@@ -493,7 +493,7 @@ public class ShopControllerTests : ControllerTestBase
         SetupValidWebhookRequest(c2, body);
         await c2.Webhook();
 
-        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "psp-once"));
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "psp-once", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -501,8 +501,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = false };
-        await db.ShopItems.AddAsync(item);
-        await db.SaveChangesAsync();
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var dto = new CreateOrderDto
@@ -522,8 +522,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = true, StockCount = 1 };
-        await db.ShopItems.AddAsync(item);
-        await db.SaveChangesAsync();
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var dto = new CreateOrderDto
@@ -543,8 +543,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = true };
-        await db.ShopItems.AddAsync(item);
-        await db.SaveChangesAsync();
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var dto = new CreateOrderDto
@@ -564,8 +564,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 8000, IsActive = true, StockCount = -1 };
-        await db.ShopItems.AddAsync(item);
-        await db.SaveChangesAsync();
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreatePaymentAsync(It.IsAny<Order>(), It.IsAny<List<VippsOrderLine>>(),
@@ -583,8 +583,8 @@ public class ShopControllerTests : ControllerTestBase
 
         await ctrl.Checkout(dto);
 
-        var savedOrder = await db.Orders.FirstAsync();
-        var savedItem = await db.OrderItems.FirstAsync();
+        var savedOrder = await db.Orders.FirstAsync(TestContext.Current.CancellationToken);
+        var savedItem = await db.OrderItems.FirstAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal("Testgata 1, 0001 Oslo", savedOrder.ShippingAddress);
         Assert.Equal(8000, savedItem.UnitPriceExclVatInOre);
@@ -597,8 +597,8 @@ public class ShopControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = true, StockCount = 3 };
-        await db.ShopItems.AddAsync(item);
-        await db.SaveChangesAsync();
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreatePaymentAsync(It.IsAny<Order>(), It.IsAny<List<VippsOrderLine>>(),
@@ -613,7 +613,7 @@ public class ShopControllerTests : ControllerTestBase
             ShippingAddress = "Test"
         });
 
-        var reloaded = await db.ShopItems.FirstAsync();
+        var reloaded = await db.ShopItems.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(1, reloaded.StockCount);
     }
 
@@ -626,8 +626,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-000007",
             TotalInOre = 12500, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
@@ -638,7 +638,7 @@ public class ShopControllerTests : ControllerTestBase
 
         Assert.IsType<OkResult>(result);
         vipps.Verify(v => v.RefundPaymentAsync("garge-order-000007", 12500, $"refund-{order.Id}"), Times.Once);
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(OrderStatus.Refunded, updated!.Status);
     }
 
@@ -651,8 +651,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-000008",
             TotalInOre = 5000, Status = OrderStatus.Reserved
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         var ctrl = CreateController(db, vipps: vipps);
@@ -660,7 +660,7 @@ public class ShopControllerTests : ControllerTestBase
 
         Assert.IsType<BadRequestObjectResult>(result);
         vipps.Verify(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(OrderStatus.Reserved, updated!.Status);
     }
 
@@ -673,8 +673,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = null,
             TotalInOre = 5000, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         var ctrl = CreateController(db, vipps: vipps);
@@ -702,8 +702,8 @@ public class ShopControllerTests : ControllerTestBase
             UserId = "user-1", VippsOrderId = "garge-order-000009",
             TotalInOre = 7700, Status = OrderStatus.Paid
         };
-        await db.Orders.AddAsync(order);
-        await db.SaveChangesAsync();
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
@@ -713,7 +713,7 @@ public class ShopControllerTests : ControllerTestBase
 
         await Assert.ThrowsAsync<HttpRequestException>(() => ctrl.RefundOrder(order.Id));
 
-        var updated = await db.Orders.FindAsync(order.Id);
+        var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(OrderStatus.Paid, updated!.Status);
     }
 

@@ -85,7 +85,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         string eventType, SubscriptionStatus expected)
     {
         using var db = CreateDbContext();
-        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        await db.AppSettings.AddAsync(new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1",
@@ -93,8 +93,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             VippsAgreementId = "agr_test",
             Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new VippsAgreementWebhookDto
         {
@@ -111,7 +111,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var result = await ctrl.Webhook();
 
         Assert.IsType<OkResult>(result);
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(expected, updated.Status);
     }
 
@@ -119,7 +119,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task Webhook_InvalidHmac_Returns401()
     {
         using var db = CreateDbContext();
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var body = """{"agreementId":"agr_test","eventType":"recurring.agreement-activated.v1"}""";
         var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "correct" });
@@ -139,8 +139,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_race", Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new VippsAgreementWebhookDto
         {
@@ -161,7 +161,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var t2 = ctrl2.Webhook();
         await Task.WhenAll(t1, t2);
 
-        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-race"));
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-race", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -173,8 +173,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_dup", Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new VippsAgreementWebhookDto
         {
@@ -194,7 +194,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl2, body);
         await ctrl2.Webhook();
 
-        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-1"));
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(e => e.Id == "evt-1", TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -208,8 +208,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             VippsAgreementId = "agr_start",
             Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new
         {
@@ -224,7 +224,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, body);
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(occurred, updated.StartDate);
     }
 
@@ -237,8 +237,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_addr1", Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr1"))
@@ -262,7 +262,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal("Mårvegen 21a, 4347 Lye, Norway", updated.BillingAddress);
         Assert.Equal(SubscriptionStatus.Active, updated.Status);
     }
@@ -276,8 +276,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_addr2", Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr2"))
@@ -296,7 +296,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Null(updated.BillingAddress);
         Assert.Equal(SubscriptionStatus.Active, updated.Status);
         vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>()), Times.Never);
@@ -311,8 +311,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_addr3", Status = SubscriptionStatus.Pending
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr3"))
@@ -334,7 +334,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var result = await ctrl.Webhook();
 
         Assert.IsType<OkResult>(result);
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Null(updated.BillingAddress);
         Assert.Equal(SubscriptionStatus.Active, updated.Status);
     }
@@ -350,8 +350,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             Status = SubscriptionStatus.Pending,
             BillingAddress = "Existing address"
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         var payload = new
@@ -367,7 +367,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal("Existing address", updated.BillingAddress);
         vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>()), Times.Never);
     }
@@ -377,14 +377,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var occurred = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_charge", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new
         {
@@ -399,7 +399,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, body);
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(occurred.AddMonths(1), updated.NextChargeDate);
     }
 
@@ -408,14 +408,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var occurred = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_no_post", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
 
@@ -436,7 +436,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         vipps.Verify(v => v.CreateChargeAsync(
             It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
             It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(occurred.AddMonths(1), updated.NextChargeDate);
     }
 
@@ -444,14 +444,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task Webhook_ChargeCaptured_NullOccurred_LeavesNextChargeDateNull()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_noocc", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new
         {
@@ -465,7 +465,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Null(updated.NextChargeDate);
     }
 
@@ -478,14 +478,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
         {
             Id = 1, Name = "Garge Yearly", PriceInOre = 99900,
             Interval = BillingInterval.Yearly, Type = ProductType.Primary, IsActive = true
-        });
+        }, TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_yr", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var payload = new
         {
@@ -500,7 +500,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
         await ctrl.Webhook();
 
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(occurred.AddYears(1), updated.NextChargeDate);
     }
 
@@ -535,8 +535,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task InitiatePrimary_NoExisting_Returns200WithConfirmationUrl()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
-        await db.SaveChangesAsync();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
@@ -562,8 +562,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task InitiatePrimary_WithoutConsent_Returns400()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
-        await db.SaveChangesAsync();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
 
@@ -577,13 +577,13 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task InitiatePrimary_ExistingActivePrimary_Returns409()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         await db.Subscriptions.AddAsync(new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "existing", Status = SubscriptionStatus.Active
-        });
-        await db.SaveChangesAsync();
+        }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var result = await ctrl.InitiateSubscription(
@@ -601,8 +601,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
-        });
-        await db.SaveChangesAsync();
+        }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
@@ -615,15 +615,15 @@ public class SubscriptionsControllerTests : ControllerTestBase
             new InitiateSubscriptionDto { ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
 
         Assert.IsType<OkObjectResult>(result);
-        Assert.Equal(2, await db.Subscriptions.CountAsync(s => s.UserId == "user-1"));
+        Assert.Equal(2, await db.Subscriptions.CountAsync(s => s.UserId == "user-1", TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task InitiateAddOn_WithoutPrimary_Returns400()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakeAddOnProduct());
-        await db.SaveChangesAsync();
+        await db.Products.AddAsync(MakeAddOnProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var result = await ctrl.InitiateSubscription(
@@ -641,8 +641,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "agr_cancel", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>())).Returns(Task.CompletedTask);
@@ -652,7 +652,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var result = await ctrl.CancelSubscription(sub.Id);
 
         Assert.IsType<OkResult>(result);
-        var updated = await db.Subscriptions.FirstAsync();
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(SubscriptionStatus.Stopped, updated.Status);
     }
 
@@ -665,8 +665,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "other-user", ProductId = 1,
             VippsAgreementId = "agr_other", Status = SubscriptionStatus.Active
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db, userId: "user-1");
         var result = await ctrl.CancelSubscription(sub.Id);
@@ -683,8 +683,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
-        });
-        await db.SaveChangesAsync();
+        }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         int? capturedUnit = null;
@@ -718,8 +718,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active
-        });
-        await db.SaveChangesAsync();
+        }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
@@ -733,7 +733,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
             ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 3
         });
 
-        var addon = await db.Subscriptions.SingleAsync(s => s.ProductId == 2);
+        var addon = await db.Subscriptions.SingleAsync(s => s.ProductId == 2, TestContext.Current.CancellationToken);
         Assert.Equal(3, addon.Quantity);
     }
 
@@ -741,8 +741,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task InitiatePrimary_WithQuantityAbove1_Returns400()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
-        await db.SaveChangesAsync();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var result = await ctrl.InitiateSubscription(new InitiateSubscriptionDto
@@ -763,8 +763,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 2,
             VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 3
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         int? capturedCeiling = null;
@@ -777,7 +777,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Equal(4900 * 5, capturedCeiling);
-        var updated = await db.Subscriptions.FindAsync(sub.Id);
+        var updated = await db.Subscriptions.FindAsync(new object?[] { sub.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(5, updated!.Quantity);
     }
 
@@ -791,8 +791,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
             UserId = "user-1", ProductId = 2,
             VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 5
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
         vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
@@ -803,7 +803,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         Assert.IsType<OkObjectResult>(result);
         vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
-        var updated = await db.Subscriptions.FindAsync(sub.Id);
+        var updated = await db.Subscriptions.FindAsync(new object?[] { sub.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(3, updated!.Quantity);
     }
 
@@ -811,14 +811,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task UpdateQuantity_NotOwner_Returns404()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakeAddOnProduct());
+        await db.Products.AddAsync(MakeAddOnProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "other-user", ProductId = 2,
             VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 1
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db, userId: "user-1");
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 5 });
@@ -830,14 +830,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task UpdateQuantity_Primary_Returns400()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakePrimaryProduct());
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
             VippsAgreementId = "primary_agr", Status = SubscriptionStatus.Active, Quantity = 1
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 2 });
@@ -849,14 +849,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
     public async Task UpdateQuantity_NotActive_Returns400()
     {
         using var db = CreateDbContext();
-        await db.Products.AddAsync(MakeAddOnProduct());
+        await db.Products.AddAsync(MakeAddOnProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 2,
             VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Pending, Quantity = 1
         };
-        await db.Subscriptions.AddAsync(sub);
-        await db.SaveChangesAsync();
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var ctrl = CreateController(db);
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });

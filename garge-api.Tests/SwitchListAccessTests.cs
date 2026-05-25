@@ -75,9 +75,9 @@ public class SwitchListAccessTests : ControllerTestBase
         using var db = CreateDbContext();
         await SeedAsync(db);
         db.UserSwitches.Add(new UserSwitch { UserId = "owner", SwitchId = 1, IsOwner = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "owner").GetAllSwitches());
+        var dtos = List(await CreateController(db, "owner").GetAllSwitches(TestContext.Current.CancellationToken));
 
         var dto = Assert.Single(dtos);
         Assert.Equal(1, dto.Id);
@@ -90,9 +90,9 @@ public class SwitchListAccessTests : ControllerTestBase
         using var db = CreateDbContext();
         await SeedAsync(db);
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 3, IsOwner = false, Permission = SharePermission.Read });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "viewer").GetAllSwitches());
+        var dtos = List(await CreateController(db, "viewer").GetAllSwitches(TestContext.Current.CancellationToken));
 
         var dto = Assert.Single(dtos);
         Assert.Equal(3, dto.Id);
@@ -105,9 +105,9 @@ public class SwitchListAccessTests : ControllerTestBase
         using var db = CreateDbContext();
         await SeedAsync(db);
         db.UserSwitches.Add(new UserSwitch { UserId = "viewer", SwitchId = 3, IsOwner = false, Permission = SharePermission.Edit });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "viewer").GetAllSwitches());
+        var dtos = List(await CreateController(db, "viewer").GetAllSwitches(TestContext.Current.CancellationToken));
 
         var dto = Assert.Single(dtos);
         Assert.Equal(3, dto.Id);
@@ -121,9 +121,9 @@ public class SwitchListAccessTests : ControllerTestBase
         await SeedAsync(db);
         // user owns the sensor whose gateway discovered socket-2; no direct UserSwitch row.
         db.UserSensors.Add(new UserSensor { UserId = "indirect", SensorId = 100, IsOwner = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "indirect").GetAllSwitches());
+        var dtos = List(await CreateController(db, "indirect").GetAllSwitches(TestContext.Current.CancellationToken));
 
         var dto = Assert.Single(dtos);
         Assert.Equal(2, dto.Id);
@@ -137,9 +137,9 @@ public class SwitchListAccessTests : ControllerTestBase
         await SeedAsync(db);
         // A non-owner sensor share must NOT confer switch access (matches LoadSwitchOwnersAsync: IsOwner only).
         db.UserSensors.Add(new UserSensor { UserId = "sensor-viewer", SensorId = 100, IsOwner = false, Permission = SharePermission.Edit });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "sensor-viewer").GetAllSwitches());
+        var dtos = List(await CreateController(db, "sensor-viewer").GetAllSwitches(TestContext.Current.CancellationToken));
 
         Assert.Empty(dtos);
     }
@@ -149,9 +149,9 @@ public class SwitchListAccessTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         await SeedAsync(db);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "admin-1", isAdmin: true).GetAllSwitches());
+        var dtos = List(await CreateController(db, "admin-1", isAdmin: true).GetAllSwitches(TestContext.Current.CancellationToken));
 
         Assert.Equal(new[] { 1, 2, 3 }, dtos.Select(d => d.Id).OrderBy(x => x));
         Assert.All(dtos, d => Assert.Equal(DeviceAccess.Owner, d.Access));
@@ -163,9 +163,9 @@ public class SwitchListAccessTests : ControllerTestBase
         using var db = CreateDbContext();
         await SeedAsync(db);
         db.UserSwitches.Add(new UserSwitch { UserId = "owner", SwitchId = 1, IsOwner = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "stranger").GetAllSwitches());
+        var dtos = List(await CreateController(db, "stranger").GetAllSwitches(TestContext.Current.CancellationToken));
 
         Assert.Empty(dtos);
     }
@@ -178,9 +178,9 @@ public class SwitchListAccessTests : ControllerTestBase
         db.UserSwitches.Add(new UserSwitch { UserId = "mix", SwitchId = 1, IsOwner = true });               // direct owner
         db.UserSwitches.Add(new UserSwitch { UserId = "mix", SwitchId = 3, IsOwner = false, Permission = SharePermission.Read }); // shared
         db.UserSensors.Add(new UserSensor { UserId = "mix", SensorId = 100, IsOwner = true });               // indirect -> socket 2
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var dtos = List(await CreateController(db, "mix").GetAllSwitches());
+        var dtos = List(await CreateController(db, "mix").GetAllSwitches(TestContext.Current.CancellationToken));
 
         Assert.Equal(new[] { 1, 2, 3 }, dtos.Select(d => d.Id).OrderBy(x => x));
         Assert.Equal(DeviceAccess.Owner, dtos.Single(d => d.Id == 1).Access);

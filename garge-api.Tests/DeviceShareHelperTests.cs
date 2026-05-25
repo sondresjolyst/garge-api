@@ -32,7 +32,7 @@ public class DeviceShareHelperTests : ControllerTestBase
             setPermission: (us, p) => us.Permission = p,
             newMembership: () => new UserSensor { UserId = "viewer", SensorId = 1, IsOwner = false, Permission = SharePermission.Edit },
             newPeriod: () => new SensorOwnershipPeriod { UserId = "viewer", SensorId = 1, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ShareUpsertResult.Added, result);
         var row = Assert.Single(db.UserSensors);
@@ -47,7 +47,7 @@ public class DeviceShareHelperTests : ControllerTestBase
         using var db = CreateDbContext();
         db.UserSensors.Add(new UserSensor { UserId = "viewer", SensorId = 1, IsOwner = false, Permission = SharePermission.Read });
         db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "viewer", SensorId = 1, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await DeviceShareHelper.UpsertShareAsync(
             db.UserSensors, db.SensorOwnershipPeriods,
@@ -57,7 +57,7 @@ public class DeviceShareHelperTests : ControllerTestBase
             setPermission: (us, p) => us.Permission = p,
             newMembership: () => new UserSensor { UserId = "viewer", SensorId = 1, IsOwner = false, Permission = SharePermission.Edit },
             newPeriod: () => new SensorOwnershipPeriod { UserId = "viewer", SensorId = 1, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ShareUpsertResult.PermissionUpdated, result);
         Assert.Single(db.UserSensors);
@@ -70,7 +70,7 @@ public class DeviceShareHelperTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         db.UserSwitches.Add(new UserSwitch { UserId = "owner", SwitchId = 1, IsOwner = true });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await DeviceShareHelper.UpsertShareAsync(
             db.UserSwitches, db.SwitchOwnershipPeriods,
@@ -80,7 +80,7 @@ public class DeviceShareHelperTests : ControllerTestBase
             setPermission: (us, p) => us.Permission = p,
             newMembership: () => new UserSwitch { UserId = "owner", SwitchId = 1, IsOwner = false, Permission = SharePermission.Edit },
             newPeriod: () => new SwitchOwnershipPeriod { UserId = "owner", SwitchId = 1, StartedAt = DateTime.UtcNow, EndedAt = null });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(ShareUpsertResult.AlreadyOwner, result);
         Assert.True(db.UserSwitches.Single().IsOwner);
@@ -95,7 +95,7 @@ public class DeviceShareHelperTests : ControllerTestBase
         db.UserSwitches.AddRange(
             new UserSwitch { UserId = "owner", SwitchId = 1, IsOwner = true },
             new UserSwitch { UserId = "viewer", SwitchId = 1, IsOwner = false, Permission = SharePermission.Edit });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var recipients = await DeviceShareHelper.ListRecipientsAsync(
             db.UserSwitches.Where(us => us.SwitchId == 1 && !us.IsOwner),

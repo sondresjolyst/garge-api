@@ -37,9 +37,9 @@ public class AnonymizationServiceTests : ControllerTestBase
             new SensorData { SensorId = 1, Value = "12.7", Timestamp = Apr },
             new SensorData { SensorId = 1, Value = "13.0", Timestamp = Jul }); // outside the period window
         db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Status = "ok", Timestamp = Mar });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var moved = await Service(db).AnonymizeSensorPeriodAsync(period.Id);
+        var moved = await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, moved);
         var series = Assert.Single(db.AnonymizedSeries);
@@ -63,9 +63,9 @@ public class AnonymizationServiceTests : ControllerTestBase
         db.SensorData.AddRange(
             new SensorData { SensorId = 1, Value = "1", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) }, // only A
             new SensorData { SensorId = 1, Value = "2", Timestamp = Apr }); // A and B overlap
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var moved = await Service(db).AnonymizeSensorPeriodAsync(pA.Id);
+        var moved = await Service(db).AnonymizeSensorPeriodAsync(pA.Id, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, moved); // only the A-exclusive Feb row
         Assert.Single(db.SensorData); // Feb moved out; the co-owned Apr row stays — B is still entitled
@@ -84,9 +84,9 @@ public class AnonymizationServiceTests : ControllerTestBase
             new SwitchData { SwitchId = 1, Value = "on", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) },
             new SwitchData { SwitchId = 1, Value = "off", Timestamp = Mar },
             new SwitchData { SwitchId = 1, Value = "garbage", Timestamp = Apr });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var moved = await Service(db).AnonymizeSwitchPeriodAsync(period.Id);
+        var moved = await Service(db).AnonymizeSwitchPeriodAsync(period.Id, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, moved); // garbage dropped
         var series = Assert.Single(db.AnonymizedSeries);

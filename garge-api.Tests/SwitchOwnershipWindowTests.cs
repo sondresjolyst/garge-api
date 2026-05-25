@@ -74,9 +74,9 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
         db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "user-A", SwitchId = SwitchId, StartedAt = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), EndedAt = Cancel });
         db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "user-C", SwitchId = SwitchId, StartedAt = Cancel, EndedAt = null });
         AddData(db);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateController(db, "user-C", isAdmin: false).GetSwitchData(SwitchId, null, null, null);
+        var result = await CreateController(db, "user-C", isAdmin: false).GetSwitchData(SwitchId, null, null, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, Count(result)); // not A's 3 pre-resale rows
     }
@@ -88,9 +88,9 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
         db.Switches.Add(MakeSwitch());
         db.SwitchOwnershipPeriods.Add(new SwitchOwnershipPeriod { UserId = "user-C", SwitchId = SwitchId, StartedAt = Cancel, EndedAt = null });
         AddData(db);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateController(db, "admin-1", isAdmin: true).GetSwitchData(SwitchId, null, null, null);
+        var result = await CreateController(db, "admin-1", isAdmin: true).GetSwitchData(SwitchId, null, null, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(5, Count(result));
     }
@@ -106,9 +106,9 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
         db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "user-D", SensorId = 10, StartedAt = Cancel, EndedAt = null });
         // user-D has NO SwitchOwnershipPeriod — access and window come purely from the sensor chain.
         AddData(db);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var result = await CreateController(db, "user-D", isAdmin: false).GetSwitchData(SwitchId, null, null, null);
+        var result = await CreateController(db, "user-D", isAdmin: false).GetSwitchData(SwitchId, null, null, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, Count(result)); // only data within D's sensor ownership window
     }
@@ -118,7 +118,7 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         db.Switches.Add(MakeSwitch());
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         await CreateController(db, "user-A", isAdmin: false).ClaimSwitch(new ClaimSwitchDto { RegistrationCode = "rc-1" });
 
@@ -132,7 +132,7 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         db.Switches.Add(MakeSwitch());
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var before = DateTime.UtcNow;
         await CreateController(db, "user-A", isAdmin: false).ClaimSwitch(new ClaimSwitchDto { RegistrationCode = "rc-1" });
@@ -159,7 +159,7 @@ public class SwitchOwnershipWindowTests : ControllerTestBase
             UserId = "user-A", SwitchId = SwitchId, StartedAt = SwitchOwnershipPeriod.FirstOwnerStart, EndedAt = null
         });
         db.UserSwitchCustomNames.Add(new UserSwitchCustomName { UserId = "user-A", SwitchId = SwitchId, CustomName = "Heater" });
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateController(db, "user-A", isAdmin: false).UnclaimSwitch(SwitchId);
 
