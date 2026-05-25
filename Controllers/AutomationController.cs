@@ -123,18 +123,40 @@ namespace garge_api.Controllers
         [HttpGet]
         [SwaggerOperation(Summary = "Gets all automation rules the user has access to.")]
         [SwaggerResponse(200, "List of rules.", typeof(IEnumerable<AutomationRuleDto>))]
-        public async Task<ActionResult<IEnumerable<AutomationRuleDto>>> GetRules()
+        public async Task<ActionResult<IEnumerable<AutomationRuleDto>>> GetRules(CancellationToken ct = default)
         {
-            var allRules = await _context.AutomationRules.AsNoTracking().ToListAsync();
-            var accessibleRules = new List<AutomationRuleDto>();
+            var allRules = await _context.AutomationRules.AsNoTracking().ToListAsync(ct);
 
-            foreach (var rule in allRules)
-            {
-                if (await UserHasAccessToAutomationAsync(rule))
-                {
-                    accessibleRules.Add(_mapper.Map<AutomationRuleDto>(rule));
-                }
-            }
+            // Admins see every rule (matches UserHasAccessToAutomationAsync's admin short-circuit).
+            if (User.IsInAnyRole(RoleNames.Admin, RoleNames.AutomationAdmin))
+                return Ok(allRules.Select(r => _mapper.Map<AutomationRuleDto>(r)).ToList());
+
+            var userId = User.UserId();
+
+            // Sensors the caller can act on: owned, or shared with Edit. Computed once for the whole list
+            // instead of per rule. A read-only share must not let the recipient see the owner's automations.
+            var accessibleParentNames = await _context.UserSensors
+                .Where(us => us.UserId == userId && (us.IsOwner || us.Permission == garge_api.Models.SharePermission.Edit))
+                .Join(_context.Sensors, us => us.SensorId, s => s.Id, (us, s) => s.ParentName)
+                .ToListAsync(ct);
+
+            // The switch names a device the caller can act on has discovered. A rule is accessible when its
+            // target switch's name is in this set — identical to the per-rule discovered-device check.
+            var accessibleTargetNames = (await _context.DiscoveredDevices
+                .Where(dd => accessibleParentNames.Contains(dd.DiscoveredBy))
+                .Select(dd => dd.Target)
+                .ToListAsync(ct)).ToHashSet();
+
+            // Resolve each rule's target switch name once for the rules in play.
+            var targetIds = allRules.Select(r => r.TargetId).Distinct().ToList();
+            var switchNameById = await _context.Switches
+                .Where(s => targetIds.Contains(s.Id))
+                .ToDictionaryAsync(s => s.Id, s => s.Name, ct);
+
+            var accessibleRules = allRules
+                .Where(r => switchNameById.TryGetValue(r.TargetId, out var name) && accessibleTargetNames.Contains(name))
+                .Select(r => _mapper.Map<AutomationRuleDto>(r))
+                .ToList();
 
             return Ok(accessibleRules);
         }

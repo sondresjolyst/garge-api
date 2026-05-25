@@ -80,6 +80,60 @@ public class AutomationControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task GetRules_EditShareViewer_SeesAccessibleRule()
+    {
+        // An Edit share of the gateway sensor confers automation access, so the rule is listed.
+        var db = CreateDbContext();
+        SeedAccessChain(db, "viewer", isOwner: false, permission: SharePermission.Edit);
+        db.AutomationRules.AddRange(
+            MakeRule(targetId: 10, sensorId: 5),    // accessible via the edit share
+            MakeRule(targetId: 99, sensorId: 99));  // unrelated target
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value).ToList();
+        Assert.Single(rules);
+        Assert.Equal(10, rules[0].TargetId);
+    }
+
+    [Fact]
+    public async Task GetRules_ReadShareViewer_SeesNoRules()
+    {
+        // A read-only share must not expose the owner's automations.
+        var db = CreateDbContext();
+        SeedAccessChain(db, "viewer", isOwner: false, permission: SharePermission.Read);
+        db.AutomationRules.Add(MakeRule(targetId: 10, sensorId: 5));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAutomationController(db, userId: "viewer", isAdmin: false).GetRules();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value);
+        Assert.Empty(rules);
+    }
+
+    [Fact]
+    public async Task GetRules_OwnerWithMultipleRules_ReturnsExactlyAccessibleSet()
+    {
+        var db = CreateDbContext();
+        SeedAccessChain(db, "user-1", isOwner: true);
+        db.AutomationRules.AddRange(
+            MakeRule(targetId: 10, sensorId: 5),    // accessible (target switch-a discovered by hub-1)
+            MakeRule(targetId: 10, sensorId: 7),    // accessible (same accessible target)
+            MakeRule(targetId: 99, sensorId: 5));   // not accessible (unknown target switch)
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateAutomationController(db, userId: "user-1", isAdmin: false).GetRules();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var rules = Assert.IsAssignableFrom<IEnumerable<AutomationRuleDto>>(ok.Value).ToList();
+        Assert.Equal(2, rules.Count);
+        Assert.All(rules, r => Assert.Equal(10, r.TargetId));
+    }
+
+    [Fact]
     public async Task CreateRule_AdminUser_ReturnsCreatedRule()
     {
         var db = CreateDbContext();

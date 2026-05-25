@@ -50,13 +50,13 @@ namespace garge_api.Controllers
             return userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
         }
 
-        private async Task<bool> UserCanAccessSensorAsync(int sensorId)
+        private async Task<bool> UserCanAccessSensorAsync(int sensorId, CancellationToken ct = default)
         {
             if (IsAdmin()) return true;
             var userId = User.UserId();
             if (string.IsNullOrEmpty(userId)) return false;
             // Delegate to the shared ownership service.
-            return await _ownership.CanUserAccessSensorAsync(userId, sensorId);
+            return await _ownership.CanUserAccessSensorAsync(userId, sensorId, ct);
         }
 
         /// <summary>
@@ -99,22 +99,22 @@ namespace garge_api.Controllers
         /// blocked. Admins are never suspended. Export and unclaim/delete must not use this gate, as
         /// those are GDPR rights.
         /// </summary>
-        private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
+        private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId, CancellationToken ct = default)
         {
             if (IsAdmin()) return false;
             var userId = User.UserId();
-            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null);
+            return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null, ct);
         }
 
         /// <summary>Returns the subset of the given sensor ids that the caller has suspended (empty for admins).</summary>
-        private async Task<HashSet<int>> CallerSuspendedSensorIdsAsync(IEnumerable<int> sensorIds)
+        private async Task<HashSet<int>> CallerSuspendedSensorIdsAsync(IEnumerable<int> sensorIds, CancellationToken ct = default)
         {
             if (IsAdmin()) return new HashSet<int>();
             var userId = User.UserId();
             var ids = await _context.UserSensors
                 .Where(us => us.UserId == userId && us.SuspendedAt != null && sensorIds.Contains(us.SensorId))
                 .Select(us => us.SensorId)
-                .ToListAsync();
+                .ToListAsync(ct);
             return ids.ToHashSet();
         }
 
@@ -125,7 +125,7 @@ namespace garge_api.Controllers
         [HttpGet]
         [SwaggerOperation(Summary = "Retrieves all available sensors.")]
         [SwaggerResponse(200, "A list of all sensors.", typeof(IEnumerable<SensorDto>))]
-        public async Task<IActionResult> GetAllSensors()
+        public async Task<IActionResult> GetAllSensors(CancellationToken ct = default)
         {
             _logger.LogInformation("GetAllSensors called by {@LogData}", new { CallerUserId = User.UserId() });
 
@@ -134,30 +134,30 @@ namespace garge_api.Controllers
             List<Sensor> sensors;
             if (IsAdmin())
             {
-                sensors = await _context.Sensors.AsNoTracking().ToListAsync();
+                sensors = await _context.Sensors.AsNoTracking().ToListAsync(ct);
             }
             else
             {
                 sensors = await _context.Sensors
                     .AsNoTracking()
                     .Where(s => _context.UserSensors.Any(us => us.UserId == currentUserId && us.SensorId == s.Id))
-                    .ToListAsync();
+                    .ToListAsync(ct);
             }
 
             // Fetch all custom names for the current user
             var customNames = await _context.UserSensorCustomNames
                 .Where(x => x.UserId == currentUserId)
-                .ToDictionaryAsync(x => x.SensorId, x => x.CustomName);
+                .ToDictionaryAsync(x => x.SensorId, x => x.CustomName, ct);
 
             var sensorIds = sensors.Select(s => s.Id).ToList();
-            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds);
+            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds, ct);
 
             // The caller's owner, edit, or read relationship per sensor (admins are treated as owner).
             var accessRows = IsAdmin()
                 ? new List<UserSensor>()
                 : await _context.UserSensors
                     .Where(us => us.UserId == currentUserId && sensorIds.Contains(us.SensorId))
-                    .ToListAsync();
+                    .ToListAsync(ct);
             var accessById = accessRows.ToDictionary(us => us.SensorId, us => DeviceAccess.From(us.IsOwner, us.Permission));
 
             // Map sensors and apply the user-specific custom name, suspended flag, and access state.
@@ -179,24 +179,25 @@ namespace garge_api.Controllers
         /// Retrieves a sensor by its ID.
         /// </summary>
         /// <param name="id">The ID of the sensor to retrieve.</param>
+        /// <param name="ct">Cancellation token bound by the framework.</param>
         /// <returns>The sensor with the specified ID.</returns>
         [HttpGet("{id}")]
         [SwaggerOperation(Summary = "Retrieves a sensor by its ID.")]
         [SwaggerResponse(200, "The sensor with the specified ID.", typeof(SensorDto))]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetSensor(int id)
+        public async Task<IActionResult> GetSensor(int id, CancellationToken ct = default)
         {
             _logger.LogInformation("GetSensor called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
-            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
+            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
             if (sensor == null)
             {
                 _logger.LogWarning("GetSensor not found: {@LogData}", new { id });
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (!await UserCanAccessSensorAsync(sensor.Id))
+            if (!await UserCanAccessSensorAsync(sensor.Id, ct))
             {
                 _logger.LogWarning("GetSensor forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
                 return Forbid();
@@ -208,13 +209,13 @@ namespace garge_api.Controllers
             var customName = await _context.UserSensorCustomNames
                 .Where(x => x.UserId == currentUserId && x.SensorId == id)
                 .Select(x => x.CustomName)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
 
             if (!string.IsNullOrEmpty(customName))
                 dto.CustomName = customName;
 
-            dto.Suspended = await IsSensorSuspendedForCallerAsync(id);
-            dto.Access = await CallerAccessAsync(id);
+            dto.Suspended = await IsSensorSuspendedForCallerAsync(id, ct);
+            dto.Access = await CallerAccessAsync(id, ct);
 
             _logger.LogInformation("Returning sensor {@LogData}", new { id, CallerUserId = User.UserId() });
             return Ok(dto);
@@ -230,6 +231,7 @@ namespace garge_api.Controllers
         /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
         /// <param name="pageNumber">The page number for pagination.</param>
         /// <param name="pageSize">The number of items per page.</param>
+        /// <param name="ct">Cancellation token bound by the framework.</param>
         /// <returns>The data for the specified sensor.</returns>
         [HttpGet("{sensorId}/data")]
         [SwaggerOperation(Summary = "Retrieves data for a specific sensor.")]
@@ -239,47 +241,31 @@ namespace garge_api.Controllers
         public async Task<IActionResult> GetSensorData(
             int sensorId, string? timeRange, DateTime? startDate,
             DateTime? endDate, string? groupBy = "5m",
-            int pageNumber = 1, int pageSize = 100)
+            int pageNumber = 1, int pageSize = 100, CancellationToken ct = default)
         {
             _logger.LogInformation("GetSensorData called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
 
-            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sensorId);
+            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sensorId, ct);
             if (sensor == null)
             {
                 _logger.LogWarning("GetSensorData not found: {@LogData}", new { sensorId });
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (!await UserCanAccessSensorAsync(sensor.Id))
+            if (!await UserCanAccessSensorAsync(sensor.Id, ct))
             {
                 _logger.LogWarning("GetSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
                 return Forbid();
             }
 
-            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id, ct))
                 return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
+            var (effectiveStart, effectiveEnd) = TimeRangeQueryExtensions.ResolveRange(timeRange, startDate, endDate);
+
             var query = WithinOwnershipWindow(
-                _context.SensorData.Where(sd => sd.SensorId == sensorId));
-
-            DateTime? effectiveStart = null;
-            DateTime? effectiveEnd = null;
-
-            if (!string.IsNullOrEmpty(timeRange))
-            {
-                var now = DateTime.UtcNow;
-                var timeSpan = TimeRangeParser.Parse(timeRange);
-                if (timeSpan.HasValue)
-                {
-                    effectiveStart = now.Subtract(timeSpan.Value);
-                    query = query.Where(sd => sd.Timestamp >= effectiveStart.Value);
-                }
-            }
-            else
-            {
-                if (startDate.HasValue) { effectiveStart = startDate; query = query.Where(sd => sd.Timestamp >= startDate.Value); }
-                if (endDate.HasValue) { effectiveEnd = endDate; query = query.Where(sd => sd.Timestamp <= endDate.Value); }
-            }
+                _context.SensorData.Where(sd => sd.SensorId == sensorId))
+                .ApplyTimeRange(effectiveStart, effectiveEnd);
 
             IEnumerable<SensorDataDto> result;
             int totalCount;
@@ -287,18 +273,18 @@ namespace garge_api.Controllers
             var groupBySpan = !string.IsNullOrEmpty(groupBy) ? TimeRangeParser.Parse(groupBy) : null;
             if (groupBySpan.HasValue)
             {
-                var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
+                var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin(), ct);
                 totalCount = grouped.Count;
                 result = grouped;
             }
             else
             {
-                totalCount = await query.CountAsync();
+                totalCount = await query.CountAsync(ct);
                 var sensorDataList = await query
                     .OrderBy(sd => sd.Timestamp)
                     .Skip((pageNumber - 1) * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(ct);
 
                 result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
@@ -323,6 +309,7 @@ namespace garge_api.Controllers
         /// <param name="groupBy">The level to group the data by (e.g., "minute", "hour", "day", "5m", "10h", "2d").</param>
         /// <param name="pageNumber">The page number for pagination.</param>
         /// <param name="pageSize">The number of items per page.</param>
+        /// <param name="ct">Cancellation token bound by the framework.</param>
         /// <returns>The data for the specified sensors.</returns>
         [HttpGet("data")]
         [SwaggerOperation(Summary = "Retrieves data for multiple sensors.")]
@@ -332,11 +319,11 @@ namespace garge_api.Controllers
         public async Task<IActionResult> GetMultipleSensorsData(
             [FromQuery] List<int> sensorIds, string? timeRange, DateTime? startDate, DateTime? endDate,
             string? groupBy = "5m",
-            int pageNumber = 1, int pageSize = 100)
+            int pageNumber = 1, int pageSize = 100, CancellationToken ct = default)
         {
             _logger.LogInformation("GetMultipleSensorsData called by {@LogData}", new { CallerUserId = User.UserId(), sensorIds });
 
-            var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync();
+            var sensors = await _context.Sensors.Where(s => sensorIds.Contains(s.Id)).ToListAsync(ct);
             if (sensors.Count() != sensorIds.Count())
             {
                 _logger.LogWarning("GetMultipleSensorsData not found: {@LogData}", new { sensorIds });
@@ -345,7 +332,7 @@ namespace garge_api.Controllers
 
             foreach (var sensor in sensors)
             {
-                if (!await UserCanAccessSensorAsync(sensor.Id))
+                if (!await UserCanAccessSensorAsync(sensor.Id, ct))
                 {
                     _logger.LogWarning("GetMultipleSensorsData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId = sensor.Id });
                     return Forbid();
@@ -353,30 +340,14 @@ namespace garge_api.Controllers
             }
 
             // Suspended sensors stay out of the batch (the caller can't read their data while off).
-            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds);
+            var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds, ct);
             var visibleSensorIds = sensorIds.Where(sid => !suspendedIds.Contains(sid)).ToList();
 
+            var (effectiveStart, effectiveEnd) = TimeRangeQueryExtensions.ResolveRange(timeRange, startDate, endDate);
+
             var query = WithinOwnershipWindow(
-                _context.SensorData.Where(sd => visibleSensorIds.Contains(sd.SensorId)));
-
-            DateTime? effectiveStart = null;
-            DateTime? effectiveEnd = null;
-
-            if (!string.IsNullOrEmpty(timeRange))
-            {
-                var now = DateTime.UtcNow;
-                var timeSpan = TimeRangeParser.Parse(timeRange);
-                if (timeSpan.HasValue)
-                {
-                    effectiveStart = now.Subtract(timeSpan.Value);
-                    query = query.Where(sd => sd.Timestamp >= effectiveStart.Value);
-                }
-            }
-            else
-            {
-                if (startDate.HasValue) { effectiveStart = startDate; query = query.Where(sd => sd.Timestamp >= startDate.Value); }
-                if (endDate.HasValue) { effectiveEnd = endDate; query = query.Where(sd => sd.Timestamp <= endDate.Value); }
-            }
+                _context.SensorData.Where(sd => visibleSensorIds.Contains(sd.SensorId)))
+                .ApplyTimeRange(effectiveStart, effectiveEnd);
 
             IEnumerable<SensorDataDto> result;
             int totalCount;
@@ -384,18 +355,18 @@ namespace garge_api.Controllers
             var groupBySpan = !string.IsNullOrEmpty(groupBy) ? TimeRangeParser.Parse(groupBy) : null;
             if (groupBySpan.HasValue)
             {
-                var grouped = await GetAveragedDataAsync(visibleSensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
+                var grouped = await GetAveragedDataAsync(visibleSensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin(), ct);
                 totalCount = grouped.Count;
                 result = grouped;
             }
             else
             {
-                totalCount = await query.CountAsync();
+                totalCount = await query.CountAsync(ct);
                 var sensorDataList = await query
                     .OrderBy(sd => sd.Timestamp)
                     .Skip((pageNumber - 1) * pageSize)
                     .Take(pageSize)
-                    .ToListAsync();
+                    .ToListAsync(ct);
 
                 result = _mapper.Map<IEnumerable<SensorDataDto>>(sensorDataList);
             }
@@ -412,7 +383,7 @@ namespace garge_api.Controllers
 
         private async Task<List<SensorDataDto>> GetAveragedDataAsync(
             IEnumerable<int> sensorIds, long bucketSeconds, DateTime? effectiveStart, DateTime? effectiveEnd,
-            string? userId, bool isAdmin)
+            string? userId, bool isAdmin, CancellationToken ct = default)
         {
             var effectiveBucket = EnforcedBucketSeconds(bucketSeconds, effectiveStart, effectiveEnd);
 
@@ -451,7 +422,7 @@ namespace garge_api.Controllers
             _context.Database.SetCommandTimeout(120);
             return await _context.Database
                 .SqlQueryRaw<SensorDataDto>(sql, parameters.Cast<object>().ToArray())
-                .ToListAsync();
+                .ToListAsync(ct);
         }
 
         /// <summary>
@@ -784,14 +755,14 @@ namespace garge_api.Controllers
         }
 
         /// <summary>Returns the caller's relationship to a sensor for SensorDto.Access (admins count as owner).</summary>
-        private async Task<string> CallerAccessAsync(int sensorId)
+        private async Task<string> CallerAccessAsync(int sensorId, CancellationToken ct = default)
         {
             if (IsAdmin()) return DeviceAccess.Owner;
             var userId = User.UserId();
             var row = await _context.UserSensors
                 .Where(us => us.UserId == userId && us.SensorId == sensorId)
                 .Select(us => new { us.IsOwner, us.Permission })
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
             return row == null ? DeviceAccess.Owner : DeviceAccess.From(row.IsOwner, row.Permission);
         }
 
@@ -802,7 +773,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Sensor shared.")]
         [SwaggerResponse(403, "Only the owner can share.")]
         [SwaggerResponse(404, "Sensor or recipient not found.")]
-        public async Task<IActionResult> ShareSensor(int id, [FromBody] ShareSensorDto dto)
+        public async Task<IActionResult> ShareSensor(int id, [FromBody] ShareRequestDto dto)
         {
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null) return NotFound(new { message = "Sensor not found." });
@@ -818,26 +789,19 @@ namespace garge_api.Controllers
             if (target.Id == User.UserId())
                 return BadRequest(new { message = "You already own this sensor." });
 
-            var existing = await _context.UserSensors
-                .FirstOrDefaultAsync(us => us.UserId == target.Id && us.SensorId == id);
-            if (existing != null)
-            {
-                if (existing.IsOwner)
-                    return BadRequest(new { message = "That user already owns this sensor." });
-                existing.Permission = dto.Permission; // Re-sharing updates the permission tier.
-            }
-            else
-            {
-                _context.UserSensors.Add(new UserSensor
-                {
-                    UserId = target.Id, SensorId = id, IsOwner = false, Permission = dto.Permission,
-                });
+            var upsert = await DeviceShareHelper.UpsertShareAsync(
+                _context.UserSensors,
+                _context.SensorOwnershipPeriods,
+                dto.Permission,
+                matchesTarget: us => us.UserId == target.Id && us.SensorId == id,
+                isOwner: us => us.IsOwner,
+                setPermission: (us, p) => us.Permission = p,
+                newMembership: () => new UserSensor { UserId = target.Id, SensorId = id, IsOwner = false, Permission = dto.Permission },
                 // The recipient sees data from now on, not the owner's earlier private history.
-                _context.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod
-                {
-                    UserId = target.Id, SensorId = id, StartedAt = DateTime.UtcNow, EndedAt = null,
-                });
-            }
+                newPeriod: () => new SensorOwnershipPeriod { UserId = target.Id, SensorId = id, StartedAt = DateTime.UtcNow, EndedAt = null });
+
+            if (upsert == ShareUpsertResult.AlreadyOwner)
+                return BadRequest(new { message = "That user already owns this sensor." });
 
             await _context.SaveChangesAsync();
             _ownership.InvalidateSensor(id);
@@ -875,24 +839,18 @@ namespace garge_api.Controllers
         [HttpGet("{id}/shares")]
         [Authorize]
         [SwaggerOperation(Summary = "Lists who a sensor is shared with.")]
-        [SwaggerResponse(200, "Shares.", typeof(IEnumerable<SensorShareDto>))]
+        [SwaggerResponse(200, "Shares.", typeof(IEnumerable<ShareRecipientDto>))]
         [SwaggerResponse(403, "Only the owner can view shares.")]
         public async Task<IActionResult> ListShares(int id)
         {
             if (!await UserIsSensorOwnerAsync(id)) return Forbid();
 
-            var shares = await _context.UserSensors
-                .Where(us => us.SensorId == id && !us.IsOwner)
-                .Join(_context.Users, us => us.UserId, u => u.Id, (us, u) => new SensorShareDto
-                {
-                    UserId = u.Id,
-                    Email = u.Email!,
-                    FirstName = u.FirstName,
-                    LastName = u.LastName,
-                    Permission = us.Permission,
-                    SharedAt = us.CreatedAt,
-                })
-                .ToListAsync();
+            var shares = await DeviceShareHelper.ListRecipientsAsync(
+                _context.UserSensors.Where(us => us.SensorId == id && !us.IsOwner),
+                _context.Users,
+                userIdOf: us => us.UserId,
+                permissionOf: us => us.Permission,
+                sharedAtOf: us => us.CreatedAt);
 
             return Ok(shares);
         }
@@ -1350,36 +1308,37 @@ namespace garge_api.Controllers
         /// Retrieves the latest data point for a specific sensor.
         /// </summary>
         /// <param name="sensorId">The ID of the sensor.</param>
+        /// <param name="ct">Cancellation token bound by the framework.</param>
         /// <returns>The latest sensor data.</returns>
         [HttpGet("{sensorId}/latest-data")]
         [SwaggerOperation(Summary = "Retrieves the latest data point for a specific sensor.")]
         [SwaggerResponse(200, "The latest sensor data.", typeof(SensorDataDto))]
         [SwaggerResponse(404, "Sensor or sensor data not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
-        public async Task<IActionResult> GetLatestSensorData(int sensorId)
+        public async Task<IActionResult> GetLatestSensorData(int sensorId, CancellationToken ct = default)
         {
             _logger.LogInformation("GetLatestSensorData called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
 
-            var sensor = await _context.Sensors.FindAsync(sensorId);
+            var sensor = await _context.Sensors.FindAsync(new object[] { sensorId }, ct);
             if (sensor == null)
             {
                 _logger.LogWarning("GetLatestSensorData not found: {@LogData}", new { sensorId });
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (!await UserCanAccessSensorAsync(sensor.Id))
+            if (!await UserCanAccessSensorAsync(sensor.Id, ct))
             {
                 _logger.LogWarning("GetLatestSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
                 return Forbid();
             }
 
-            if (await IsSensorSuspendedForCallerAsync(sensor.Id))
+            if (await IsSensorSuspendedForCallerAsync(sensor.Id, ct))
                 return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
             var latestData = await WithinOwnershipWindow(
                     _context.SensorData.Where(sd => sd.SensorId == sensorId))
                 .OrderByDescending(sd => sd.Timestamp)
-                .FirstOrDefaultAsync();
+                .FirstOrDefaultAsync(ct);
 
             if (latestData == null)
             {

@@ -1,9 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using garge_api.Models.Common;
 
 namespace garge_api.Models.Switch
 {
-    public class SwitchData
+    public class SwitchData : ITimestamped
     {
         [Key]
         public int Id { get; set; }
