@@ -1,3 +1,4 @@
+using Mapster;
 using MapsterMapper;
 using garge_api.Controllers;
 using garge_api.Models;
@@ -26,7 +27,22 @@ public abstract class ControllerTestBase
     protected Mock<SignInManager<User>> MockSignInManager { get; }
     protected Mock<IEmailService> MockEmailService { get; } = new();
     protected Mock<IMapper> MockMapper { get; } = new();
+
+    /// <summary>
+    /// A real Mapster-backed mapper built from the production <see cref="MappingProfile"/>. Use this
+    /// where a controller now relies on <c>_mapper.Map&lt;&gt;()</c> for its response shape and the
+    /// test asserts mapped field values (e.g. AutomationController, GroupsController).
+    /// </summary>
+    protected static IMapper RealMapper { get; } = BuildRealMapper();
+
     protected IConfiguration Configuration { get; }
+
+    private static IMapper BuildRealMapper()
+    {
+        var config = new TypeAdapterConfig();
+        new MappingProfile().Register(config);
+        return new Mapper(config);
+    }
 
     protected ControllerTestBase()
     {
@@ -55,7 +71,7 @@ public abstract class ControllerTestBase
     protected static AutomationController CreateAutomationController(
         ApplicationDbContext db, string userId = "user-1", bool isAdmin = false)
     {
-        var controller = new AutomationController(db, NullLogger<AutomationController>.Instance);
+        var controller = new AutomationController(db, NullLogger<AutomationController>.Instance, RealMapper);
         controller.ControllerContext = MakeControllerContext(userId, isAdmin);
         return controller;
     }

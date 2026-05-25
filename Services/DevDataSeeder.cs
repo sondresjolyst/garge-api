@@ -1,4 +1,5 @@
 using System.Globalization;
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Sensor;
 using Microsoft.EntityFrameworkCore;
@@ -47,7 +48,7 @@ namespace garge_api.Services
                 var sensor = new Sensor
                 {
                     Name = name,
-                    Type = "voltage",
+                    Type = SensorTypes.Voltage,
                     Role = name,
                     RegistrationCode = $"DEV{code}", // stable + obvious in logs
                     DefaultName = $"Garge {code} voltage",

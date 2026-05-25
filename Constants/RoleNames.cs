@@ -2,6 +2,14 @@ namespace garge_api.Constants
 {
     public static class RoleNames
     {
+        // Canonical role names. These are the values seeded into Identity and issued in JWTs,
+        // so [Authorize(Roles = ...)] and IsInAnyRole(...) checks must use these exact strings.
+        public const string Admin = "Admin";
+        public const string SensorAdmin = "SensorAdmin";
+        public const string SwitchAdmin = "SwitchAdmin";
+        public const string MqttAdmin = "MqttAdmin";
+        public const string AutomationAdmin = "AutomationAdmin";
+
         public static readonly string[] AllRoles =
         {
             "Default", "Electricity",

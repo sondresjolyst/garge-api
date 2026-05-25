@@ -47,7 +47,7 @@ namespace garge_api.Controllers
 
             var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
-            var hasAccess = userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
+            var hasAccess = User.IsInAnyRole(RoleNames.Admin) ||
                             userRoles.Any(role => RoleNames.RolePermissions.TryGetValue(role, out var permissions) && permissions.Contains("Electricity", StringComparer.OrdinalIgnoreCase));
 
             if (!hasAccess)

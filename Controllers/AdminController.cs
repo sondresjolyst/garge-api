@@ -81,11 +81,11 @@ namespace garge_api.Controllers
         [HttpGet]
         [SwaggerOperation(Summary = "Gets all roles.")]
         [SwaggerResponse(200, "Roles retrieved successfully.", typeof(IEnumerable<RoleDto>))]
-        public IActionResult GetRoles()
+        public async Task<IActionResult> GetRoles()
         {
             _logger.LogInformation("GetRoles called by {@LogData}", new { CallerUserId = User.UserId() });
 
-            var roles = _roleManager.Roles.ToList();
+            var roles = await _roleManager.Roles.ToListAsync();
             var dtos = _mapper.Map<IEnumerable<RoleDto>>(roles);
             return Ok(dtos);
         }
@@ -224,7 +224,7 @@ namespace garge_api.Controllers
 
             var query = _userManager.Users;
             if (!includeDeleted) query = query.Where(u => !u.IsDeleted);
-            var users = query.ToList();
+            var users = await query.ToListAsync();
             var dtos = new List<UserDto>();
             foreach (var user in users)
             {
@@ -421,6 +421,12 @@ namespace garge_api.Controllers
             {
                 _logger.LogWarning("AssignPermission failed: Unknown permission {@LogData}", new { permission });
                 return BadRequest(new { message = $"Unknown permission. Allowed: {string.Join(", ", Constants.RoleNames.KnownPermissions)}." });
+            }
+
+            if (await _context.RolePermissions.AnyAsync(rp => rp.RoleName == roleName && rp.Permission == permission))
+            {
+                _logger.LogInformation("AssignPermission no-op: Permission already assigned {@LogData}", new { permission, roleName });
+                return Ok(new { message = "Permission assigned successfully!" });
             }
 
             var rolePermission = new RolePermission

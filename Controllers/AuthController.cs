@@ -189,7 +189,7 @@ namespace garge_api.Controllers
 
             var userRoles = await _userManager.GetRolesAsync(user);
             var tokenString = BuildJwt(user, userRoles);
-            var rawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
+            var rawToken = await IssueRefreshTokenAsync(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("User logged in successfully {UserId}", user.Id);
@@ -349,7 +349,7 @@ namespace garge_api.Controllers
 
             var userRoles = await _userManager.GetRolesAsync(user);
             var newTokenString = BuildJwt(user, userRoles);
-            var newRawToken = IssueRefreshToken(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
+            var newRawToken = await IssueRefreshTokenAsync(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
 
             await _context.SaveChangesAsync();
             await tx.CommitAsync();
@@ -386,15 +386,15 @@ namespace garge_api.Controllers
         /// Adds a new refresh token row for the user (capped at 5 active per user).
         /// Caller must SaveChangesAsync. Returns the raw (un-hashed) token to send to the client.
         /// </summary>
-        private string IssueRefreshToken(string userId)
+        private async Task<string> IssueRefreshTokenAsync(string userId)
         {
             var rawToken = GenerateRefreshToken();
             var hashedToken = HashText(rawToken);
 
-            var userTokens = _context.RefreshTokens
+            var userTokens = await _context.RefreshTokens
                 .Where(t => t.UserId == userId && t.Revoked == null && t.Expires > DateTime.UtcNow)
                 .OrderBy(t => t.Created)
-                .ToList();
+                .ToListAsync();
             if (userTokens.Count >= 5)
             {
                 _context.RefreshTokens.Remove(userTokens.First());

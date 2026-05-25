@@ -2,6 +2,7 @@ using garge_api.Controllers;
 using garge_api.Dtos.Sensor;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Sensor;
 using garge_api.Services;
 using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
@@ -72,5 +73,86 @@ public class SensorControllerCreateTests : ControllerTestBase
         Assert.IsNotType<BadRequestObjectResult>(result);
         Assert.Single(db.Sensors);
         Assert.Equal(type, db.Sensors.Single().Type);
+    }
+
+    private static Sensor SeedSensor(ApplicationDbContext db, int id = 1, string name = "garge_test_voltage")
+    {
+        var sensor = new Sensor
+        {
+            Id = id,
+            Name = name,
+            Type = "voltage",
+            Role = "sensor",
+            RegistrationCode = $"rc-{id}",
+            DefaultName = "Battery",
+            ParentName = "garge_test",
+        };
+        db.Sensors.Add(sensor);
+        db.SaveChanges();
+        return sensor;
+    }
+
+    // The by-id endpoint previously used double.Parse (a 500 on bad input). It must now reject
+    // invalid input with a 400, exactly like its by-name sibling.
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateSensorDataById_InvalidValue_Returns400(string value)
+    {
+        using var db = CreateDbContext();
+        var sensor = SeedSensor(db);
+        var controller = CreateController(db);
+
+        var result = await controller.CreateSensorDataById(sensor.Id, new CreateSensorDataDto { Value = value });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(db.SensorData);
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateSensorDataByName_InvalidValue_Returns400(string value)
+    {
+        using var db = CreateDbContext();
+        var sensor = SeedSensor(db);
+        var controller = CreateController(db);
+
+        var result = await controller.CreateSensorDataByName(sensor.Name, new CreateSensorDataDto { Value = value });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(db.SensorData);
+    }
+
+    [Fact]
+    public async Task CreateSensorDataById_ValidValue_PersistsRoundedValue()
+    {
+        using var db = CreateDbContext();
+        var sensor = SeedSensor(db);
+        MockMapper.Setup(m => m.Map<SensorDataDto>(It.IsAny<SensorData>()))
+            .Returns(new SensorDataDto { Id = 1, Value = "0", Timestamp = DateTime.UtcNow });
+        var controller = CreateController(db);
+
+        var result = await controller.CreateSensorDataById(sensor.Id, new CreateSensorDataDto { Value = "12.34567" });
+
+        Assert.IsNotType<BadRequestObjectResult>(result);
+        Assert.Equal("12.346", db.SensorData.Single().Value);
+    }
+
+    [Fact]
+    public async Task CreateSensorDataByName_ValidValue_PersistsRoundedValue()
+    {
+        using var db = CreateDbContext();
+        var sensor = SeedSensor(db);
+        MockMapper.Setup(m => m.Map<SensorDataDto>(It.IsAny<SensorData>()))
+            .Returns(new SensorDataDto { Id = 1, Value = "0", Timestamp = DateTime.UtcNow });
+        var controller = CreateController(db);
+
+        var result = await controller.CreateSensorDataByName(sensor.Name, new CreateSensorDataDto { Value = "12.34567" });
+
+        Assert.IsNotType<BadRequestObjectResult>(result);
+        Assert.Equal("12.346", db.SensorData.Single().Value);
     }
 }

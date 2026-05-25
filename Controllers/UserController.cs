@@ -1,4 +1,5 @@
 using MapsterMapper;
+using garge_api.Constants;
 using garge_api.Dtos.User;
 using garge_api.Helpers;
 using garge_api.Hubs;
@@ -124,7 +125,7 @@ namespace garge_api.Controllers
             await using var tx = await _context.Database.BeginTransactionAsync();
 
             await AnonymizeUserTelemetryAsync(id);
-            ClearUserOwnedRows(id);
+            await ClearUserOwnedRowsAsync(id);
             await ScrubUserPiiAsync(user);
 
             var result = await _userManager.UpdateAsync(user);
@@ -148,12 +149,12 @@ namespace garge_api.Controllers
         /// names, refresh tokens, push subs, etc.). Add new user-owned tables
         /// here when introduced.
         /// </summary>
-        private void ClearUserOwnedRows(string userId)
+        private async Task ClearUserOwnedRowsAsync(string userId)
         {
             // Capture associated device ids before removing the rows so we
             // can invalidate the ownership cache once the changes commit.
-            var sensorIds = _context.UserSensors.Where(us => us.UserId == userId).Select(us => us.SensorId).ToList();
-            var switchIds = _context.UserSwitches.Where(us => us.UserId == userId).Select(us => us.SwitchId).ToList();
+            var sensorIds = await _context.UserSensors.Where(us => us.UserId == userId).Select(us => us.SensorId).ToListAsync();
+            var switchIds = await _context.UserSwitches.Where(us => us.UserId == userId).Select(us => us.SwitchId).ToListAsync();
 
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
@@ -173,7 +174,7 @@ namespace garge_api.Controllers
         /// Moves the user's exclusive telemetry into the anonymized ML store before their ownership
         /// rows are removed. This is the GDPR-erasure path: the readings leave personal scope (no link
         /// back to the user/device) while co-owned ranges are preserved for the other owner. Each call
-        /// consumes (deletes) the ownership period it processes. Run before <see cref="ClearUserOwnedRows"/>.
+        /// consumes (deletes) the ownership period it processes. Run before <see cref="ClearUserOwnedRowsAsync"/>.
         /// </summary>
         private async Task AnonymizeUserTelemetryAsync(string userId)
         {
@@ -337,7 +338,7 @@ namespace garge_api.Controllers
 
             var automationRules = await _context.AutomationRules
                 .Where(r => sensorIds.Contains(r.SensorId)
-                            || (r.TargetType == "socket" && switchIds.Contains(r.TargetId)))
+                            || (r.TargetType == SwitchTypes.Socket && switchIds.Contains(r.TargetId)))
                 .ToListAsync();
 
             var groups = await _context.Groups

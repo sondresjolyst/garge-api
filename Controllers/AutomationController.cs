@@ -1,6 +1,8 @@
-﻿using garge_api.Dtos.Automation;
+﻿using garge_api.Constants;
+using garge_api.Dtos.Automation;
 using garge_api.Models;
 using garge_api.Models.Automation;
+using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -18,19 +20,18 @@ namespace garge_api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AutomationController> _logger;
+        private readonly IMapper _mapper;
 
-        public AutomationController(ApplicationDbContext context, ILogger <AutomationController> logger)
+        public AutomationController(ApplicationDbContext context, ILogger<AutomationController> logger, IMapper mapper)
         {
             _context = context;
             _logger = logger;
+            _mapper = mapper;
         }
 
         private async Task<bool> UserHasAccessToAutomationAsync(AutomationRule rule)
         {
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-
-            if (userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                userRoles.Contains("AutomationAdmin", StringComparer.OrdinalIgnoreCase))
+            if (User.IsInAnyRole(RoleNames.Admin, RoleNames.AutomationAdmin))
             {
                 return true;
             }
@@ -91,27 +92,7 @@ namespace garge_api.Controllers
             _context.AutomationRules.Add(rule);
             await _context.SaveChangesAsync();
 
-            var result = new AutomationRuleDto
-            {
-                Id = rule.Id,
-                TargetType = rule.TargetType,
-                TargetId = rule.TargetId,
-                SensorType = rule.SensorType,
-                SensorId = rule.SensorId,
-                Condition = rule.Condition,
-                Threshold = rule.Threshold,
-                Action = rule.Action,
-                IsEnabled = rule.IsEnabled,
-                LastTriggeredAt = rule.LastTriggeredAt,
-                ElectricityPriceCondition = rule.ElectricityPriceCondition,
-                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
-                ElectricityPriceArea = rule.ElectricityPriceArea,
-                ElectricityPriceOperator = rule.ElectricityPriceOperator,
-                TimerDurationHours = rule.TimerDurationHours,
-                TimerActivatedAt = rule.TimerActivatedAt,
-            };
-
-            return Ok(result);
+            return Ok(_mapper.Map<AutomationRuleDto>(rule));
         }
 
         /// <summary>
@@ -144,32 +125,14 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "List of rules.", typeof(IEnumerable<AutomationRuleDto>))]
         public async Task<ActionResult<IEnumerable<AutomationRuleDto>>> GetRules()
         {
-            var allRules = await _context.AutomationRules.ToListAsync();
+            var allRules = await _context.AutomationRules.AsNoTracking().ToListAsync();
             var accessibleRules = new List<AutomationRuleDto>();
 
             foreach (var rule in allRules)
             {
                 if (await UserHasAccessToAutomationAsync(rule))
                 {
-                    accessibleRules.Add(new AutomationRuleDto
-                    {
-                        Id = rule.Id,
-                        TargetType = rule.TargetType,
-                        TargetId = rule.TargetId,
-                        SensorType = rule.SensorType,
-                        SensorId = rule.SensorId,
-                        Condition = rule.Condition,
-                        Threshold = rule.Threshold,
-                        Action = rule.Action,
-                        IsEnabled = rule.IsEnabled,
-                        LastTriggeredAt = rule.LastTriggeredAt,
-                        ElectricityPriceCondition = rule.ElectricityPriceCondition,
-                        ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
-                        ElectricityPriceArea = rule.ElectricityPriceArea,
-                        ElectricityPriceOperator = rule.ElectricityPriceOperator,
-                        TimerDurationHours = rule.TimerDurationHours,
-                        TimerActivatedAt = rule.TimerActivatedAt,
-                    });
+                    accessibleRules.Add(_mapper.Map<AutomationRuleDto>(rule));
                 }
             }
 
@@ -225,27 +188,7 @@ namespace garge_api.Controllers
 
             await _context.SaveChangesAsync();
 
-            var result = new AutomationRuleDto
-            {
-                Id = rule.Id,
-                TargetType = rule.TargetType,
-                TargetId = rule.TargetId,
-                SensorType = rule.SensorType,
-                SensorId = rule.SensorId,
-                Condition = rule.Condition,
-                Threshold = rule.Threshold,
-                Action = rule.Action,
-                IsEnabled = rule.IsEnabled,
-                LastTriggeredAt = rule.LastTriggeredAt,
-                ElectricityPriceCondition = rule.ElectricityPriceCondition,
-                ElectricityPriceThreshold = rule.ElectricityPriceThreshold,
-                ElectricityPriceArea = rule.ElectricityPriceArea,
-                ElectricityPriceOperator = rule.ElectricityPriceOperator,
-                TimerDurationHours = rule.TimerDurationHours,
-                TimerActivatedAt = rule.TimerActivatedAt,
-            };
-
-            return Ok(result);
+            return Ok(_mapper.Map<AutomationRuleDto>(rule));
         }
 
         /// <summary>
