@@ -1,4 +1,5 @@
-﻿using garge_api.Dtos.Mqtt;
+﻿using garge_api.Constants;
+using garge_api.Dtos.Mqtt;
 using garge_api.Models;
 using garge_api.Models.Mqtt;
 using Microsoft.AspNetCore.Authorization;
@@ -20,19 +21,12 @@ namespace garge_api.Controllers
     public class MqttController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private static readonly List<string> AdminRoles = new() { "MqttAdmin", "admin" };
         private readonly ILogger<MqttController> _logger;
 
         public MqttController(ApplicationDbContext context, ILogger<MqttController> logger)
         {
             _context = context;
             _logger = logger;
-        }
-
-        private bool UserHasRequiredRole()
-        {
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            return userRoles.Any(role => AdminRoles.Contains(role, StringComparer.OrdinalIgnoreCase));
         }
 
         private static string GenerateSalt(int length = 16)
@@ -56,6 +50,7 @@ namespace garge_api.Controllers
         /// <param name="dto">The user creation data.</param>
         /// <returns>The created user ID and username.</returns>
         [HttpPost("user")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
         [SwaggerOperation(Summary = "Creates a new EMQX MQTT user.")]
         [SwaggerResponse(200, "User created successfully.")]
         [SwaggerResponse(403, "Forbidden.")]
@@ -63,12 +58,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
             _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.UserId(), dto.Username });
-
-            if (!UserHasRequiredRole())
-            {
-                _logger.LogWarning("CreateUser forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             if (await _context.EMQXMqttUsers.AnyAsync(u => u.Username == dto.Username))
             {
@@ -103,6 +92,7 @@ namespace garge_api.Controllers
         /// <param name="dto">The ACL creation data.</param>
         /// <returns>The created ACL ID.</returns>
         [HttpPost("acl")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
         [SwaggerOperation(Summary = "Creates a new EMQX MQTT ACL entry.")]
         [SwaggerResponse(200, "ACL created successfully.")]
         [SwaggerResponse(403, "Forbidden.")]
@@ -120,12 +110,6 @@ namespace garge_api.Controllers
                 dto.Qos,
                 dto.Retain
             });
-
-            if (!UserHasRequiredRole())
-            {
-                _logger.LogWarning("CreateAcl forbidden for {@LogData}", new { User = User.Identity?.Name });
-                return Forbid();
-            }
 
             if (!await _context.EMQXMqttUsers.AnyAsync(u => u.Username == dto.Username))
             {
@@ -172,6 +156,7 @@ namespace garge_api.Controllers
         /// <param name="dto">The discovered device data.</param>
         /// <returns>The created device ID.</returns>
         [HttpPost("discovered-device")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
         [SwaggerOperation(Summary = "Registers a discovered device.")]
         [SwaggerResponse(200, "Device registered successfully.")]
         [SwaggerResponse(403, "Forbidden.")]
@@ -186,12 +171,6 @@ namespace garge_api.Controllers
                 dto.Type,
                 dto.Timestamp
             });
-
-            if (!UserHasRequiredRole())
-            {
-                _logger.LogWarning("PostDiscoveredDevice forbidden for {@LogData}", new { User = User.Identity?.Name });
-                return Forbid();
-            }
 
             var device = new DiscoveredDevice
             {

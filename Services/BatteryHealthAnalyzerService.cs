@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Sensor;
@@ -92,7 +93,7 @@ namespace garge_api.Services
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var sensor = await db.Sensors.FindAsync(new object?[] { sensorId }, ct);
-            if (sensor == null || !sensor.Type.Equals("voltage", StringComparison.OrdinalIgnoreCase))
+            if (sensor == null || !sensor.Type.Equals(SensorTypes.Voltage, StringComparison.OrdinalIgnoreCase))
                 return;
 
             await RunForSensorAsync(db, sensor, ct);
@@ -105,7 +106,7 @@ namespace garge_api.Services
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             var voltageSensors = await db.Sensors
-                .Where(s => s.Type == "voltage")
+                .Where(s => s.Type == SensorTypes.Voltage)
                 .ToListAsync(ct);
 
             var cutoff = DateTime.UtcNow - StalenessThreshold;

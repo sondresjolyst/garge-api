@@ -1,14 +1,18 @@
 using Mapster;
 using garge_api.Dtos.Admin;
 using garge_api.Dtos.Auth;
+using garge_api.Dtos.Automation;
 using garge_api.Dtos.Electricity;
+using garge_api.Dtos.Group;
 using garge_api.Dtos.Sensor;
 using garge_api.Dtos.Shop;
 using garge_api.Dtos.Subscription;
 using garge_api.Dtos.Switch;
 using garge_api.Dtos.User;
 using garge_api.Models.Admin;
+using garge_api.Models.Automation;
 using garge_api.Models.Electricity;
+using garge_api.Models.Group;
 using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
@@ -51,6 +55,17 @@ public class MappingProfile : IRegister
         config.NewConfig<UpdateSwitchDto, Switch>();
         config.NewConfig<SwitchData, SwitchDataDto>().TwoWays();
         config.NewConfig<CreateSwitchDataDto, SwitchData>();
+
+        // Automation mappings. All AutomationRuleDto members share the entity's names (the entity's
+        // extra CreatedAt is simply not present on the DTO), so a default name-based map reproduces
+        // the previous hand-written projection field-for-field.
+        config.NewConfig<AutomationRule, AutomationRuleDto>();
+
+        // Group mappings. Id/Name/Icon map by name; the sensor/switch id lists are flattened from
+        // the join navigations, matching the previous manual projection.
+        config.NewConfig<Group, GroupDto>()
+            .Map(d => d.SensorIds, s => s.GroupSensors.Select(gs => gs.SensorId).ToList())
+            .Map(d => d.SwitchIds, s => s.GroupSwitches.Select(gs => gs.SwitchId).ToList());
 
         // User mappings
         config.NewConfig<UserProfile, UserProfileDto>()

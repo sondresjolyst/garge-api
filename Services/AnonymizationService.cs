@@ -1,4 +1,5 @@
 using System.Globalization;
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Anonymized;
 using Microsoft.EntityFrameworkCore;
@@ -114,7 +115,7 @@ namespace garge_api.Services
                 var switchEntity = await _db.Switches.FirstOrDefaultAsync(s => s.Id == switchId, ct);
                 var series = new AnonymizedSeries
                 {
-                    SourceType = switchEntity?.Type ?? "socket",
+                    SourceType = switchEntity?.Type ?? SwitchTypes.Socket,
                     AnonymizedAt = DateTime.UtcNow
                 };
                 _db.AnonymizedSeries.Add(series);

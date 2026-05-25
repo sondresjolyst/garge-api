@@ -393,4 +393,25 @@ public class AdminControllerTests : ControllerTestBase
         Assert.IsType<BadRequestObjectResult>(result);
         Assert.Empty(db.RolePermissions);
     }
+
+    [Fact]
+    public async Task AssignPermission_AlreadyAssigned_DoesNotInsertDuplicate()
+    {
+        var db = CreateDbContext();
+        db.RolePermissions.Add(new RolePermission { RoleName = "Default", Permission = "Electricity" });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var roleManager = CreateRoleManagerMock();
+        roleManager.Setup(r => r.RoleExistsAsync("Default")).ReturnsAsync(true);
+
+        var controller = new AdminController(
+            roleManager.Object, MockUserManager.Object, db,
+            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+        controller.ControllerContext = MakeControllerContext(isAdmin: true);
+
+        var result = await controller.AssignPermission("Default", "Electricity");
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Single(db.RolePermissions);
+    }
 }

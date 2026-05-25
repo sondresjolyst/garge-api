@@ -134,11 +134,12 @@ namespace garge_api.Controllers
             List<Sensor> sensors;
             if (IsAdmin())
             {
-                sensors = await _context.Sensors.ToListAsync();
+                sensors = await _context.Sensors.AsNoTracking().ToListAsync();
             }
             else
             {
                 sensors = await _context.Sensors
+                    .AsNoTracking()
                     .Where(s => _context.UserSensors.Any(us => us.UserId == currentUserId && us.SensorId == s.Id))
                     .ToListAsync();
             }
@@ -188,7 +189,7 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetSensor called by {@LogData}", new { CallerUserId = User.UserId(), id });
 
-            var sensor = await _context.Sensors.FindAsync(id);
+            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id);
             if (sensor == null)
             {
                 _logger.LogWarning("GetSensor not found: {@LogData}", new { id });
@@ -242,7 +243,7 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetSensorData called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
 
-            var sensor = await _context.Sensors.FindAsync(sensorId);
+            var sensor = await _context.Sensors.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sensorId);
             if (sensor == null)
             {
                 _logger.LogWarning("GetSensorData not found: {@LogData}", new { sensorId });
@@ -267,7 +268,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
-                var timeSpan = ParseTimeRange(timeRange);
+                var timeSpan = TimeRangeParser.Parse(timeRange);
                 if (timeSpan.HasValue)
                 {
                     effectiveStart = now.Subtract(timeSpan.Value);
@@ -283,7 +284,7 @@ namespace garge_api.Controllers
             IEnumerable<SensorDataDto> result;
             int totalCount;
 
-            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
+            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? TimeRangeParser.Parse(groupBy) : null;
             if (groupBySpan.HasValue)
             {
                 var grouped = await GetAveragedDataAsync(new[] { sensorId }, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
@@ -364,7 +365,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
-                var timeSpan = ParseTimeRange(timeRange);
+                var timeSpan = TimeRangeParser.Parse(timeRange);
                 if (timeSpan.HasValue)
                 {
                     effectiveStart = now.Subtract(timeSpan.Value);
@@ -380,7 +381,7 @@ namespace garge_api.Controllers
             IEnumerable<SensorDataDto> result;
             int totalCount;
 
-            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? ParseTimeRange(groupBy) : null;
+            var groupBySpan = !string.IsNullOrEmpty(groupBy) ? TimeRangeParser.Parse(groupBy) : null;
             if (groupBySpan.HasValue)
             {
                 var grouped = await GetAveragedDataAsync(visibleSensorIds, (long)groupBySpan.Value.TotalSeconds, effectiveStart, effectiveEnd, User.UserId(), IsAdmin());
@@ -481,57 +482,20 @@ namespace garge_api.Controllers
             return CleanIntervals[^1];
         }
 
-        private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
+        private Task<string> GenerateSensorRegistrationCodeAsync(int length = 10) =>
+            RegistrationCode.GenerateUniqueAsync(
+                code => _context.Sensors.AnyAsync(s => s.RegistrationCode == code), length);
+
+        /// <summary>
+        /// Validates a raw sensor-data value as a number. Returns true and the parsed value on
+        /// success; otherwise false. Both data-write endpoints (by id and by name) use this so they
+        /// reject invalid input identically with a 400 rather than throwing a 500.
+        /// </summary>
+        private static bool TryParseSensorValue(string? raw, out double value)
         {
-            if (string.IsNullOrEmpty(groupBy))
-                return timestamp;
-
-            var timeSpan = ParseTimeRange(groupBy);
-            if (timeSpan.HasValue)
-            {
-                var ticks = (timestamp.Ticks / timeSpan.Value.Ticks) * timeSpan.Value.Ticks;
-                return new DateTime(ticks, DateTimeKind.Utc);
-            }
-
-            return timestamp;
-        }
-
-        private static TimeSpan? ParseTimeRange(string timeRange)
-        {
-            if (string.IsNullOrEmpty(timeRange) || timeRange.Length < 2)
-                return null;
-
-            var value = timeRange.Substring(0, timeRange.Length - 1);
-            var unit = timeRange.Substring(timeRange.Length - 1).ToLower();
-
-            if (!int.TryParse(value, out var intValue))
-                return null;
-
-            return unit switch
-            {
-                "m" => TimeSpan.FromMinutes(intValue),
-                "h" => TimeSpan.FromHours(intValue),
-                "d" => TimeSpan.FromDays(intValue),
-                "w" => TimeSpan.FromDays(intValue * 7),
-                "y" => TimeSpan.FromDays(intValue * 365),
-                _ => null,
-            };
-        }
-
-        private async Task<string> GenerateSensorRegistrationCodeAsync(int length = 10)
-        {
-            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            string code;
-            bool exists;
-
-            do
-            {
-                code = new string(Enumerable.Range(0, length)
-                    .Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
-                exists = await _context.Sensors.AnyAsync(s => s.RegistrationCode == code);
-            } while (exists);
-
-            return code;
+            value = 0;
+            return !string.IsNullOrWhiteSpace(raw)
+                && double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
         }
 
         private static string GenerateParentName(string name)
@@ -546,15 +510,10 @@ namespace garge_api.Controllers
         }
 
         [HttpPost("generate-missing-codes")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         public async Task<IActionResult> GenerateMissingRegistrationCodes()
         {
             _logger.LogInformation("GenerateMissingRegistrationCodes called by {@LogData}", new { CallerUserId = User.UserId() });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("GenerateMissingRegistrationCodes forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             var sensorsWithoutCode = await _context.Sensors
                 .Where(s => string.IsNullOrEmpty(s.RegistrationCode))
@@ -586,15 +545,10 @@ namespace garge_api.Controllers
         /// </summary>
         /// <returns>The number of sensors updated.</returns>
         [HttpPost("generate-missing-parent-names")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         public async Task<IActionResult> GenerateMissingParentNames()
         {
             _logger.LogInformation("GenerateMissingParentNames called by {@LogData}", new { CallerUserId = User.UserId() });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("GenerateMissingParentNames forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             var sensorsWithoutParentName = await _context.Sensors
                 .Where(s => string.IsNullOrEmpty(s.ParentName))
@@ -1011,15 +965,10 @@ namespace garge_api.Controllers
         }
 
         [HttpPost("generate-missing-default-names")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         public async Task<IActionResult> GenerateMissingDefaultNames()
         {
             _logger.LogInformation("GenerateMissingDefaultNames called by {@LogData}", new { CallerUserId = User.UserId() });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("GenerateMissingDefaultNames forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             var sensorsWithoutDefaultName = await _context.Sensors
                 .Where(s => string.IsNullOrEmpty(s.DefaultName))
@@ -1045,18 +994,13 @@ namespace garge_api.Controllers
         /// <param name="sensorDto">The sensor to create.</param>
         /// <returns>The created sensor.</returns>
         [HttpPost]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Creates a new sensor.")]
         [SwaggerResponse(201, "The created sensor.", typeof(SensorDto))]
         [SwaggerResponse(409, "Sensor name already exists.")]
         public async Task<IActionResult> CreateSensor([FromBody] CreateSensorDto sensorDto)
         {
             _logger.LogInformation("CreateSensor called by {@LogData}", new { CallerUserId = User.UserId(), sensorDto.Name, sensorDto.Type });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("CreateSensor forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             if (!SensorTypes.IsAllowed(sensorDto.Type))
             {
@@ -1097,19 +1041,15 @@ namespace garge_api.Controllers
         /// <param name="sensorDataDto">The data to create.</param>
         /// <returns>The created sensor data.</returns>
         [HttpPost("{sensorId}/data")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Creates new data for a specific sensor using sensorId.")]
         [SwaggerResponse(201, "The created sensor data.", typeof(SensorDataDto))]
+        [SwaggerResponse(400, "Invalid value format.")]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataById(int sensorId, [FromBody] CreateSensorDataDto sensorDataDto)
         {
             _logger.LogInformation("CreateSensorDataById called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("CreateSensorDataById forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
-                return Forbid();
-            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -1118,10 +1058,16 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Sensor not found!" });
             }
 
+            if (!TryParseSensorValue(sensorDataDto.Value, out var parsedValue))
+            {
+                _logger.LogWarning("CreateSensorDataById bad request: Invalid value {@LogData}", new { sensorDataDto.Value, sensorId });
+                return BadRequest(new { message = "Value must be a valid number." });
+            }
+
             var sensorData = new SensorData
             {
                 SensorId = sensorId,
-                Value = Math.Round(double.Parse(sensorDataDto.Value), 3).ToString(CultureInfo.InvariantCulture),
+                Value = Math.Round(parsedValue, 3).ToString(CultureInfo.InvariantCulture),
                 Timestamp = DateTime.UtcNow
             };
 
@@ -1140,19 +1086,15 @@ namespace garge_api.Controllers
         /// <param name="sensorDataDto">The data to create.</param>
         /// <returns>The created sensor data.</returns>
         [HttpPost("name/{sensorName}/data")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Creates new data for a specific sensor using sensorName.")]
         [SwaggerResponse(201, "The created sensor data.", typeof(SensorDataDto))]
+        [SwaggerResponse(400, "Invalid value format.")]
         [SwaggerResponse(404, "Sensor not found.")]
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSensorDataByName(string sensorName, [FromBody] CreateSensorDataDto sensorDataDto)
         {
             _logger.LogInformation("CreateSensorDataByName called by {@LogData}", new { CallerUserId = User.UserId(), sensorName });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("CreateSensorDataByName forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorName });
-                return Forbid();
-            }
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
@@ -1161,7 +1103,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Sensor not found!" });
             }
 
-            if (string.IsNullOrWhiteSpace(sensorDataDto.Value) || !double.TryParse(sensorDataDto.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedValue))
+            if (!TryParseSensorValue(sensorDataDto.Value, out var parsedValue))
             {
                 _logger.LogWarning("CreateSensorDataByName bad request: Invalid value {@LogData}", new { sensorDataDto.Value, sensorName });
                 return BadRequest(new { message = "Value must be a valid number." });
@@ -1170,7 +1112,7 @@ namespace garge_api.Controllers
             var sensorData = new SensorData
             {
                 SensorId = sensor.Id,
-                Value = Math.Round(double.Parse(sensorDataDto.Value), 3).ToString(CultureInfo.InvariantCulture),
+                Value = Math.Round(parsedValue, 3).ToString(CultureInfo.InvariantCulture),
                 Timestamp = DateTime.UtcNow
             };
 
@@ -1189,6 +1131,7 @@ namespace garge_api.Controllers
         /// <param name="sensorDto">The updated sensor data.</param>
         /// <returns>No content.</returns>
         [HttpPut("{id}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Updates an existing sensor.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(400, "Bad request.")]
@@ -1197,12 +1140,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> UpdateSensor(int id, [FromBody] UpdateSensorDto sensorDto)
         {
             _logger.LogInformation("UpdateSensor called by {@LogData}", new { CallerUserId = User.UserId(), id });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("UpdateSensor forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
-                return Forbid();
-            }
 
             var existingSensor = await _context.Sensors.FindAsync(id);
             if (existingSensor == null)
@@ -1228,6 +1165,7 @@ namespace garge_api.Controllers
         /// <param name="id">The ID of the sensor to delete.</param>
         /// <returns>No content.</returns>
         [HttpDelete("{id}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Deletes a sensor by its ID.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(404, "Sensor not found.")]
@@ -1235,12 +1173,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> DeleteSensor(int id)
         {
             _logger.LogInformation("DeleteSensor called by {@LogData}", new { CallerUserId = User.UserId(), id });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("DeleteSensor forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
-                return Forbid();
-            }
 
             var sensor = await _context.Sensors.FindAsync(id);
             if (sensor == null)
@@ -1263,6 +1195,7 @@ namespace garge_api.Controllers
         /// <param name="dataId">The ID of the sensor data to delete.</param>
         /// <returns>No content.</returns>
         [HttpDelete("{sensorId}/data/{dataId}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Deletes specific sensor data by its ID.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(404, "Sensor or sensor data not found.")]
@@ -1270,12 +1203,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> DeleteSensorData(int sensorId, int dataId)
         {
             _logger.LogInformation("DeleteSensorData called by {@LogData}", new { CallerUserId = User.UserId(), sensorId, dataId });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("DeleteSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
-                return Forbid();
-            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)
@@ -1304,6 +1231,7 @@ namespace garge_api.Controllers
         /// <param name="sensorId">The ID of the sensor.</param>
         /// <returns>No content.</returns>
         [HttpDelete("{sensorId}/data")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
         [SwaggerOperation(Summary = "Deletes all sensor data for a specific sensor.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(404, "Sensor not found.")]
@@ -1311,12 +1239,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> DeleteAllSensorData(int sensorId)
         {
             _logger.LogInformation("DeleteAllSensorData called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
-
-            if (!IsAdmin())
-            {
-                _logger.LogWarning("DeleteAllSensorData forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
-                return Forbid();
-            }
 
             var sensor = await _context.Sensors.FindAsync(sensorId);
             if (sensor == null)

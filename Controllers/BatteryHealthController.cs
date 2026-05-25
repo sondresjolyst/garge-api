@@ -1,4 +1,5 @@
 using MapsterMapper;
+using garge_api.Constants;
 using garge_api.Dtos.Sensor;
 using garge_api.Helpers;
 using garge_api.Models;
@@ -142,7 +143,7 @@ namespace garge_api.Controllers
         public async Task<IActionResult> ReanalyzeAll(CancellationToken ct)
         {
             var sensorIds = await _context.Sensors
-                .Where(s => s.Type == "voltage")
+                .Where(s => s.Type == SensorTypes.Voltage)
                 .Select(s => s.Id)
                 .ToListAsync(ct);
 
@@ -177,7 +178,7 @@ namespace garge_api.Controllers
         public async Task<IActionResult> ReanalyzeOne(int sensorId, CancellationToken ct)
         {
             var exists = await _context.Sensors
-                .AnyAsync(s => s.Id == sensorId && s.Type == "voltage", ct);
+                .AnyAsync(s => s.Id == sensorId && s.Type == SensorTypes.Voltage, ct);
             if (!exists) return NotFound(new { message = "Voltage sensor not found." });
 
             await _analyzer.AnalyzeSensorAsync(sensorId, ct);

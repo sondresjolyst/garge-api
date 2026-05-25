@@ -1,4 +1,5 @@
-﻿using garge_api.Dtos.Switch;
+﻿using garge_api.Constants;
+using garge_api.Dtos.Switch;
 using garge_api.Helpers;
 using garge_api.Hubs;
 using garge_api.Models;
@@ -36,12 +37,8 @@ namespace garge_api.Controllers
             _hub = hub;
         }
 
-        private bool IsSwitchAdmin()
-        {
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            return userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase) ||
-                   userRoles.Contains("SwitchAdmin", StringComparer.OrdinalIgnoreCase);
-        }
+        private bool IsSwitchAdmin() =>
+            User.IsInAnyRole(RoleNames.Admin, RoleNames.SwitchAdmin);
 
         private async Task<bool> UserHasRequiredRoleAsync(Switch switchEntity)
         {
@@ -140,7 +137,8 @@ namespace garge_api.Controllers
             _logger.LogInformation("GetAllSwitches called by {@LogData}", new { CallerUserId = User.UserId() });
 
             var allSwitches = await _context.Switches
-                .Where(sw => sw.Type.ToUpper() == "SOCKET")
+                .AsNoTracking()
+                .Where(sw => sw.Type.ToLower() == SwitchTypes.Socket)
                 .ToListAsync();
             var accessibleSwitches = new List<Switch>();
 
@@ -214,20 +212,13 @@ namespace garge_api.Controllers
         /// Creates a new switch.
         /// </summary>
         [HttpPost]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Creates a new switch.")]
         [SwaggerResponse(201, "The created switch.", typeof(SwitchDto))]
         [SwaggerResponse(409, "Switch name already exists.")]
         public async Task<IActionResult> CreateSwitch([FromBody] CreateSwitchDto switchDto)
         {
             _logger.LogInformation("CreateSwitch called by {@LogData}", new { CallerUserId = User.UserId(), switchDto.Name, switchDto.Type });
-
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            if (!userRoles.Contains("SwitchAdmin", StringComparer.OrdinalIgnoreCase) &&
-                !userRoles.Contains("admin", StringComparer.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning("CreateSwitch forbidden for {@LogData}", new { CallerUserId = User.UserId() });
-                return Forbid();
-            }
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
@@ -254,6 +245,7 @@ namespace garge_api.Controllers
         /// Updates an existing switch.
         /// </summary>
         [HttpPut("{id}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Updates an existing switch.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(400, "Bad request.")]
@@ -262,12 +254,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> UpdateSwitch(int id, [FromBody] UpdateSwitchDto switchDto)
         {
             _logger.LogInformation("UpdateSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
-
-            if (!IsSwitchAdmin())
-            {
-                _logger.LogWarning("UpdateSwitch forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
-                return Forbid();
-            }
 
             if (id != switchDto.Id)
             {
@@ -295,6 +281,7 @@ namespace garge_api.Controllers
         /// Deletes a switch by its ID.
         /// </summary>
         [HttpDelete("{id}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Deletes a switch by its ID.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(404, "Switch not found.")]
@@ -302,12 +289,6 @@ namespace garge_api.Controllers
         public async Task<IActionResult> DeleteSwitch(int id)
         {
             _logger.LogInformation("DeleteSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
-
-            if (!IsSwitchAdmin())
-            {
-                _logger.LogWarning("DeleteSwitch forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
-                return Forbid();
-            }
 
             var switchEntity = await _context.Switches.FindAsync(id);
             if (switchEntity == null)
@@ -335,7 +316,7 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
 
-            var switchEntity = await _context.Switches.FindAsync(switchId);
+            var switchEntity = await _context.Switches.AsNoTracking().FirstOrDefaultAsync(s => s.Id == switchId);
             if (switchEntity == null)
             {
                 _logger.LogWarning("GetSwitchData not found: {@LogData}", new { switchId });
@@ -354,7 +335,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
-                var timeSpan = ParseTimeRange(timeRange);
+                var timeSpan = TimeRangeParser.Parse(timeRange);
                 if (timeSpan.HasValue)
                     query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
             }
@@ -419,6 +400,7 @@ namespace garge_api.Controllers
         /// Creates new data for a specific switch.
         /// </summary>
         [HttpPost("{switchId}/data")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Creates new data for a specific switch.")]
         [SwaggerResponse(201, "The created switch data.", typeof(SwitchDataDto))]
         [SwaggerResponse(400, "Invalid value format.")]
@@ -428,12 +410,6 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("CreateSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
 
-            if (!IsSwitchAdmin())
-            {
-                _logger.LogWarning("CreateSwitchData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
-                return Forbid();
-            }
-
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
             {
@@ -441,8 +417,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Switch not found!" });
             }
 
-            var validStates = new[] { "ON", "OFF" };
-            if (!validStates.Contains(switchDataDto.Value, StringComparer.OrdinalIgnoreCase))
+            if (!SwitchStates.IsValid(switchDataDto.Value))
             {
                 _logger.LogWarning("CreateSwitchData bad request: Invalid value {@LogData}", new { switchDataDto.Value, switchId });
                 return BadRequest(new { message = "The value must be either 'ON' or 'OFF'." });
@@ -496,7 +471,7 @@ namespace garge_api.Controllers
             if (!string.IsNullOrEmpty(timeRange))
             {
                 var now = DateTime.UtcNow;
-                var timeSpan = ParseTimeRange(timeRange);
+                var timeSpan = TimeRangeParser.Parse(timeRange);
                 if (timeSpan.HasValue)
                     query = query.Where(sd => sd.Timestamp >= now.Subtract(timeSpan.Value));
             }
@@ -558,6 +533,7 @@ namespace garge_api.Controllers
         /// Creates new data for a specific switch using switchName.
         /// </summary>
         [HttpPost("name/{switchName}/data")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Creates new data for a specific switch using switchName.")]
         [SwaggerResponse(201, "The created switch data.", typeof(SwitchDataDto))]
         [SwaggerResponse(400, "Invalid value format.")]
@@ -567,12 +543,6 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("CreateSwitchDataByName called by {@LogData}", new { CallerUserId = User.UserId(), switchName });
 
-            if (!IsSwitchAdmin())
-            {
-                _logger.LogWarning("CreateSwitchDataByName forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchName });
-                return Forbid();
-            }
-
             var switchEntity = await _context.Switches.FirstOrDefaultAsync(s => s.Name == switchName);
             if (switchEntity == null)
             {
@@ -580,8 +550,7 @@ namespace garge_api.Controllers
                 return NotFound(new { message = "Switch not found!" });
             }
 
-            var validStates = new[] { "ON", "OFF" };
-            if (!validStates.Contains(switchDataDto.Value, StringComparer.OrdinalIgnoreCase))
+            if (!SwitchStates.IsValid(switchDataDto.Value))
             {
                 _logger.LogWarning("CreateSwitchDataByName bad request: Invalid value {@LogData}", new { switchDataDto.Value, switchName });
                 return BadRequest(new { message = "The value must be either 'ON' or 'OFF'." });
@@ -632,43 +601,6 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("All switch data deleted for {@LogData}", new { switchId });
             return NoContent();
-        }
-
-        private static DateTime GetGroupingKey(DateTime timestamp, string? groupBy)
-        {
-            if (string.IsNullOrEmpty(groupBy))
-                return timestamp;
-
-            var timeSpan = ParseTimeRange(groupBy);
-            if (timeSpan.HasValue)
-            {
-                var ticks = (timestamp.Ticks / timeSpan.Value.Ticks) * timeSpan.Value.Ticks;
-                return new DateTime(ticks, DateTimeKind.Utc);
-            }
-
-            return timestamp;
-        }
-
-        private static TimeSpan? ParseTimeRange(string timeRange)
-        {
-            if (string.IsNullOrEmpty(timeRange) || timeRange.Length < 2)
-                return null;
-
-            var value = timeRange.Substring(0, timeRange.Length - 1);
-            var unit = timeRange.Substring(timeRange.Length - 1).ToLower();
-
-            if (!int.TryParse(value, out var intValue))
-                return null;
-
-            return unit switch
-            {
-                "m" => TimeSpan.FromMinutes(intValue),
-                "h" => TimeSpan.FromHours(intValue),
-                "d" => TimeSpan.FromDays(intValue),
-                "w" => TimeSpan.FromDays(intValue * 7),
-                "y" => TimeSpan.FromDays(intValue * 365),
-                _ => null,
-            };
         }
 
         /// <summary>
@@ -909,18 +841,8 @@ namespace garge_api.Controllers
             return Ok(shares);
         }
 
-        private async Task<string> GenerateSwitchRegistrationCodeAsync(int length = 10)
-        {
-            const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-            string code;
-            bool exists;
-            do
-            {
-                code = new string(Enumerable.Range(0, length)
-                    .Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
-                exists = await _context.Switches.AnyAsync(s => s.RegistrationCode == code);
-            } while (exists);
-            return code;
-        }
+        private Task<string> GenerateSwitchRegistrationCodeAsync(int length = 10) =>
+            RegistrationCode.GenerateUniqueAsync(
+                code => _context.Switches.AnyAsync(s => s.RegistrationCode == code), length);
     }
 }

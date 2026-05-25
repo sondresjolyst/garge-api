@@ -2,6 +2,7 @@ using garge_api.Dtos.Group;
 using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Group;
+using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -18,11 +19,13 @@ namespace garge_api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<GroupsController> _logger;
+        private readonly IMapper _mapper;
 
-        public GroupsController(ApplicationDbContext context, ILogger<GroupsController> logger)
+        public GroupsController(ApplicationDbContext context, ILogger<GroupsController> logger, IMapper mapper)
         {
             _context = context;
             _logger = logger;
+            _mapper = mapper;
         }
 
         private string GetUserId() => User.UserId()!;
@@ -35,20 +38,13 @@ namespace garge_api.Controllers
         {
             var userId = GetUserId();
             var groups = await _context.Groups
+                .AsNoTracking()
                 .Where(g => g.UserId == userId)
                 .Include(g => g.GroupSensors)
                 .Include(g => g.GroupSwitches)
-                .Select(g => new GroupDto
-                {
-                    Id = g.Id,
-                    Name = g.Name,
-                    Icon = g.Icon,
-                    SensorIds = g.GroupSensors.Select(gs => gs.SensorId).ToList(),
-                    SwitchIds = g.GroupSwitches.Select(gs => gs.SwitchId).ToList()
-                })
                 .ToListAsync();
 
-            return Ok(groups);
+            return Ok(_mapper.Map<List<GroupDto>>(groups));
         }
 
         /// <summary>
@@ -70,14 +66,7 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Group {Name} created by {UserId}", LogSanitizer.Sanitize(group.Name), userId);
 
-            return CreatedAtAction(nameof(GetGroups), new GroupDto
-            {
-                Id = group.Id,
-                Name = group.Name,
-                Icon = group.Icon,
-                SensorIds = new List<int>(),
-                SwitchIds = new List<int>()
-            });
+            return CreatedAtAction(nameof(GetGroups), _mapper.Map<GroupDto>(group));
         }
 
         /// <summary>
