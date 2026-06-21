@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.9.1](https://github.com/sondresjolyst/garge-api/compare/v2.9.0...v2.9.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **api:** ship sensor-data validation fix and access/sharing refactor ([#285](https://github.com/sondresjolyst/garge-api/issues/285)) ([c94adca](https://github.com/sondresjolyst/garge-api/commit/c94adca172f82768708a65ebc498cb3c2bf055cd))
+* clear lockout on reset + show cooldown message on login ([#272](https://github.com/sondresjolyst/garge-api/issues/272)) ([ba1a0d9](https://github.com/sondresjolyst/garge-api/commit/ba1a0d97a9e8c0a3104f5af2819cdf36ccaa6799))
+
+
+### Dependencies
+
+* bump `actions/checkout` from 6.0.2 to 6.0.3 ([#300](https://github.com/sondresjolyst/garge-api/issues/300)) ([0c1d533](https://github.com/sondresjolyst/garge-api/commit/0c1d5332b90ab86960b9e923d7642497d130606a))
+* bump `actions/setup-dotnet` from 5.2.0 to 5.3.0 ([#293](https://github.com/sondresjolyst/garge-api/issues/293)) ([6613a5b](https://github.com/sondresjolyst/garge-api/commit/6613a5bc889f2914965ede693f5450fc23202dae))
+* bump `BCrypt.Net-Next` from 4.1.0 to 4.2.0 ([#276](https://github.com/sondresjolyst/garge-api/issues/276)) ([fde079b](https://github.com/sondresjolyst/garge-api/commit/fde079b53203d4ef7efb29791c7e404657574cf1))
+* bump `coverlet.collector` from 10.0.0 to 10.0.1 ([#287](https://github.com/sondresjolyst/garge-api/issues/287)) ([4d62a6c](https://github.com/sondresjolyst/garge-api/commit/4d62a6c287b5d88f76c6d3c7a36b7de9cd99d423))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.37.3 to 9.38.0 ([#275](https://github.com/sondresjolyst/garge-api/issues/275)) ([d51e909](https://github.com/sondresjolyst/garge-api/commit/d51e909ae21e13c5754b2e13b42d0ac96b62c49c))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.38.0 to 9.38.1 ([#294](https://github.com/sondresjolyst/garge-api/issues/294)) ([7be6122](https://github.com/sondresjolyst/garge-api/commit/7be6122b5aebc9d5985aa68bd44c51dca8d5ba5a))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.38.1 to 9.38.2 ([#301](https://github.com/sondresjolyst/garge-api/issues/301)) ([694ca9e](https://github.com/sondresjolyst/garge-api/commit/694ca9e11790dca59000ff21ed1e8f9f822824b0))
+* bump `equinor/ops-actions/.github/workflows/release-please.yml` from 9.37.3 to 9.38.0 ([#274](https://github.com/sondresjolyst/garge-api/issues/274)) ([13b7c36](https://github.com/sondresjolyst/garge-api/commit/13b7c36202e87a7f2f42c4de86e0679fe86fdd99))
+* bump `equinor/ops-actions/.github/workflows/release-please.yml` from 9.38.0 to 9.38.1 ([#292](https://github.com/sondresjolyst/garge-api/issues/292)) ([324f488](https://github.com/sondresjolyst/garge-api/commit/324f488ba10f19b20c63db74ba927df02cef732b))
+* bump `equinor/ops-actions/.github/workflows/release-please.yml` from 9.38.1 to 9.38.2 ([#302](https://github.com/sondresjolyst/garge-api/issues/302)) ([097a703](https://github.com/sondresjolyst/garge-api/commit/097a703415f06079be7a0380ae4720e9268f0573))
+* bump `Microsoft.AspNetCore.Authentication.JwtBearer` from 10.0.7 to 10.0.8 ([#277](https://github.com/sondresjolyst/garge-api/issues/277)) ([4d34aa4](https://github.com/sondresjolyst/garge-api/commit/4d34aa4d4334d512738b56515dbd42da9127fa00))
+* bump `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore` and `Microsoft.EntityFrameworkCore` from 10.0.7 to 10.0.8 ([#278](https://github.com/sondresjolyst/garge-api/issues/278)) ([f02df7a](https://github.com/sondresjolyst/garge-api/commit/f02df7a0bb6affb226c76dfb04db5b62e273aa7f))
+* bump `Microsoft.AspNetCore.Identity.EntityFrameworkCore` from 10.0.7 to 10.0.8 ([#279](https://github.com/sondresjolyst/garge-api/issues/279)) ([5a1bd14](https://github.com/sondresjolyst/garge-api/commit/5a1bd148438ae40aa654017a26139f5e8b404db9))
+* bump `Microsoft.AspNetCore.OpenApi` from 10.0.7 to 10.0.8 ([#280](https://github.com/sondresjolyst/garge-api/issues/280)) ([c6b2ef8](https://github.com/sondresjolyst/garge-api/commit/c6b2ef8cce83840bb377c696e6ba891b1663643a))
+* bump `Microsoft.EntityFrameworkCore.Design` from 10.0.7 to 10.0.8 ([#288](https://github.com/sondresjolyst/garge-api/issues/288)) ([4720d35](https://github.com/sondresjolyst/garge-api/commit/4720d351e9ac0eb3ef031e1a55e9b4689dd8bce7))
+* bump `Microsoft.EntityFrameworkCore.InMemory` from 10.0.7 to 10.0.8 ([#289](https://github.com/sondresjolyst/garge-api/issues/289)) ([cc68f4f](https://github.com/sondresjolyst/garge-api/commit/cc68f4ff1d90b80cf9bf50d7b4867542e21e9dfd))
+* bump `Microsoft.EntityFrameworkCore.Tools` from 10.0.7 to 10.0.8 ([#290](https://github.com/sondresjolyst/garge-api/issues/290)) ([0047f23](https://github.com/sondresjolyst/garge-api/commit/0047f235002ec0de9304b14962ebb25d94e27f5a))
+* bump `Microsoft.Extensions.Logging.Abstractions` from 10.0.7 to 10.0.8 ([#291](https://github.com/sondresjolyst/garge-api/issues/291)) ([87c5a5a](https://github.com/sondresjolyst/garge-api/commit/87c5a5afe0d95bd67dde0f14a18330a31e253ba4))
+* bump `Microsoft.NET.Test.Sdk` from 18.5.1 to 18.6.0 ([#295](https://github.com/sondresjolyst/garge-api/issues/295)) ([dc965c3](https://github.com/sondresjolyst/garge-api/commit/dc965c3420c23164c315324cbc9c1e74e76f0d9e))
+* bump `Npgsql.EntityFrameworkCore.PostgreSQL` from 10.0.1 to 10.0.2 ([#296](https://github.com/sondresjolyst/garge-api/issues/296)) ([fc797b5](https://github.com/sondresjolyst/garge-api/commit/fc797b5827432d112dabd842fcd3d54faa6b7c4b))
+* bump `PuppeteerSharp` from 24.42.0 to 25.0.4 ([#297](https://github.com/sondresjolyst/garge-api/issues/297)) ([2f01722](https://github.com/sondresjolyst/garge-api/commit/2f017220013172e7e5c6acb6d53239e4208027b6))
+* bump `PuppeteerSharp` from 25.0.4 to 25.1.0 ([#303](https://github.com/sondresjolyst/garge-api/issues/303)) ([1872130](https://github.com/sondresjolyst/garge-api/commit/18721308bf8c169257744275830e1c07f18de2d9))
+* bump `Swashbuckle.AspNetCore.Annotations` from 10.1.7 to 10.2.0 ([#299](https://github.com/sondresjolyst/garge-api/issues/299)) ([1e05aa0](https://github.com/sondresjolyst/garge-api/commit/1e05aa0f6e5be00b680a73ceb008f1615f20bda1))
+* bump `Swashbuckle.AspNetCore.Annotations` from 10.2.0 to 10.2.1 ([#305](https://github.com/sondresjolyst/garge-api/issues/305)) ([e7687f3](https://github.com/sondresjolyst/garge-api/commit/e7687f39c70be05018487eeeb8619fc441f2f167))
+* bump `Swashbuckle.AspNetCore` from 10.1.7 to 10.2.0 ([#298](https://github.com/sondresjolyst/garge-api/issues/298)) ([4a62db4](https://github.com/sondresjolyst/garge-api/commit/4a62db4841438b526e2b287432f2bae4e049a97a))
+* bump `Swashbuckle.AspNetCore` from 10.2.0 to 10.2.1 ([#304](https://github.com/sondresjolyst/garge-api/issues/304)) ([979e3f0](https://github.com/sondresjolyst/garge-api/commit/979e3f03f3d2b069bdfe199e9de5a04fc6b3f152))
+* bump `System.IdentityModel.Tokens.Jwt` from 8.18.0 to 8.19.1 ([#306](https://github.com/sondresjolyst/garge-api/issues/306)) ([6c20c6b](https://github.com/sondresjolyst/garge-api/commit/6c20c6bba2194d1f34b688544290b9e42e988d05))
+
 ## [2.9.1](https://github.com/sondresjolyst/garge-api/compare/v2.9.0...v2.9.1) (2026-05-25)
 
 
