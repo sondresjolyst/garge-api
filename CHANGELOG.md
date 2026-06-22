@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.3](https://github.com/sondresjolyst/garge-api/compare/v2.9.2...v2.9.3) (2026-06-22)
+
+
+### Dependencies
+
+* Bump `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore` and `Microsoft.EntityFrameworkCore` from 10.0.8 to 10.0.9 ([#313](https://github.com/sondresjolyst/garge-api/issues/313)) ([816eec4](https://github.com/sondresjolyst/garge-api/commit/816eec4237c3bb8478e10d23ed9266af86b5405a))
+
 ## [2.9.2](https://github.com/sondresjolyst/garge-api/compare/v2.9.1...v2.9.2) (2026-06-22)
 
 
