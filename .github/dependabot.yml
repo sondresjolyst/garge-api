@@ -17,5 +17,3 @@ updates:
       day: sunday
     cooldown:
       default-days: 7
-    commit-message:
-      prefix: deps
