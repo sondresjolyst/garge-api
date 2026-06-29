@@ -13,6 +13,14 @@ namespace garge_api.Dtos.Sensor
         public required string DefaultName { get; set; }
         public required string ParentName { get; set; }
 
+        /// <summary>
+        /// The caller's voltage color thresholds for this sensor. Both are null when unset, in which
+        /// case the client leaves the reading uncolored. A reading at or above <see cref="WarningVoltage"/>
+        /// is normal, below it is a warning, and below <see cref="CriticalVoltage"/> is critical.
+        /// </summary>
+        public double? WarningVoltage { get; set; }
+        public double? CriticalVoltage { get; set; }
+
         /// <summary>True when the caller has this owned sensor turned off / over-quota suspended. Data reads are blocked while suspended.</summary>
         public bool Suspended { get; set; }
 

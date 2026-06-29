@@ -149,6 +149,11 @@ namespace garge_api.Controllers
                 .Where(x => x.UserId == currentUserId)
                 .ToDictionaryAsync(x => x.SensorId, x => x.CustomName, ct);
 
+            // Fetch all voltage color thresholds for the current user
+            var voltageThresholds = await _context.UserSensorVoltageThresholds
+                .Where(x => x.UserId == currentUserId)
+                .ToDictionaryAsync(x => x.SensorId, x => new { x.WarningVoltage, x.CriticalVoltage }, ct);
+
             var sensorIds = sensors.Select(s => s.Id).ToList();
             var suspendedIds = await CallerSuspendedSensorIdsAsync(sensorIds, ct);
 
@@ -166,6 +171,11 @@ namespace garge_api.Controllers
                 var dto = _mapper.Map<SensorDto>(sensor);
                 if (customNames.TryGetValue(sensor.Id, out var customName))
                     dto.CustomName = customName;
+                if (voltageThresholds.TryGetValue(sensor.Id, out var threshold))
+                {
+                    dto.WarningVoltage = threshold.WarningVoltage;
+                    dto.CriticalVoltage = threshold.CriticalVoltage;
+                }
                 dto.Suspended = suspendedIds.Contains(sensor.Id);
                 dto.Access = IsAdmin() ? DeviceAccess.Owner : (accessById.TryGetValue(sensor.Id, out var a) ? a : DeviceAccess.Owner);
                 return dto;
@@ -213,6 +223,16 @@ namespace garge_api.Controllers
 
             if (!string.IsNullOrEmpty(customName))
                 dto.CustomName = customName;
+
+            var threshold = await _context.UserSensorVoltageThresholds
+                .Where(x => x.UserId == currentUserId && x.SensorId == id)
+                .Select(x => new { x.WarningVoltage, x.CriticalVoltage })
+                .FirstOrDefaultAsync(ct);
+            if (threshold != null)
+            {
+                dto.WarningVoltage = threshold.WarningVoltage;
+                dto.CriticalVoltage = threshold.CriticalVoltage;
+            }
 
             dto.Suspended = await IsSensorSuspendedForCallerAsync(id, ct);
             dto.Access = await CallerAccessAsync(id, ct);
@@ -729,6 +749,9 @@ namespace garge_api.Controllers
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.SensorId == sensorId);
             if (customName != null)
                 _context.UserSensorCustomNames.Remove(customName);
+
+            _context.UserSensorVoltageThresholds.RemoveRange(
+                _context.UserSensorVoltageThresholds.Where(x => x.UserId == userId && x.SensorId == sensorId));
 
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == sensorId));
             _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == sensorId));
@@ -1302,6 +1325,120 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Custom name updated for {@LogData}", new { sensorId, CallerUserId = User.UserId() });
             return Ok(resultDto);
+        }
+
+        /// <summary>
+        /// Sets the caller's voltage color thresholds for a sensor. The reading is shown as a warning
+        /// below <paramref name="dto"/>.WarningVoltage and as critical below CriticalVoltage. Upserts the row.
+        /// </summary>
+        /// <param name="sensorId">The ID of the sensor.</param>
+        /// <param name="dto">The warning and critical voltages. Warning must be greater than critical.</param>
+        /// <returns>The stored thresholds.</returns>
+        [HttpPatch("{sensorId}/voltage-thresholds")]
+        [SwaggerOperation(Summary = "Sets the caller's voltage color thresholds for a sensor.")]
+        [SwaggerResponse(200, "Thresholds updated.", typeof(UserSensorVoltageThresholdDto))]
+        [SwaggerResponse(400, "Invalid thresholds.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(403, "User does not have access to the sensor.")]
+        public async Task<IActionResult> UpdateVoltageThresholds(
+            int sensorId,
+            [FromBody] UpdateVoltageThresholdDto dto)
+        {
+            _logger.LogInformation("UpdateVoltageThresholds called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+
+            var sensor = await _context.Sensors.FindAsync(sensorId);
+            if (sensor == null)
+            {
+                _logger.LogWarning("UpdateVoltageThresholds not found: {@LogData}", new { sensorId });
+                return NotFound(new { message = "Sensor not found!" });
+            }
+
+            if (!await UserCanAccessSensorAsync(sensor.Id))
+            {
+                _logger.LogWarning("UpdateVoltageThresholds forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+                return Forbid();
+            }
+
+            var currentUserId = User.UserId();
+            if (string.IsNullOrEmpty(currentUserId))
+                return Unauthorized();
+
+            if (dto.WarningVoltage <= dto.CriticalVoltage)
+            {
+                _logger.LogWarning("UpdateVoltageThresholds bad request: {@LogData}", new { sensorId, CallerUserId = currentUserId });
+                return BadRequest(new { message = "WarningVoltage must be greater than CriticalVoltage." });
+            }
+
+            var entry = await _context.UserSensorVoltageThresholds
+                .FirstOrDefaultAsync(x => x.UserId == currentUserId && x.SensorId == sensorId);
+
+            if (entry == null)
+            {
+                entry = new UserSensorVoltageThreshold
+                {
+                    UserId = currentUserId,
+                    SensorId = sensorId,
+                    WarningVoltage = dto.WarningVoltage,
+                    CriticalVoltage = dto.CriticalVoltage,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _context.UserSensorVoltageThresholds.Add(entry);
+            }
+            else
+            {
+                entry.WarningVoltage = dto.WarningVoltage;
+                entry.CriticalVoltage = dto.CriticalVoltage;
+            }
+
+            await _context.SaveChangesAsync();
+
+            var resultDto = new UserSensorVoltageThresholdDto
+            {
+                UserId = entry.UserId,
+                SensorId = entry.SensorId,
+                WarningVoltage = entry.WarningVoltage,
+                CriticalVoltage = entry.CriticalVoltage,
+                CreatedAt = entry.CreatedAt
+            };
+
+            _logger.LogInformation("Voltage thresholds updated for {@LogData}", new { sensorId, CallerUserId = currentUserId });
+            return Ok(resultDto);
+        }
+
+        /// <summary>
+        /// Clears the caller's voltage color thresholds for a sensor, so the reading is no longer colored.
+        /// </summary>
+        /// <param name="sensorId">The ID of the sensor.</param>
+        [HttpDelete("{sensorId}/voltage-thresholds")]
+        [SwaggerOperation(Summary = "Clears the caller's voltage color thresholds for a sensor.")]
+        [SwaggerResponse(204, "Thresholds cleared.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        [SwaggerResponse(403, "User does not have access to the sensor.")]
+        public async Task<IActionResult> ClearVoltageThresholds(int sensorId)
+        {
+            _logger.LogInformation("ClearVoltageThresholds called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+
+            var sensor = await _context.Sensors.FindAsync(sensorId);
+            if (sensor == null)
+                return NotFound(new { message = "Sensor not found!" });
+
+            if (!await UserCanAccessSensorAsync(sensor.Id))
+                return Forbid();
+
+            var currentUserId = User.UserId();
+            if (string.IsNullOrEmpty(currentUserId))
+                return Unauthorized();
+
+            var entry = await _context.UserSensorVoltageThresholds
+                .FirstOrDefaultAsync(x => x.UserId == currentUserId && x.SensorId == sensorId);
+            if (entry != null)
+            {
+                _context.UserSensorVoltageThresholds.Remove(entry);
+                await _context.SaveChangesAsync();
+            }
+
+            _logger.LogInformation("Voltage thresholds cleared for {@LogData}", new { sensorId, CallerUserId = currentUserId });
+            return NoContent();
         }
 
         /// <summary>

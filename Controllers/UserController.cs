@@ -158,6 +158,7 @@ namespace garge_api.Controllers
 
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
+            _context.UserSensorVoltageThresholds.RemoveRange(_context.UserSensorVoltageThresholds.Where(x => x.UserId == userId));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
             _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId));
@@ -266,6 +267,10 @@ namespace garge_api.Controllers
             var sensorCustomNames = await _context.UserSensorCustomNames
                 .Where(x => x.UserId == id)
                 .ToDictionaryAsync(x => x.SensorId, x => x.CustomName);
+
+            var voltageThresholds = await _context.UserSensorVoltageThresholds
+                .Where(x => x.UserId == id)
+                .ToDictionaryAsync(x => x.SensorId, x => new { x.WarningVoltage, x.CriticalVoltage });
 
             var sensors = await _context.UserSensors
                 .Where(us => us.UserId == id)
@@ -404,6 +409,9 @@ namespace garge_api.Controllers
                     s.Type,
                     DefaultName = s.DefaultName,
                     CustomName = sensorCustomNames.TryGetValue(s.Id, out var cn) ? cn : null,
+                    VoltageThresholds = voltageThresholds.TryGetValue(s.Id, out var vt)
+                        ? new { vt.WarningVoltage, vt.CriticalVoltage }
+                        : null,
                     Readings = sensorReadings
                         .Where(r => r.SensorId == s.Id)
                         .Select(r => new { r.Value, r.Timestamp }),
