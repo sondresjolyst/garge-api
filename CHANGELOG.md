@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.10.0](https://github.com/sondresjolyst/garge-api/compare/v2.9.3...v2.10.0) (2026-06-29)
+
+
+### Features
+
+* per-user voltage color thresholds ([#327](https://github.com/sondresjolyst/garge-api/issues/327)) ([fb0f73e](https://github.com/sondresjolyst/garge-api/commit/fb0f73e88f1acd1bff2bb7d7e7c50c5a8ee3d38a))
+
+
+### Dependencies
+
+* bump `actions/checkout` from 6.0.3 to 7.0.0 ([#321](https://github.com/sondresjolyst/garge-api/issues/321)) ([8dcdf7f](https://github.com/sondresjolyst/garge-api/commit/8dcdf7f4c4044d91e61c050c0d72249b38ade098))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.38.2 to 9.38.3 ([#322](https://github.com/sondresjolyst/garge-api/issues/322)) ([0841383](https://github.com/sondresjolyst/garge-api/commit/0841383c892b863483adc62887018a5bdc47cef0))
+* bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.38.2 to 9.38.3 ([#320](https://github.com/sondresjolyst/garge-api/issues/320)) ([30ee43b](https://github.com/sondresjolyst/garge-api/commit/30ee43ba3dcd6041d3d41acefa723386e0d9bb41))
+* bump `PuppeteerSharp` from 25.1.0 to 25.1.2 ([#323](https://github.com/sondresjolyst/garge-api/issues/323)) ([1330f89](https://github.com/sondresjolyst/garge-api/commit/1330f89fcb3617dea6b9f0adfc002f0e47ddc948))
+* bump `Swashbuckle.AspNetCore.Annotations` from 10.2.1 to 10.2.2 ([#325](https://github.com/sondresjolyst/garge-api/issues/325)) ([317a97a](https://github.com/sondresjolyst/garge-api/commit/317a97abd4974ef7311cbcf314000e3f9b12dbc3))
+* bump `Swashbuckle.AspNetCore` from 10.2.1 to 10.2.2 ([#324](https://github.com/sondresjolyst/garge-api/issues/324)) ([594d5dd](https://github.com/sondresjolyst/garge-api/commit/594d5ddf51095397de876f3eb3285857b931960c))
+
 ## [2.9.3](https://github.com/sondresjolyst/garge-api/compare/v2.9.2...v2.9.3) (2026-06-22)
 
 
