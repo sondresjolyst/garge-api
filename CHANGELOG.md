@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.1](https://github.com/sondresjolyst/garge-api/compare/v2.10.0...v2.10.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* detect charger disconnect for full-charge events ([#328](https://github.com/sondresjolyst/garge-api/issues/328)) ([ca35459](https://github.com/sondresjolyst/garge-api/commit/ca35459ef3ece8a4ebc22b01c343dd4c7899f2ac))
+
 ## [2.10.0](https://github.com/sondresjolyst/garge-api/compare/v2.9.3...v2.10.0) (2026-06-29)
 
 
