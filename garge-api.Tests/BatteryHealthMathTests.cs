@@ -253,6 +253,74 @@ public class BatteryHealthMathTests
     }
 
     [Fact]
+    public void DetectChargeEvents_SlowSurfaceChargeDecay_ClosesNearResting()
+    {
+        // After the charger is unplugged, surface charge bleeds off slowly and
+        // voltage lingers well above resting for a day+. At a 1.02 exit the
+        // window stayed open (charge never recorded → "last full charge" went
+        // stale). The 1.03 exit closes it once the decay reaches ~1.03x resting.
+        var start = DateTime.UtcNow.AddDays(-4);
+        // 12h resting 13.00, 24h charge 14.20 (> 1.08x = 14.04),
+        // 12h slow decay 14.20 -> 13.35, then flat 13.35 (= 1.027x resting).
+        var samples = Trace(start, 84, h => h switch
+        {
+            < 12 => 13.00f,
+            < 36 => 14.20f,
+            < 48 => 14.20f - (14.20f - 13.35f) * ((h - 36) / 11f),
+            _ => 13.35f
+        });
+        var events = BatteryHealthMath.DetectChargeEvents(samples, restingMedian: 13.00f);
+        Assert.Single(events);
+    }
+
+    [Fact]
+    public void DetectChargeEvents_MultiStageThenFloat_SingleEventNoSplit()
+    {
+        // A multi-stage charge: inrush spike, absorption plateau, a higher
+        // boost stage, then float — all one physical charge. A peak-relative
+        // exit would split this (the spike/boost peaks sit far above the
+        // plateau). The resting-relative exit keeps it a single window that
+        // only closes once the charger is disconnected and voltage decays
+        // toward resting.
+        var start = DateTime.UtcNow.AddDays(-5);
+        // 12h resting 13.45, 1h spike 15.11, 24h absorption 14.25,
+        // 24h boost 15.71, 24h float 13.95 (= 1.037x, stays open),
+        // then 12h decay to 13.30 (disconnect) -> closes once.
+        var samples = Trace(start, 97, h => h switch
+        {
+            < 12 => 13.45f,
+            12 => 15.11f,
+            < 37 => 14.25f,
+            < 61 => 15.71f,
+            < 85 => 13.95f,
+            _ => 13.95f - (13.95f - 13.30f) * ((h - 84) / 12f)
+        });
+        var events = BatteryHealthMath.DetectChargeEvents(samples, restingMedian: 13.45f);
+        Assert.Single(events);
+        Assert.InRange(events[0].PeakRatio, 1.16f, 1.18f);
+    }
+
+    [Fact]
+    public void DetectChargeEvents_FloatStillConnected_StaysOpen()
+    {
+        // Same multi-stage charge but the charger is still floating at the end
+        // of the trace (never disconnected). Voltage holds at 1.037x resting,
+        // above the 1.03 exit, so the window is still open — no closed event
+        // yet, which is correct: the charge hasn't finished.
+        var start = DateTime.UtcNow.AddDays(-4);
+        var samples = Trace(start, 85, h => h switch
+        {
+            < 12 => 13.45f,
+            12 => 15.11f,
+            < 37 => 14.25f,
+            < 61 => 15.71f,
+            _ => 13.95f
+        });
+        var events = BatteryHealthMath.DetectChargeEvents(samples, restingMedian: 13.45f);
+        Assert.Empty(events);
+    }
+
+    [Fact]
     public void DetectChargeEvents_CalibrationDrift_StillDetects()
     {
         // Sensor reads 0.8V higher than reality. Resting "looks like" 13.20.

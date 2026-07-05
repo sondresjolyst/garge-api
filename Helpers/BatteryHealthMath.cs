@@ -21,7 +21,11 @@ namespace garge_api.Helpers
 
         // Charge-event detection ratios (relative to restingMedian).
         public const float ChargeEntryRatio = 1.04f;
-        public const float ChargeExitRatio = 1.02f;
+        // Charger-disconnected threshold. Sits below observed float levels
+        // (~1.037× resting) so an actively-floating charger isn't read as a
+        // finished charge, but high enough to close promptly on real
+        // disconnect-decay. Resting-relative so multi-stage charges don't split.
+        public const float ChargeExitRatio = 1.03f;
         public const float ChargePeakMinRatio = 1.08f;
         public const int ChargeMinMinutes = 60;
         public const int ChargeExitSustainMinutes = 30;
