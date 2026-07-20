@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.10.2](https://github.com/sondresjolyst/garge-api/compare/v2.10.1...v2.10.2) (2026-07-20)
+
+
+### Dependencies
+
+* bump `actions/setup-dotnet` from 5.3.0 to 5.4.0 ([#332](https://github.com/sondresjolyst/garge-api/issues/332)) ([c87fc8e](https://github.com/sondresjolyst/garge-api/commit/c87fc8e1faaca89dbcb2a9a07ffb2739fc1c3c46))
+* bump `AutoMapper` from 16.1.1 to 16.2.0 ([#342](https://github.com/sondresjolyst/garge-api/issues/342)) ([1fa2db8](https://github.com/sondresjolyst/garge-api/commit/1fa2db896a0f21952e0d3c5030203510bfc19ea7))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.38.3 to 9.38.4 ([#330](https://github.com/sondresjolyst/garge-api/issues/330)) ([66dd68d](https://github.com/sondresjolyst/garge-api/commit/66dd68d705853733e39a669fe4fdb89cfe434a34))
+* bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.38.4 to 9.39.1 ([#340](https://github.com/sondresjolyst/garge-api/issues/340)) ([7fcda6e](https://github.com/sondresjolyst/garge-api/commit/7fcda6e5c3f04954721d6b12c5249117f7b807ed))
+* bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.38.3 to 9.38.4 ([#331](https://github.com/sondresjolyst/garge-api/issues/331)) ([ae7614c](https://github.com/sondresjolyst/garge-api/commit/ae7614ce19e744871bd00cc70996f8c48a6685d8))
+* bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.38.4 to 9.39.1 ([#341](https://github.com/sondresjolyst/garge-api/issues/341)) ([f029401](https://github.com/sondresjolyst/garge-api/commit/f0294014de817047ddfa293556d6e6be29b90a99))
+* Bump `Mapster` and `Mapster.DependencyInjection` from 10.0.8 to 10.0.9 ([#334](https://github.com/sondresjolyst/garge-api/issues/334)) ([34923f3](https://github.com/sondresjolyst/garge-api/commit/34923f31dc107a0c353754e49010fdb331ee8a61))
+* bump `Microsoft.NET.Test.Sdk` from 18.6.0 to 18.7.0 ([#335](https://github.com/sondresjolyst/garge-api/issues/335)) ([b971aea](https://github.com/sondresjolyst/garge-api/commit/b971aeaf894da71e4c01ea57eca1c8fce15fd78d))
+* bump `Npgsql.EntityFrameworkCore.PostgreSQL` from 10.0.2 to 10.0.3 ([#346](https://github.com/sondresjolyst/garge-api/issues/346)) ([2ed6dd5](https://github.com/sondresjolyst/garge-api/commit/2ed6dd5021cf09ff0450ea93c778605891684277))
+* bump `PuppeteerSharp` from 25.1.2 to 25.2.1 ([#336](https://github.com/sondresjolyst/garge-api/issues/336)) ([76e8158](https://github.com/sondresjolyst/garge-api/commit/76e8158a64c3e2bdc31697cb607ce651d0063318))
+* bump `PuppeteerSharp` from 25.2.1 to 25.3.1 ([#345](https://github.com/sondresjolyst/garge-api/issues/345)) ([ecf8340](https://github.com/sondresjolyst/garge-api/commit/ecf834082b25bb0da23869fe28b294389a9ceb70))
+* bump `PuppeteerSharp` from 25.3.1 to 25.3.3 ([#347](https://github.com/sondresjolyst/garge-api/issues/347)) ([19174fd](https://github.com/sondresjolyst/garge-api/commit/19174fd2dd82ca70ae8c14532e95dbde9d5b90b8))
+* bump `Swashbuckle.AspNetCore.Annotations` from 10.2.2 to 10.2.3 ([#338](https://github.com/sondresjolyst/garge-api/issues/338)) ([64d7087](https://github.com/sondresjolyst/garge-api/commit/64d70879c2c4743ba156275822d78b7649704810))
+* bump `Swashbuckle.AspNetCore` from 10.2.2 to 10.2.3 ([#337](https://github.com/sondresjolyst/garge-api/issues/337)) ([426bd0e](https://github.com/sondresjolyst/garge-api/commit/426bd0ef82ee8e2778bc35327ed61c93a9c5df05))
+* Bump Mapster and Mapster.DependencyInjection ([#344](https://github.com/sondresjolyst/garge-api/issues/344)) ([4cdf231](https://github.com/sondresjolyst/garge-api/commit/4cdf231d69df7af30cdae6c9217b01aa204d2fd4))
+
 ## [2.10.1](https://github.com/sondresjolyst/garge-api/compare/v2.10.0...v2.10.1) (2026-07-05)
 
 
