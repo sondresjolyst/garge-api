@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/sondresjolyst/garge-api/compare/v2.10.3...v2.11.0) (2026-07-27)
+
+
+### Features
+
+* pairing token mint and claim endpoints ([#366](https://github.com/sondresjolyst/garge-api/issues/366)) ([08fd9b3](https://github.com/sondresjolyst/garge-api/commit/08fd9b3c8c4f8161faeb53c10e16075c4a0f2e1e))
+
 ## [2.10.3](https://github.com/sondresjolyst/garge-api/compare/v2.10.2...v2.10.3) (2026-07-27)
 
 
