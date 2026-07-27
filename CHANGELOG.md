@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.0](https://github.com/sondresjolyst/garge-api/compare/v2.11.0...v2.12.0) (2026-07-27)
+
+
+### Features
+
+* device credential provisioning endpoint ([#368](https://github.com/sondresjolyst/garge-api/issues/368)) ([ba0eed1](https://github.com/sondresjolyst/garge-api/commit/ba0eed138315243487280ab8f545e6984286af73))
+
 ## [2.11.0](https://github.com/sondresjolyst/garge-api/compare/v2.10.3...v2.11.0) (2026-07-27)
 
 
