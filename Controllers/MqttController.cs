@@ -1,5 +1,6 @@
 ﻿using garge_api.Constants;
 using garge_api.Dtos.Mqtt;
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Mqtt;
 using Microsoft.AspNetCore.Authorization;
@@ -8,8 +9,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace garge_api.Controllers
@@ -27,21 +26,6 @@ namespace garge_api.Controllers
         {
             _context = context;
             _logger = logger;
-        }
-
-        private static string GenerateSalt(int length = 16)
-        {
-            var saltBytes = new byte[length];
-            using var rng = RandomNumberGenerator.Create();
-            rng.GetBytes(saltBytes);
-            return Convert.ToHexString(saltBytes).ToLowerInvariant();
-        }
-
-        private static string HashPasswordPBKDF2(string password, string salt, int iterations = 300_000, int hashByteSize = 32)
-        {
-            var saltBytes = Encoding.UTF8.GetBytes(salt);
-            var hash = Rfc2898DeriveBytes.Pbkdf2(password, saltBytes, iterations, HashAlgorithmName.SHA512, hashByteSize);
-            return Convert.ToHexString(hash).ToLowerInvariant();
         }
 
         /// <summary>
@@ -65,8 +49,8 @@ namespace garge_api.Controllers
                 return Conflict(new { message = "Username already exists." });
             }
 
-            var salt = GenerateSalt(16);
-            var hash = HashPasswordPBKDF2(dto.Password, salt);
+            var salt = MqttPasswordHasher.GenerateSalt(16);
+            var hash = MqttPasswordHasher.HashPasswordPBKDF2(dto.Password, salt);
 
             // IsSuperuser intentionally hardcoded to false. Broker superusers
             // bypass all ACLs; granting that flag must be done out-of-band

@@ -1,7 +1,9 @@
 using garge_api.Constants;
 using garge_api.Dtos.Pairing;
+using garge_api.Helpers;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Mqtt;
 using garge_api.Models.Pairing;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
@@ -12,6 +14,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Swashbuckle.AspNetCore.Annotations;
+using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace garge_api.Controllers
 {
@@ -234,6 +238,134 @@ namespace garge_api.Controllers
                 result.Skipped
             });
             return Ok(result);
+        }
+
+        /// <summary>Chip ids are the device MAC: exactly 12 lowercase hex characters.</summary>
+        private static readonly Regex ChipIdRegex = new("^[0-9a-f]{12}$", RegexOptions.Compiled);
+
+        /// <summary>Equivalent of the provisioning script's <c>secrets.token_urlsafe(16)</c>.</summary>
+        private static string GenerateDevicePassword()
+        {
+            var bytes = RandomNumberGenerator.GetBytes(16);
+            return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+
+        /// <summary>
+        /// Exchanges a pairing token for per-device MQTT broker credentials. Anonymous:
+        /// possession of a live pairing token is the authorization. The token is not consumed
+        /// here — it stays redeemable for the subsequent <see cref="ClaimPairing"/> step.
+        /// </summary>
+        [HttpPost("provision")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Exchanges a pairing token for per-device MQTT broker credentials.")]
+        [SwaggerResponse(200, "The MQTT username and plaintext password (returned exactly once).", typeof(DeviceCredentialsDto))]
+        [SwaggerResponse(400, "Chip id is not 12 hex characters.")]
+        [SwaggerResponse(404, "Unknown token.")]
+        [SwaggerResponse(409, "Device is owned by another user.")]
+        [SwaggerResponse(410, "Token expired or already consumed.")]
+        public async Task<IActionResult> ProvisionDevice([FromBody] ProvisionDeviceDto dto)
+        {
+            var chipId = dto.ChipId?.Trim().ToLowerInvariant() ?? string.Empty;
+            if (!ChipIdRegex.IsMatch(chipId))
+            {
+                _logger.LogWarning("ProvisionDevice bad request: Invalid chip id");
+                return BadRequest(new { message = "ChipId must be 12 hexadecimal characters." });
+            }
+            var deviceName = $"garge_{chipId}";
+
+            var normalizedToken = (dto.Token ?? string.Empty).Trim().ToUpperInvariant();
+            var token = await _context.PairingTokens.FirstOrDefaultAsync(t => t.Token == normalizedToken);
+            if (token == null)
+            {
+                _logger.LogWarning("ProvisionDevice not found: Unknown pairing token {@LogData}", new { deviceName });
+                return NotFound(new { message = "Unknown pairing token." });
+            }
+
+            if (token.ConsumedAt != null)
+            {
+                _logger.LogWarning("ProvisionDevice gone: Token already consumed {@LogData}", new { token.Id, token.ConsumedAt, deviceName });
+                return StatusCode(410, new { message = "Pairing token has already been used." });
+            }
+
+            if (token.ExpiresAt <= DateTime.UtcNow)
+            {
+                _logger.LogWarning("ProvisionDevice gone: Token expired {@LogData}", new { token.Id, token.ExpiresAt, deviceName });
+                return StatusCode(410, new { message = "Pairing token has expired." });
+            }
+
+            // Rotating credentials for a device owned by someone else would let a stranger's
+            // token hijack it; unclaimed devices (including first boot, no rows yet) may proceed.
+            var sensorIds = await _context.Sensors
+                .Where(s => s.ParentName == deviceName)
+                .Select(s => s.Id)
+                .ToListAsync();
+            var sensorOwnedByOther = await _context.UserSensors
+                .AnyAsync(us => sensorIds.Contains(us.SensorId) && us.IsOwner && us.UserId != token.UserId);
+
+            // Switches have no parent name; they relate to the gateway via DiscoveredDevices.
+            var switchNames = await _context.DiscoveredDevices
+                .Where(dd => dd.DiscoveredBy == deviceName)
+                .Select(dd => dd.Target)
+                .Distinct()
+                .ToListAsync();
+            var switchIds = await _context.Switches
+                .Where(s => switchNames.Contains(s.Name))
+                .Select(s => s.Id)
+                .ToListAsync();
+            var switchOwnedByOther = await _context.UserSwitches
+                .AnyAsync(us => switchIds.Contains(us.SwitchId) && us.IsOwner && us.UserId != token.UserId);
+
+            if (sensorOwnedByOther || switchOwnedByOther)
+            {
+                _logger.LogWarning("ProvisionDevice conflict: Device owned by another user {@LogData}", new { deviceName, token.UserId });
+                return Conflict(new { message = "Device is owned by another user." });
+            }
+
+            var password = GenerateDevicePassword();
+            var salt = MqttPasswordHasher.GenerateSalt(16);
+            var hash = MqttPasswordHasher.HashPasswordPBKDF2(password, salt);
+
+            var brokerUser = await _context.EMQXMqttUsers.FirstOrDefaultAsync(u => u.Username == deviceName);
+            var rotated = brokerUser != null;
+            if (brokerUser == null)
+            {
+                // Broker superusers bypass all ACLs.
+                brokerUser = new EMQXMqttUser { IsSuperuser = false, Username = deviceName };
+                _context.EMQXMqttUsers.Add(brokerUser);
+            }
+            brokerUser.PasswordHash = hash;
+            brokerUser.Salt = salt;
+
+            // Two rows (retain 1 and 0) mirror the provisioning script; upsert is idempotent.
+            var topic = $"garge/devices/{deviceName}/#";
+            foreach (short retain in new short[] { 1, 0 })
+            {
+                var exists = await _context.EMQXMqttAcls.AnyAsync(a =>
+                    a.Username == deviceName && a.Permission == "allow" && a.Action == "all" &&
+                    a.Topic == topic && a.Qos == 0 && a.Retain == retain);
+                if (!exists)
+                {
+                    _context.EMQXMqttAcls.Add(new EMQXMqttAcl
+                    {
+                        Username = deviceName,
+                        Permission = "allow",
+                        Action = "all",
+                        Topic = topic,
+                        Qos = 0,
+                        Retain = retain
+                    });
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            _logger.LogInformation("ProvisionDevice credentials issued {@LogData}", new
+            {
+                token.UserId,
+                DeviceName = deviceName,
+                Rotated = rotated
+            });
+            return Ok(new DeviceCredentialsDto { Username = deviceName, Password = password });
         }
     }
 }

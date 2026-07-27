@@ -62,6 +62,12 @@ public class PairingControllerTests : ControllerTestBase
     private static ClaimPairingTokenDto Claim(string token = "ABC234", string parentName = "gw") =>
         new() { Token = token, ParentName = parentName };
 
+    private const string ChipId = "a1b2c3d4e5f6";
+    private const string DeviceName = $"garge_{ChipId}";
+
+    private static ProvisionDeviceDto Provision(string token = "ABC234", string chipId = ChipId) =>
+        new() { Token = token, ChipId = chipId };
+
     [Fact]
     public async Task CreatePairingToken_MintsSixCharTokenWithFifteenMinuteExpiry()
     {
@@ -271,5 +277,111 @@ public class PairingControllerTests : ControllerTestBase
         Assert.Empty(dto.ClaimedSensorIds);
         Assert.Equal(1, dto.Skipped);
         Assert.Single(db.UserSensors.Where(us => us.UserId == "user-1" && us.SensorId == 1));
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_FirstBoot_CreatesBrokerUserAndAcls()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "device").ProvisionDevice(Provision());
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var creds = Assert.IsType<DeviceCredentialsDto>(ok.Value);
+        Assert.Equal(DeviceName, creds.Username);
+        Assert.Equal(22, creds.Password.Length); // secrets.token_urlsafe(16) equivalent
+        Assert.All(creds.Password, c => Assert.Contains(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"));
+
+        var user = db.EMQXMqttUsers.Single();
+        Assert.Equal(DeviceName, user.Username);
+        Assert.False(user.IsSuperuser);
+        // Only the PBKDF2 hash is stored; the returned plaintext must verify against it.
+        Assert.Equal(MqttPasswordHasher.HashPasswordPBKDF2(creds.Password, user.Salt!), user.PasswordHash);
+
+        var acls = db.EMQXMqttAcls.OrderBy(a => a.Retain).ToList();
+        Assert.Equal(2, acls.Count);
+        Assert.Equal(new short?[] { 0, 1 }, acls.Select(a => a.Retain));
+        Assert.All(acls, a =>
+        {
+            Assert.Equal(DeviceName, a.Username);
+            Assert.Equal($"garge/devices/{DeviceName}/#", a.Topic);
+            Assert.Equal("all", a.Action);
+            Assert.Equal("allow", a.Permission);
+            Assert.Equal((short)0, a.Qos);
+        });
+
+        // The token is only consumed by the later claim step.
+        Assert.Null(db.PairingTokens.Single().ConsumedAt);
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_ExistingBrokerUser_RotatesPasswordWithoutDuplicates()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        db.EMQXMqttUsers.Add(new EMQXMqttUser { Username = DeviceName, PasswordHash = "old-hash", Salt = "old-salt", IsSuperuser = false });
+        db.EMQXMqttAcls.Add(new EMQXMqttAcl { Username = DeviceName, Permission = "allow", Action = "all", Topic = $"garge/devices/{DeviceName}/#", Qos = 0, Retain = 1 });
+        db.EMQXMqttAcls.Add(new EMQXMqttAcl { Username = DeviceName, Permission = "allow", Action = "all", Topic = $"garge/devices/{DeviceName}/#", Qos = 0, Retain = 0 });
+        await db.SaveChangesAsync();
+
+        // Uppercase chip id exercises the lowercase normalization.
+        var result = await CreateController(db, "device").ProvisionDevice(Provision(chipId: ChipId.ToUpperInvariant()));
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var creds = Assert.IsType<DeviceCredentialsDto>(ok.Value);
+        Assert.Equal(DeviceName, creds.Username);
+
+        var user = db.EMQXMqttUsers.Single(); // rotated in place, not duplicated
+        Assert.NotEqual("old-hash", user.PasswordHash);
+        Assert.NotEqual("old-salt", user.Salt);
+        Assert.Equal(MqttPasswordHasher.HashPasswordPBKDF2(creds.Password, user.Salt!), user.PasswordHash);
+
+        Assert.Equal(2, db.EMQXMqttAcls.Count()); // upsert respects the unique composite index
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_DeviceOwnedByAnotherUser_Conflict()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.Add(MakeSensor(1, parentName: DeviceName));
+        db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 1, IsOwner = true });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "device").ProvisionDevice(Provision());
+
+        Assert.IsType<ConflictObjectResult>(result);
+        Assert.Empty(db.EMQXMqttUsers); // no credentials minted for a device someone else owns
+        Assert.Empty(db.EMQXMqttAcls);
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_ExpiredToken_Gone()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1", expiresAt: DateTime.UtcNow.AddMinutes(-1)));
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "device").ProvisionDevice(Provision());
+
+        var status = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(410, status.StatusCode);
+        Assert.Empty(db.EMQXMqttUsers);
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_InvalidChipId_BadRequest()
+    {
+        using var db = CreateDbContext();
+
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "nothex")));
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "a1b2c3d4e5f6aa"))); // too long
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "g1b2c3d4e5f6"))); // non-hex char
     }
 }
