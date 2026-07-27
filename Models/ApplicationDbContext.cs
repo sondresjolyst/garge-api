@@ -4,6 +4,7 @@ using garge_api.Models.Automation;
 using garge_api.Models.Electricity;
 using garge_api.Models.Group;
 using garge_api.Models.Mqtt;
+using garge_api.Models.Pairing;
 using garge_api.Models.Push;
 using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
@@ -61,6 +62,7 @@ namespace garge_api.Models
         public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
         public DbSet<Anonymized.AnonymizedSeries> AnonymizedSeries { get; set; }
         public DbSet<Anonymized.AnonymizedReading> AnonymizedReadings { get; set; }
+        public DbSet<PairingToken> PairingTokens { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -408,6 +410,16 @@ namespace garge_api.Models
 
             modelBuilder.Entity<ProcessedWebhookEvent>()
                 .HasIndex(p => p.ProcessedAt);
+
+            modelBuilder.Entity<PairingToken>()
+                .HasIndex(t => t.Token)
+                .IsUnique();
+
+            modelBuilder.Entity<PairingToken>()
+                .HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
         public void EnsureTriggers()
         {
