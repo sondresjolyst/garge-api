@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.10.3](https://github.com/sondresjolyst/garge-api/compare/v2.10.2...v2.10.3) (2026-07-27)
+
+
+### Dependencies
+
+* **github-actions:** bump `actions/checkout` from 7.0.0 to 7.0.1 ([#352](https://github.com/sondresjolyst/garge-api/issues/352)) ([8fbf068](https://github.com/sondresjolyst/garge-api/commit/8fbf0681e2c8269c13457fbbd0c6ab3f9a42a2aa))
+* **github-actions:** bump `actions/setup-dotnet` from 5.4.0 to 6.0.0 ([#350](https://github.com/sondresjolyst/garge-api/issues/350)) ([2512e0d](https://github.com/sondresjolyst/garge-api/commit/2512e0d926fc551df723d8841bd4d39650e71d12))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.1 to 9.39.2 ([#349](https://github.com/sondresjolyst/garge-api/issues/349)) ([ab1b657](https://github.com/sondresjolyst/garge-api/commit/ab1b657b765f84bdc91a52db176162d0d2991f48))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.1 to 9.39.2 ([#351](https://github.com/sondresjolyst/garge-api/issues/351)) ([ad64fc4](https://github.com/sondresjolyst/garge-api/commit/ad64fc4876a993b4f9348242e81e48042d0490f5))
+* **nuget:** Bump `Mapster` and `Mapster.DependencyInjection` from 10.0.10 to 10.0.11 ([#354](https://github.com/sondresjolyst/garge-api/issues/354)) ([6a7a27b](https://github.com/sondresjolyst/garge-api/commit/6a7a27b1a60883146949e8865fbe322c4b7f991a))
+* **nuget:** bump `Microsoft.AspNetCore.Authentication.JwtBearer` from 10.0.9 to 10.0.10 ([#355](https://github.com/sondresjolyst/garge-api/issues/355)) ([03fa483](https://github.com/sondresjolyst/garge-api/commit/03fa48307f8265f58a7dcd5b5078f70d77f94a67))
+* **nuget:** Bump `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore` and `Microsoft.EntityFrameworkCore` from 10.0.9 to 10.0.10 ([#356](https://github.com/sondresjolyst/garge-api/issues/356)) ([e37d66b](https://github.com/sondresjolyst/garge-api/commit/e37d66b544544eccd42a1d807fcbb43322f57817))
+* **nuget:** Bump `Microsoft.AspNetCore.Identity.EntityFrameworkCore` from 10.0.9 to 10.0.10 ([#357](https://github.com/sondresjolyst/garge-api/issues/357)) ([4e8ab56](https://github.com/sondresjolyst/garge-api/commit/4e8ab566cae327db7abf883b9080e3b25799d77e))
+* **nuget:** Bump `Microsoft.AspNetCore.OpenApi` from 10.0.9 to 10.0.10 ([#358](https://github.com/sondresjolyst/garge-api/issues/358)) ([4e84115](https://github.com/sondresjolyst/garge-api/commit/4e84115c5b6b1e187d5290b33dfc6bc0d321c58f))
+* **nuget:** Bump `Microsoft.EntityFrameworkCore.Design` and `Microsoft.EntityFrameworkCore.Tools` from 10.0.9 to 10.0.10 ([#362](https://github.com/sondresjolyst/garge-api/issues/362)) ([81e5abb](https://github.com/sondresjolyst/garge-api/commit/81e5abb96515d2fdd778f9b2f38ec3cd4d2f9f5f))
+* **nuget:** bump `Microsoft.EntityFrameworkCore.InMemory` from 10.0.9 to 10.0.10 ([#361](https://github.com/sondresjolyst/garge-api/issues/361)) ([b75a582](https://github.com/sondresjolyst/garge-api/commit/b75a5827d4cdf316a6cb4b68eca7bda7bafe8f90))
+* **nuget:** bump `Microsoft.NET.Test.Sdk` from 18.7.0 to 18.8.1 ([#363](https://github.com/sondresjolyst/garge-api/issues/363)) ([6e88878](https://github.com/sondresjolyst/garge-api/commit/6e888786e385047e25eb286c78eedf417aab9916))
+* **nuget:** bump `PuppeteerSharp` from 25.3.3 to 25.3.4 ([#364](https://github.com/sondresjolyst/garge-api/issues/364)) ([aa492b0](https://github.com/sondresjolyst/garge-api/commit/aa492b02ddc5a474f3c15b6e82ff63eefc249147))
+* **nuget:** bump `System.IdentityModel.Tokens.Jwt` from 8.19.1 to 8.19.2 ([#365](https://github.com/sondresjolyst/garge-api/issues/365)) ([73cb1d7](https://github.com/sondresjolyst/garge-api/commit/73cb1d7ab1a113fb5e586803810b99cb666dbafc))
+
 ## [2.10.2](https://github.com/sondresjolyst/garge-api/compare/v2.10.1...v2.10.2) (2026-07-20)
 
 
