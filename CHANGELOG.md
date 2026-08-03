@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.1](https://github.com/sondresjolyst/garge-api/compare/v2.12.0...v2.12.1) (2026-08-03)
+
+
+### Dependencies
+
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.2 to 9.39.3 ([#371](https://github.com/sondresjolyst/garge-api/issues/371)) ([9c9d8cb](https://github.com/sondresjolyst/garge-api/commit/9c9d8cbc6d99996268e7eb587be6933560e61436))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.2 to 9.39.3 ([#370](https://github.com/sondresjolyst/garge-api/issues/370)) ([d6df7ba](https://github.com/sondresjolyst/garge-api/commit/d6df7ba3a817fd474f3a4942d2d490c14868d9e9))
+* **nuget:** bump `System.IdentityModel.Tokens.Jwt` from 8.19.2 to 8.21.0 ([#372](https://github.com/sondresjolyst/garge-api/issues/372)) ([b3beb5d](https://github.com/sondresjolyst/garge-api/commit/b3beb5d6e8d02fa33bc62de92eca0a3682c36706))
+
 ## [2.12.0](https://github.com/sondresjolyst/garge-api/compare/v2.11.0...v2.12.0) (2026-07-27)
 
 
