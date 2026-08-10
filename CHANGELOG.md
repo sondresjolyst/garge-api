@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.12.1](https://github.com/sondresjolyst/garge-api/compare/v2.12.0...v2.12.1) (2026-08-10)
+
+
+### Dependencies
+
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.2 to 9.39.3 ([#371](https://github.com/sondresjolyst/garge-api/issues/371)) ([9c9d8cb](https://github.com/sondresjolyst/garge-api/commit/9c9d8cbc6d99996268e7eb587be6933560e61436))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.3 to 9.39.4 ([#375](https://github.com/sondresjolyst/garge-api/issues/375)) ([342ec49](https://github.com/sondresjolyst/garge-api/commit/342ec49f4784b7c0ad2e21f997fbb59bb9398514))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.2 to 9.39.3 ([#370](https://github.com/sondresjolyst/garge-api/issues/370)) ([d6df7ba](https://github.com/sondresjolyst/garge-api/commit/d6df7ba3a817fd474f3a4942d2d490c14868d9e9))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.3 to 9.39.4 ([#376](https://github.com/sondresjolyst/garge-api/issues/376)) ([412818d](https://github.com/sondresjolyst/garge-api/commit/412818d199c02899595ec25d58742a7efcfb0d79))
+* **nuget:** bump `PuppeteerSharp` from 25.3.4 to 25.4.0 ([#377](https://github.com/sondresjolyst/garge-api/issues/377)) ([0efc998](https://github.com/sondresjolyst/garge-api/commit/0efc9980c055d35ae2c703819c2795a65f34d001))
+* **nuget:** bump `System.IdentityModel.Tokens.Jwt` from 8.19.2 to 8.21.0 ([#372](https://github.com/sondresjolyst/garge-api/issues/372)) ([b3beb5d](https://github.com/sondresjolyst/garge-api/commit/b3beb5d6e8d02fa33bc62de92eca0a3682c36706))
+* **nuget:** bump `System.IdentityModel.Tokens.Jwt` from 8.21.0 to 8.22.0 ([#378](https://github.com/sondresjolyst/garge-api/issues/378)) ([79b8849](https://github.com/sondresjolyst/garge-api/commit/79b8849003e25f8cde9a6931b266808705f08912))
+
 ## [2.12.0](https://github.com/sondresjolyst/garge-api/compare/v2.11.0...v2.12.0) (2026-07-27)
 
 
