@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.2](https://github.com/sondresjolyst/garge-api/compare/v2.12.1...v2.12.2) (2026-08-17)
+
+
+### Dependencies
+
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.4 to 9.39.6 ([#380](https://github.com/sondresjolyst/garge-api/issues/380)) ([24b5895](https://github.com/sondresjolyst/garge-api/commit/24b5895cb7f2868da26c5b48830c89ca37f83bd1))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.4 to 9.39.6 ([#379](https://github.com/sondresjolyst/garge-api/issues/379)) ([b44cbf1](https://github.com/sondresjolyst/garge-api/commit/b44cbf174446866e657799f3036294b8340f0fcc))
+* **nuget:** bump `PuppeteerSharp` from 25.4.0 to 25.5.0 ([#381](https://github.com/sondresjolyst/garge-api/issues/381)) ([de15964](https://github.com/sondresjolyst/garge-api/commit/de15964cbedd93fb64b5d706ecc8613e3c67a6b4))
+
 ## [2.12.1](https://github.com/sondresjolyst/garge-api/compare/v2.12.0...v2.12.1) (2026-08-10)
 
 
