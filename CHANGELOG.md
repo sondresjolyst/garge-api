@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.3](https://github.com/sondresjolyst/garge-api/compare/v2.12.2...v2.12.3) (2026-08-24)
+
+
+### Dependencies
+
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/docker.yml` from 9.39.6 to 9.40.0 ([#384](https://github.com/sondresjolyst/garge-api/issues/384)) ([880e4fb](https://github.com/sondresjolyst/garge-api/commit/880e4fb16685d574408cca15f421b32663e66e1f))
+* **github-actions:** bump `equinor/ops-actions/.github/workflows/release-please-manifest.yml` from 9.39.6 to 9.40.0 ([#383](https://github.com/sondresjolyst/garge-api/issues/383)) ([994c2c6](https://github.com/sondresjolyst/garge-api/commit/994c2c61e284dfc16b3b78c31c98b4e8e5f6ef3c))
+* **nuget:** bump `Microsoft.AspNetCore.Authentication.JwtBearer` from 10.0.10 to 10.0.11 ([#385](https://github.com/sondresjolyst/garge-api/issues/385)) ([9137413](https://github.com/sondresjolyst/garge-api/commit/913741347028b5425278b7466b4f58cb3bfa4673))
+* **nuget:** bump `Microsoft.AspNetCore.Identity.EntityFrameworkCore` from 10.0.10 to 10.0.11 ([#387](https://github.com/sondresjolyst/garge-api/issues/387)) ([b13c1cf](https://github.com/sondresjolyst/garge-api/commit/b13c1cf2702d379cc4d800a885d3bb04931e5c8f))
+* **nuget:** bump `Microsoft.AspNetCore.OpenApi` from 10.0.10 to 10.0.11 ([#388](https://github.com/sondresjolyst/garge-api/issues/388)) ([cca3e7c](https://github.com/sondresjolyst/garge-api/commit/cca3e7c45b1f3a1f54bda63663c0029cfcc520e9))
+* **nuget:** bump `Microsoft.EntityFrameworkCore` from 10.0.10 to 10.0.11 ([#389](https://github.com/sondresjolyst/garge-api/issues/389)) ([5ecbe9c](https://github.com/sondresjolyst/garge-api/commit/5ecbe9ca6a3d74441dddc98ef22ea2c0da91a15f))
+
 ## [2.12.2](https://github.com/sondresjolyst/garge-api/compare/v2.12.1...v2.12.2) (2026-08-17)
 
 
