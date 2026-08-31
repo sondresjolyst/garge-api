@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.12.4](https://github.com/sondresjolyst/garge-api/compare/v2.12.3...v2.12.4) (2026-08-31)
+
+
+### Dependencies
+
+* **nuget:** bump `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore` from 10.0.10 to 10.0.11 ([#393](https://github.com/sondresjolyst/garge-api/issues/393)) ([47eb5af](https://github.com/sondresjolyst/garge-api/commit/47eb5afe792f990107fd928b35d5d6741009d5bc))
+* **nuget:** bump `Microsoft.EntityFrameworkCore.InMemory` from 10.0.10 to 10.0.11 ([#395](https://github.com/sondresjolyst/garge-api/issues/395)) ([9a22d7e](https://github.com/sondresjolyst/garge-api/commit/9a22d7ee4b5152b7a6cff20a8204c10bfc8284f4))
+* **nuget:** bump `Microsoft.NET.Test.Sdk` from 18.8.1 to 18.9.0 ([#397](https://github.com/sondresjolyst/garge-api/issues/397)) ([45dee5a](https://github.com/sondresjolyst/garge-api/commit/45dee5a6fd43d9fe6f68db04c087d3fe6f704890))
+* **nuget:** bump `PuppeteerSharp` from 25.5.0 to 25.7.0 ([#398](https://github.com/sondresjolyst/garge-api/issues/398)) ([a11f7b4](https://github.com/sondresjolyst/garge-api/commit/a11f7b479ef24fea7c2c949180ac4a52ed196f2e))
+* **nuget:** bump `PuppeteerSharp` from 25.7.0 to 25.8.0 ([#403](https://github.com/sondresjolyst/garge-api/issues/403)) ([e7685f2](https://github.com/sondresjolyst/garge-api/commit/e7685f2d4faf476bbca50ca15e54c9c53a3d8e5f))
+* **nuget:** Bump Mapster and Mapster.DependencyInjection ([#402](https://github.com/sondresjolyst/garge-api/issues/402)) ([a43cb8a](https://github.com/sondresjolyst/garge-api/commit/a43cb8a3354c0d0b55b9238f043dccc331a11c65))
+* **nuget:** Bump Microsoft.EntityFrameworkCore.Design and Microsoft.EntityFrameworkCore.Tools ([#396](https://github.com/sondresjolyst/garge-api/issues/396)) ([377ed25](https://github.com/sondresjolyst/garge-api/commit/377ed25cd2e86b39dd3fda4c4478892ecd4b18db))
+* **nuget:** migrate to xunit.v3 4.0.0 ([#406](https://github.com/sondresjolyst/garge-api/issues/406)) ([700e234](https://github.com/sondresjolyst/garge-api/commit/700e234e0f2f12497b05fddef181fb8124c7f958))
+
 ## [2.12.3](https://github.com/sondresjolyst/garge-api/compare/v2.12.2...v2.12.3) (2026-08-24)
 
 
