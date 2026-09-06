@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.5](https://github.com/sondresjolyst/garge-api/compare/v2.12.4...v2.12.5) (2026-09-06)
+
+
+### Dependencies
+
+* **nuget:** bump `brevo_csharp` from 1.1.2 to 1.1.3 ([#408](https://github.com/sondresjolyst/garge-api/issues/408)) ([18cec0a](https://github.com/sondresjolyst/garge-api/commit/18cec0a46ac9ef3131e793a0d181f721842e1995))
+
 ## [2.12.4](https://github.com/sondresjolyst/garge-api/compare/v2.12.3...v2.12.4) (2026-08-31)
 
 
