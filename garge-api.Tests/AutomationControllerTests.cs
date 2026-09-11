@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Dtos.Automation;
 using garge_api.Models;
 using garge_api.Models.Automation;
@@ -274,5 +275,47 @@ public class AutomationControllerTests : ControllerTestBase
 
         Assert.IsType<NoContentResult>(result);
         Assert.NotNull(db.AutomationRules.Find(rule.Id)!.LastTriggeredAt);
+    }
+    [Fact]
+    public async Task DeleteRule_ThatEnforcesGargeSecurity_TurnsSecurityOff()
+    {
+        var db = CreateDbContext();
+        SecurityTestData.SeedReady(db);
+        GrantRoles(db, SecurityTestData.Owner, RoleNames.GargeSecurity);
+        var (security, _, _) = SecurityTestData.BuildService(db);
+        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, null, TestContext.Current.CancellationToken);
+        var rule = db.AutomationRules.Single();
+        var controller = CreateAutomationController(db, isAdmin: true, security: security);
+
+        await controller.DeleteRule(rule.Id);
+
+        Assert.False(db.UserSensorSecurities.Single().Enabled);
+        Assert.Equal(SecurityMode.LongSleepSeconds, db.SensorSecurityStates.Single().RequestedSleepSeconds);
+    }
+
+    [Fact]
+    public async Task UpdateRule_FlippedToGreaterThan_TurnsSecurityOff()
+    {
+        var db = CreateDbContext();
+        SecurityTestData.SeedReady(db);
+        GrantRoles(db, SecurityTestData.Owner, RoleNames.GargeSecurity);
+        var (security, _, _) = SecurityTestData.BuildService(db);
+        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, null, TestContext.Current.CancellationToken);
+        var rule = db.AutomationRules.Single();
+        var controller = CreateAutomationController(db, isAdmin: true, security: security);
+
+        await controller.UpdateRule(rule.Id, new UpdateAutomationRuleDto
+        {
+            TargetType = rule.TargetType,
+            TargetId = rule.TargetId,
+            SensorType = rule.SensorType,
+            SensorId = rule.SensorId,
+            Condition = ">",
+            Threshold = rule.Threshold,
+            Action = rule.Action,
+            IsEnabled = true,
+        });
+
+        Assert.False(db.UserSensorSecurities.Single().Enabled);
     }
 }

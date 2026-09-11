@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,9 +12,11 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911160757_AddGargeSecurity")]
+    partial class AddGargeSecurity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -819,63 +822,6 @@ namespace garge_api.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("PairingTokens");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Pipeline.PipelineGap", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime?>("AdminNotifiedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("AllClearSentAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("EndedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<DateTime>("StartedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("EndedAt");
-
-                    b.ToTable("PipelineGaps");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Pipeline.PipelineHeartbeat", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("LastDetectorTickAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("LastHealthyHeartbeatAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("LastHeartbeatAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("MqttConnected")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("PipelineHeartbeats", t =>
-                        {
-                            t.HasCheckConstraint("CK_PipelineHeartbeats_SingleRow", "\"Id\" = 1");
-                        });
                 });
 
             modelBuilder.Entity("garge_api.Models.Push.PushSubscription", b =>

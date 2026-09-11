@@ -23,13 +23,15 @@ namespace garge_api.Controllers
         private readonly IMapper _mapper;
         private readonly ILogger<ElectricityController> _logger;
         private readonly ApplicationDbContext _context;
+        private readonly IPermissionService _permissions;
 
-        public ElectricityController(NordPoolService nordPoolService, IMapper mapper, ILogger<ElectricityController> logger, ApplicationDbContext context)
+        public ElectricityController(NordPoolService nordPoolService, IMapper mapper, ILogger<ElectricityController> logger, ApplicationDbContext context, IPermissionService permissions)
         {
             _nordPoolService = nordPoolService;
             _mapper = mapper;
             _logger = logger;
             _context = context;
+            _permissions = permissions;
         }
 
         /// <summary>
@@ -45,14 +47,11 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("GetPrices called by {@LogData}", new { CallerUserId = User.UserId(), type = LogSanitizer.Sanitize(type), area = LogSanitizer.Sanitize(area), date, currency });
 
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-
-            var hasAccess = User.IsInAnyRole(RoleNames.Admin) ||
-                            userRoles.Any(role => RoleNames.RolePermissions.TryGetValue(role, out var permissions) && permissions.Contains("Electricity", StringComparer.OrdinalIgnoreCase));
-
-            if (!hasAccess)
+            var userId = User.UserId();
+            if (userId == null || !await _permissions.HasPermissionAsync(userId, PermissionNames.Electricity))
             {
-                _logger.LogWarning("Access denied for user {@LogData}", new { CallerUserId = User.UserId(), Roles = string.Join(",", userRoles) });
+                var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value);
+                _logger.LogWarning("Access denied for user {@LogData}", new { CallerUserId = userId, Roles = string.Join(",", userRoles) });
                 return Forbid();
             }
 

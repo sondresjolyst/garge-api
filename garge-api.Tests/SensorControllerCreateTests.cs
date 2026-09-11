@@ -28,7 +28,8 @@ public class SensorControllerCreateTests : ControllerTestBase
         var controller = new SensorController(
             db, MockMapper.Object,
             NullLogger<SensorController>.Instance,
-            ownership, hub.Object, capacity);
+            ownership, hub.Object, capacity,
+            new PermissionService(db), Mock.Of<ISecurityModeService>());
         controller.ControllerContext = MakeControllerContext("admin-1", isAdmin: true);
         return controller;
     }

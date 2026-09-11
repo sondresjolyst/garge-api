@@ -2,6 +2,7 @@
 using garge_api.Dtos.Automation;
 using garge_api.Models;
 using garge_api.Models.Automation;
+using garge_api.Services;
 using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
@@ -21,12 +22,29 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AutomationController> _logger;
         private readonly IMapper _mapper;
+        private readonly ISecurityModeService _security;
 
-        public AutomationController(ApplicationDbContext context, ILogger<AutomationController> logger, IMapper mapper)
+        public AutomationController(ApplicationDbContext context, ILogger<AutomationController> logger, IMapper mapper, ISecurityModeService security)
         {
             _context = context;
             _logger = logger;
             _mapper = mapper;
+            _security = security;
+        }
+
+        private async Task ReconcileSecurityAsync(params int[] sensorIds)
+        {
+            foreach (var sensorId in sensorIds.Distinct())
+            {
+                try
+                {
+                    await _security.ReconcileSensorAsync(sensorId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Garge Security reconcile failed for sensor {SensorId}", sensorId);
+                }
+            }
         }
 
         private async Task<bool> UserHasAccessToAutomationAsync(AutomationRule rule)
@@ -91,6 +109,7 @@ namespace garge_api.Controllers
 
             _context.AutomationRules.Add(rule);
             await _context.SaveChangesAsync();
+            await ReconcileSecurityAsync(rule.SensorId);
 
             return Ok(_mapper.Map<AutomationRuleDto>(rule));
         }
@@ -194,6 +213,7 @@ namespace garge_api.Controllers
             if (!await UserHasAccessToAutomationAsync(tempRule))
                 return Forbid();
 
+            var previousSensorId = rule.SensorId;
             rule.TargetType = dto.TargetType;
             rule.TargetId = dto.TargetId;
             rule.SensorType = dto.SensorType;
@@ -209,6 +229,7 @@ namespace garge_api.Controllers
             rule.TimerDurationHours = dto.TimerDurationHours;
 
             await _context.SaveChangesAsync();
+            await ReconcileSecurityAsync(previousSensorId, rule.SensorId);
 
             return Ok(_mapper.Map<AutomationRuleDto>(rule));
         }
@@ -274,8 +295,10 @@ namespace garge_api.Controllers
             if (!await UserHasAccessToAutomationAsync(rule))
                 return Forbid();
 
+            var sensorId = rule.SensorId;
             _context.AutomationRules.Remove(rule);
             await _context.SaveChangesAsync();
+            await ReconcileSecurityAsync(sensorId);
 
             return NoContent();
         }

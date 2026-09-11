@@ -25,6 +25,7 @@ namespace garge_api.Controllers
         private readonly IMapper _mapper;
         private readonly IEmailService _emailService;
         private readonly Services.IAppSettingsCache? _settingsCache;
+        private readonly Services.ISecurityModeService? _security;
 
         public AdminController(
             RoleManager<IdentityRole> roleManager,
@@ -33,7 +34,8 @@ namespace garge_api.Controllers
             ILogger<AdminController> logger,
             IMapper mapper,
             IEmailService emailService,
-            Services.IAppSettingsCache? settingsCache = null)
+            Services.IAppSettingsCache? settingsCache = null,
+            Services.ISecurityModeService? security = null)
         {
             _roleManager = roleManager;
             _userManager = userManager;
@@ -42,6 +44,7 @@ namespace garge_api.Controllers
             _mapper = mapper;
             _emailService = emailService;
             _settingsCache = settingsCache;
+            _security = security;
         }
 
         /// <summary>
@@ -202,6 +205,17 @@ namespace garge_api.Controllers
             if (result.Succeeded)
             {
                 _logger.LogInformation("Role removed: {@LogData}", new { roleName, TargetUserId = user.Id, CallerUserId = User.UserId() });
+                if (_security != null)
+                {
+                    try
+                    {
+                        await _security.ReconcileUserAsync(user.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Garge Security reconcile failed after role removal for {TargetUserId}", user.Id);
+                    }
+                }
                 return NoContent();
             }
 
