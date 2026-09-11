@@ -4,6 +4,11 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace garge_api.Services
 {
+    public interface IDeviceSettingsPublisher
+    {
+        void EnqueueDeviceSettingsForBridges(DeviceSettingsEventDto data);
+    }
+
     /// <summary>
     /// Buffers hub events per (group, kind, entityId) and drains every
     /// <see cref="DrainInterval"/>. Coalesces by (kind, entityId) so a slow
@@ -15,10 +20,11 @@ namespace garge_api.Services
     /// DrainInterval before being delivered. Acceptable as added latency,
     /// not data loss — no event is dropped, only collapsed.
     /// </summary>
-    public class CoalescingDispatcher : BackgroundService
+    public class CoalescingDispatcher : BackgroundService, IDeviceSettingsPublisher
     {
         public const string SwitchEventName = "switch";
         public const string SensorEventName = "sensor";
+        public const string DeviceSettingsEventName = "deviceSettings";
 
         private static readonly TimeSpan DrainInterval = TimeSpan.FromMilliseconds(100);
 
@@ -42,6 +48,9 @@ namespace garge_api.Services
 
         public void EnqueueSensorForUser(string userId, SensorEventDto data) =>
             Enqueue(DeviceHub.UserGroup(userId), SensorEventName, data.SensorId, data);
+
+        public void EnqueueDeviceSettingsForBridges(DeviceSettingsEventDto data) =>
+            Enqueue(DeviceHub.BridgeGroup, DeviceSettingsEventName, data.SensorId, data);
 
         private void Enqueue(string group, string kind, int entityId, object payload)
         {

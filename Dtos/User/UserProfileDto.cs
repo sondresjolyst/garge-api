@@ -14,6 +14,8 @@ namespace garge_api.Dtos.User
         public bool EmailConfirmed { get; set; }
         public string PriceZone { get; set; } = "NO2";
         public bool PushNotificationsEnabled { get; set; }
+        public bool EmailNotificationsEnabled { get; set; } = true;
         public int OfflineAlertThresholdHours { get; set; } = 4;
+        public IReadOnlyCollection<string> Features { get; set; } = [];
     }
 }

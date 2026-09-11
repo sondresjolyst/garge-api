@@ -33,6 +33,10 @@ namespace garge_api.Models
         public DbSet<RefreshToken> RefreshTokens { get; set; }
         public DbSet<UserSensorCustomName> UserSensorCustomNames { get; set; }
         public DbSet<UserSensorVoltageThreshold> UserSensorVoltageThresholds { get; set; }
+        public DbSet<UserSensorSecurity> UserSensorSecurities { get; set; }
+        public DbSet<SensorSecurityState> SensorSecurityStates { get; set; }
+        public DbSet<Pipeline.PipelineHeartbeat> PipelineHeartbeats { get; set; }
+        public DbSet<Pipeline.PipelineGap> PipelineGaps { get; set; }
         public DbSet<SensorActivity> SensorActivities { get; set; }
         public DbSet<EMQXMqttUser> EMQXMqttUsers { get; set; }
         public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
@@ -133,6 +137,50 @@ namespace garge_api.Models
                 .HasOne(x => x.Sensor)
                 .WithMany()
                 .HasForeignKey(x => x.SensorId);
+
+            modelBuilder.Entity<UserSensorSecurity>()
+                .HasKey(x => new { x.UserId, x.SensorId });
+
+            modelBuilder.Entity<UserSensorSecurity>()
+                .HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserSensorSecurity>()
+                .HasOne(x => x.Sensor)
+                .WithMany()
+                .HasForeignKey(x => x.SensorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<UserSensorSecurity>()
+                .HasIndex(x => new { x.Enabled, x.SensorId });
+
+            modelBuilder.Entity<SensorSecurityState>()
+                .HasKey(x => x.SensorId);
+
+            modelBuilder.Entity<SensorSecurityState>()
+                .Property(x => x.SensorId)
+                .ValueGeneratedNever();
+
+            modelBuilder.Entity<SensorSecurityState>()
+                .HasOne(x => x.Sensor)
+                .WithOne()
+                .HasForeignKey<SensorSecurityState>(x => x.SensorId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<SensorSecurityState>()
+                .HasIndex(x => x.ArmedAt);
+
+            modelBuilder.Entity<Pipeline.PipelineHeartbeat>()
+                .Property(x => x.Id)
+                .ValueGeneratedNever();
+
+            modelBuilder.Entity<Pipeline.PipelineHeartbeat>()
+                .ToTable(t => t.HasCheckConstraint("CK_PipelineHeartbeats_SingleRow", "\"Id\" = 1"));
+
+            modelBuilder.Entity<Pipeline.PipelineGap>()
+                .HasIndex(x => x.EndedAt);
 
             modelBuilder.Entity<SensorActivity>()
                 .HasOne(sa => sa.Sensor)
@@ -300,7 +348,7 @@ namespace garge_api.Models
                 .IsUnique();
 
             modelBuilder.Entity<SensorOfflineNotification>()
-                .HasIndex(n => new { n.UserId, n.SensorId, n.ResolvedAt });
+                .HasIndex(n => new { n.UserId, n.SensorId, n.Kind, n.ResolvedAt });
 
             modelBuilder.Entity<AppSettings>()
                 .Property(s => s.Id)

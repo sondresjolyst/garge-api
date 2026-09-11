@@ -102,6 +102,7 @@ namespace garge_api.Services
                 // Force-unclaim: remove ownership and the owner's personal rows for this sensor.
                 db.UserSensors.RemoveRange(db.UserSensors.Where(us => us.UserId == item.UserId && us.SensorId == item.SensorId));
                 db.UserSensorCustomNames.RemoveRange(db.UserSensorCustomNames.Where(x => x.UserId == item.UserId && x.SensorId == item.SensorId));
+                db.UserSensorSecurities.RemoveRange(db.UserSensorSecurities.Where(x => x.UserId == item.UserId && x.SensorId == item.SensorId));
                 db.SensorActivities.RemoveRange(db.SensorActivities.Where(a => a.UserId == item.UserId && a.SensorId == item.SensorId));
                 db.SensorPhotos.RemoveRange(db.SensorPhotos.Where(p => p.UserId == item.UserId && p.SensorId == item.SensorId));
                 db.SensorOfflineNotifications.RemoveRange(db.SensorOfflineNotifications.Where(n => n.UserId == item.UserId && n.SensorId == item.SensorId));

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using garge_api.Models;
@@ -11,13 +12,15 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260911161453_AddPipelineHealth")]
+    partial class AddPipelineHealth
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -373,9 +376,9 @@ namespace garge_api.Migrations
                             Id = 1,
                             CompanyAddress = "Mårvegen 21a, 4347 Lye",
                             CompanyEmail = "sondresjoelyst@gmail.com",
-                            CompanyLegalName = "Sjølyst Innovation AS",
+                            CompanyLegalName = "Sjølyst Innovations",
                             CompanyName = "Garge",
-                            CompanyOrgNumber = "938 517 789",
+                            CompanyOrgNumber = "934 531 035",
                             CookieBannerEnabled = true,
                             VatEnabled = false,
                             VippsTestMode = false

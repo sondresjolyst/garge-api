@@ -12,5 +12,7 @@ public class UserProfile
 
     public bool PushNotificationsEnabled { get; set; } = false;
 
+    public bool EmailNotificationsEnabled { get; set; } = true;
+
     public int OfflineAlertThresholdHours { get; set; } = 4;
 }
