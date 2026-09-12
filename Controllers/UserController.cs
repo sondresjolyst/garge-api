@@ -280,7 +280,7 @@ namespace garge_api.Controllers
 
             var securitySettings = await _context.UserSensorSecurities
                 .Where(x => x.UserId == id)
-                .ToDictionaryAsync(x => x.SensorId, x => new { x.Enabled, x.ThresholdMinutes, x.EnabledAt, x.CreatedAt });
+                .ToDictionaryAsync(x => x.SensorId, x => new { x.Enabled, x.EnabledAt, x.CreatedAt });
 
             var sensors = await _context.UserSensors
                 .Where(us => us.UserId == id)
@@ -424,7 +424,7 @@ namespace garge_api.Controllers
                         ? new { vt.WarningVoltage, vt.CriticalVoltage }
                         : null,
                     GargeSecurity = securitySettings.TryGetValue(s.Id, out var gs)
-                        ? new { gs.Enabled, gs.ThresholdMinutes, gs.EnabledAt, gs.CreatedAt }
+                        ? new { gs.Enabled, gs.EnabledAt, gs.CreatedAt }
                         : null,
                     Readings = sensorReadings
                         .Where(r => r.SensorId == s.Id)

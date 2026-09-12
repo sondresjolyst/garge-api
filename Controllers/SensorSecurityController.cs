@@ -70,26 +70,26 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Turns Garge Security on or off for a sensor, and sets the alert threshold. Owner only.
+        /// Turns Garge Security on or off for a sensor. Owner only.
         /// Turning it on requires an enabled charging automation on the sensor and at least one alert channel.
         /// </summary>
         [HttpPatch("{sensorId:int}/security")]
         [SwaggerOperation(Summary = "Turns Garge Security on or off for a sensor.")]
         [SwaggerResponse(200, "Security state.", typeof(SensorSecurityDto))]
-        [SwaggerResponse(400, "Invalid threshold or no charging automation.")]
+        [SwaggerResponse(400, "Unsupported sensor or no charging automation.")]
         [SwaggerResponse(403, "Not the sensor owner.")]
         [SwaggerResponse(404, "Not found.")]
         [SwaggerResponse(409, "No alert channel enabled.")]
         public async Task<IActionResult> UpdateSecurity(int sensorId, [FromBody] UpdateSensorSecurityDto dto, CancellationToken ct = default)
         {
             var userId = User.UserId();
-            _logger.LogInformation("UpdateSecurity called by {@LogData}", new { CallerUserId = userId, sensorId, dto.Enabled, dto.ThresholdMinutes });
+            _logger.LogInformation("UpdateSecurity called by {@LogData}", new { CallerUserId = userId, sensorId, dto.Enabled });
 
             var (visible, isOwner) = await ResolveCallerAsync(userId, sensorId, ct);
             if (!visible) return NotFound();
             if (!isOwner) return Forbid();
 
-            var result = await _security.SetAsync(userId!, sensorId, dto.Enabled, dto.ThresholdMinutes, ct);
+            var result = await _security.SetAsync(userId!, sensorId, dto.Enabled, ct);
             switch (result)
             {
                 case SecuritySetResult.UnsupportedSensor:
@@ -97,12 +97,6 @@ namespace garge_api.Controllers
                     {
                         code = SecurityMode.ErrorCodes.UnsupportedSensor,
                         message = "Garge Security is only available on battery voltage sensors."
-                    });
-                case SecuritySetResult.InvalidThreshold:
-                    return BadRequest(new
-                    {
-                        code = SecurityMode.ErrorCodes.InvalidThreshold,
-                        message = $"The alert threshold must be between {SecurityMode.MinThresholdMinutes} and {SecurityMode.MaxThresholdMinutes} minutes."
                     });
                 case SecuritySetResult.ChargingAutomationRequired:
                     return BadRequest(new

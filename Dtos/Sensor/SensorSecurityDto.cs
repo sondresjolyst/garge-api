@@ -4,6 +4,7 @@ namespace garge_api.Dtos.Sensor
     {
         public int SensorId { get; set; }
         public bool Enabled { get; set; }
+        /// <summary>Global alert threshold, set by an admin.</summary>
         public int ThresholdMinutes { get; set; }
         public int RequestedSleepSeconds { get; set; }
         public int? AppliedSleepSeconds { get; set; }

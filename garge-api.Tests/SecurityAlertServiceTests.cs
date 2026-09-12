@@ -19,25 +19,25 @@ public class SecurityAlertServiceTests : ControllerTestBase
 
     private sealed record Harness(ApplicationDbContext Db, SecurityAlertService Sut, SecurityModeService Security, Mock<ISecurityNotifier> Notifier);
 
-    private static Harness Build(ApplicationDbContext db)
+    private static Harness Build(ApplicationDbContext db, int thresholdMinutes = SecurityMode.DefaultThresholdMinutes)
     {
         var (security, _, _) = BuildService(db);
         var notifier = new Mock<ISecurityNotifier>();
-        notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         var sut = new SecurityAlertService(db, new PermissionService(db),
             new PipelineHealthService(db, NullLogger<PipelineHealthService>.Instance),
-            security, notifier.Object, NullLogger<SecurityAlertService>.Instance);
+            security, notifier.Object, SettingsCache(thresholdMinutes), NullLogger<SecurityAlertService>.Instance);
         return new Harness(db, sut, security, notifier);
     }
 
-    private async Task<Harness> ArmedAsync(DateTime armedAt, DateTime? lastReading, int thresholdMinutes = 25)
+    private async Task<Harness> ArmedAsync(DateTime armedAt, DateTime? lastReading, int thresholdMinutes = SecurityMode.DefaultThresholdMinutes)
     {
         var db = CreateDbContext();
         SeedReady(db);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
-        var h = Build(db);
-        await h.Security.SetAsync(Owner, SensorId, true, thresholdMinutes, Ct);
+        var h = Build(db, thresholdMinutes);
+        await h.Security.SetAsync(Owner, SensorId, true, Ct);
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         state.AppliedSleepSeconds = 600;
         state.SecurityModeReported = true;
@@ -49,7 +49,24 @@ public class SecurityAlertServiceTests : ControllerTestBase
     }
 
     private static void VerifyAlert(Harness h, string title, Times times) =>
-        h.Notifier.Verify(n => n.NotifyUserAsync(Owner, title, It.IsAny<string>(), It.IsAny<CancellationToken>()), times);
+        h.Notifier.Verify(n => n.NotifyUserAsync(Owner, title, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), times);
+
+    [Fact]
+    public async Task AlertAndAllClear_ShareATagDistinctFromOfflineAlerts()
+    {
+        var now = DateTime.UtcNow;
+        var h = await ArmedAsync(now.AddHours(-2), now.AddMinutes(-30));
+
+        await h.Sut.RunAsync(now, Tick, false, Ct);
+        h.Db.SensorData.Add(new SensorData { SensorId = SensorId, Value = "12.7", Timestamp = now.AddMinutes(1) });
+        await h.Db.SaveChangesAsync(Ct);
+        await h.Sut.RunAsync(now.AddMinutes(2), Tick, false, Ct);
+
+        var tag = $"garge-security-{SensorId}";
+        h.Notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security alert", It.IsAny<string>(), tag, It.IsAny<CancellationToken>()), Times.Once);
+        h.Notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security: Sensor back online", It.IsAny<string>(), tag, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.NotEqual($"garge-offline-{SensorId}", tag);
+    }
 
     [Fact]
     public async Task QuietForThirtyMinutes_AlertsOnceAndLatches()
@@ -64,6 +81,18 @@ public class SecurityAlertServiceTests : ControllerTestBase
         var latch = await h.Db.SensorOfflineNotifications.SingleAsync(Ct);
         Assert.Equal(NotificationKinds.Security, latch.Kind);
         Assert.Null(latch.ResolvedAt);
+    }
+
+    [Fact]
+    public async Task StillQuietManyTicksLater_DoesNotAlertAgain()
+    {
+        var now = DateTime.UtcNow;
+        var h = await ArmedAsync(now.AddHours(-2), now.AddMinutes(-30));
+
+        for (var i = 0; i < 12; i++)
+            await h.Sut.RunAsync(now.AddMinutes(2 * i), Tick, i % 5 == 0, Ct);
+
+        VerifyAlert(h, "Garge Security alert", Times.Once());
     }
 
     [Fact]
@@ -100,7 +129,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task CustomThreshold_IsRespected()
+    public async Task AdminRaisedThreshold_DelaysTheAlert()
     {
         var now = DateTime.UtcNow;
         var h = await ArmedAsync(now.AddHours(-2), now.AddMinutes(-30), thresholdMinutes: 45);
@@ -163,7 +192,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
         await h.Sut.RunAsync(now, Tick, false, Ct);
 
         Assert.NotNull((await h.Db.SensorOfflineNotifications.SingleAsync(Ct)).ResolvedAt);
-        VerifyAlert(h, "Garge Security all clear", Times.Once());
+        VerifyAlert(h, "Garge Security: Sensor back online", Times.Once());
     }
 
     [Fact]
@@ -181,7 +210,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
         await h.Sut.RunAsync(now, Tick, false, Ct);
 
         Assert.Null((await h.Db.SensorOfflineNotifications.SingleAsync(Ct)).ResolvedAt);
-        VerifyAlert(h, "Garge Security all clear", Times.Never());
+        VerifyAlert(h, "Garge Security: Sensor back online", Times.Never());
     }
 
     [Fact]
@@ -193,7 +222,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
         AddChargingRule(h.Db, sensorId: 2);
         h.Db.UserSensors.Add(new UserSensor { UserId = Owner, SensorId = 2, IsOwner = true });
         await h.Db.SaveChangesAsync(Ct);
-        await h.Security.SetAsync(Owner, 2, true, null, Ct);
+        await h.Security.SetAsync(Owner, 2, true, Ct);
         var second = await h.Db.SensorSecurityStates.SingleAsync(s => s.SensorId == 2, Ct);
         second.ArmedAt = now.AddHours(-2);
         h.Db.SensorData.Add(new SensorData { SensorId = 2, Value = "12.6", Timestamp = now.AddMinutes(-40) });
@@ -210,7 +239,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
     {
         var now = DateTime.UtcNow;
         var h = await ArmedAsync(now.AddHours(-2), now.AddMinutes(-30));
-        h.Notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        h.Notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         await h.Sut.RunAsync(now, Tick, false, Ct);
@@ -251,12 +280,12 @@ public class SecurityAlertServiceTests : ControllerTestBase
         await h.Sut.RunAsync(now.AddMinutes(120), Tick, false, Ct);
 
         VerifyAlert(h, "Garge Security alert", Times.Never());
-        h.Notifier.Verify(n => n.NotifyUserAsync("admin-1", "Garge pipeline outage", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        h.Notifier.Verify(n => n.NotifyUserAsync("admin-1", "Garge pipeline outage", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
 
         await pipeline.RecordHeartbeatAsync(true, now.AddMinutes(121), Ct);
         await h.Sut.RunAsync(now.AddMinutes(122), Tick, false, Ct);
 
-        h.Notifier.Verify(n => n.NotifyUserAsync("admin-1", "Garge pipeline restored", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        h.Notifier.Verify(n => n.NotifyUserAsync("admin-1", "Garge pipeline restored", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -327,7 +356,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
         await h.Sut.RunAsync(now, Tick, false, Ct);
 
         Assert.NotNull((await h.Db.SensorOfflineNotifications.SingleAsync(Ct)).ResolvedAt);
-        VerifyAlert(h, "Garge Security all clear", Times.Once());
+        VerifyAlert(h, "Garge Security: Sensor back online", Times.Once());
     }
 
     [Fact]

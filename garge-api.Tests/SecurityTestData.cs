@@ -1,6 +1,7 @@
 using garge_api.Constants;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Admin;
 using garge_api.Models.Automation;
 using garge_api.Models.Sensor;
 using garge_api.Models.Switch;
@@ -76,11 +77,20 @@ internal static class SecurityTestData
     {
         var publisher = new Mock<IDeviceSettingsPublisher>();
         var notifier = new Mock<ISecurityNotifier>();
-        notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         var service = new SecurityModeService(db, new PermissionService(db), publisher.Object, notifier.Object,
-            NullLogger<SecurityModeService>.Instance);
+            SettingsCache(), NullLogger<SecurityModeService>.Instance);
         return (service, publisher, notifier);
+    }
+
+    /// <summary>App settings with the given Garge Security alert threshold.</summary>
+    public static IAppSettingsCache SettingsCache(int thresholdMinutes = SecurityMode.DefaultThresholdMinutes)
+    {
+        var cache = new Mock<IAppSettingsCache>();
+        cache.Setup(c => c.GetAsync())
+            .ReturnsAsync(new AppSettings { Id = 1, SecurityAlertThresholdMinutes = thresholdMinutes });
+        return cache.Object;
     }
 
     public static void VerifyPublished(Mock<IDeviceSettingsPublisher> publisher, int sleepSeconds, bool security, int? floorMillivolts, Times times) =>

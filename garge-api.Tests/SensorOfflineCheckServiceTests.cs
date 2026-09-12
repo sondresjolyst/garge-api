@@ -22,7 +22,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
     private static (TestableService service, Mock<IWebPushService> push) BuildService(ApplicationDbContext db)
     {
         var push = new Mock<IWebPushService>();
-        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         var sp = new Mock<IServiceProvider>();
@@ -61,7 +61,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Single(db.SensorOfflineNotifications);
         Assert.Null(db.SensorOfflineNotifications.First().ResolvedAt);
     }
@@ -83,7 +83,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         var resolved = await db.SensorOfflineNotifications.FindAsync([notification.Id], TestContext.Current.CancellationToken);
         Assert.NotNull(resolved!.ResolvedAt);
     }
@@ -123,7 +123,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -139,7 +139,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);
     }
 
@@ -156,7 +156,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);
     }
     [Fact]
@@ -175,7 +175,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Single(db.SensorOfflineNotifications);
     }
 

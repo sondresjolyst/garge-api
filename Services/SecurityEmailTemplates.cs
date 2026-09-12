@@ -18,7 +18,7 @@ namespace garge_api.Services
             return EmailLayout.Render(s, new EmailLayout.Meta
             {
                 Number = "ALERT",
-                Subtitle = $"GARGE SECURITY  ·  {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC"
+                Subtitle = $"GARGE SECURITY  ·  {LocalTime.Format(DateTime.UtcNow)}"
             }, body);
         }
 

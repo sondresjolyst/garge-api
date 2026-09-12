@@ -283,7 +283,7 @@ public class AutomationControllerTests : ControllerTestBase
         SecurityTestData.SeedReady(db);
         GrantRoles(db, SecurityTestData.Owner, RoleNames.GargeSecurity);
         var (security, _, _) = SecurityTestData.BuildService(db);
-        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, null, TestContext.Current.CancellationToken);
+        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, TestContext.Current.CancellationToken);
         var rule = db.AutomationRules.Single();
         var controller = CreateAutomationController(db, isAdmin: true, security: security);
 
@@ -300,7 +300,7 @@ public class AutomationControllerTests : ControllerTestBase
         SecurityTestData.SeedReady(db);
         GrantRoles(db, SecurityTestData.Owner, RoleNames.GargeSecurity);
         var (security, _, _) = SecurityTestData.BuildService(db);
-        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, null, TestContext.Current.CancellationToken);
+        await security.SetAsync(SecurityTestData.Owner, SecurityTestData.SensorId, true, TestContext.Current.CancellationToken);
         var rule = db.AutomationRules.Single();
         var controller = CreateAutomationController(db, isAdmin: true, security: security);
 

@@ -98,6 +98,7 @@ namespace garge_api.Services
                                 user.Id,
                                 "Sensor offline",
                                 $"{name} has not reported in over {user.OfflineAlertThresholdHours}h.",
+                                $"garge-offline-{sensorId}",
                                 ct);
                         }
                         catch (Exception ex)

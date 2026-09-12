@@ -52,6 +52,44 @@ public class AdminControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task GetSecuritySettings_NoRowInDb_ReturnsDefaultThreshold()
+    {
+        var db = CreateDbContext();
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateAdminController(db).GetSecuritySettings());
+        var dto = Assert.IsType<SecuritySettingsDto>(ok.Value);
+
+        Assert.Equal(garge_api.Constants.SecurityMode.DefaultThresholdMinutes, dto.AlertThresholdMinutes);
+        Assert.Equal(garge_api.Constants.SecurityMode.MinThresholdMinutes, dto.MinAlertThresholdMinutes);
+        Assert.Equal(garge_api.Constants.SecurityMode.MaxThresholdMinutes, dto.MaxAlertThresholdMinutes);
+    }
+
+    [Fact]
+    public async Task UpdateSecuritySettings_PersistsThreshold()
+    {
+        var db = CreateDbContext();
+
+        var ok = Assert.IsType<OkObjectResult>(
+            await CreateAdminController(db).UpdateSecuritySettings(new UpdateSecuritySettingsDto { AlertThresholdMinutes = 45 }));
+
+        Assert.Equal(45, Assert.IsType<SecuritySettingsDto>(ok.Value).AlertThresholdMinutes);
+        Assert.Equal(45, (await db.AppSettings.FindAsync(1))!.SecurityAlertThresholdMinutes);
+    }
+
+    [Theory]
+    [InlineData(24)]
+    [InlineData(181)]
+    public async Task UpdateSecuritySettings_OutOfRange_Returns400(int minutes)
+    {
+        var db = CreateDbContext();
+
+        var result = await CreateAdminController(db).UpdateSecuritySettings(new UpdateSecuritySettingsDto { AlertThresholdMinutes = minutes });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(db.AppSettings);
+    }
+
+    [Fact]
     public async Task GetAppSettings_NoRowInDb_ReturnsDefaults()
     {
         var db = CreateDbContext();

@@ -18,7 +18,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         SeedReady(db);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, publisher, notifier) = BuildService(db);
-        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, null, Ct));
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, Ct));
         return (service, publisher, notifier);
     }
 
@@ -93,7 +93,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, publisher, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.ChargingAutomationRequired, await service.SetAsync(Owner, SensorId, true, null, Ct));
+        Assert.Equal(SecuritySetResult.ChargingAutomationRequired, await service.SetAsync(Owner, SensorId, true, Ct));
         Assert.Empty(db.UserSensorSecurities);
         publisher.VerifyNoOtherCalls();
     }
@@ -110,20 +110,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.NoAlertChannel, await service.SetAsync(Owner, SensorId, true, null, Ct));
-    }
-
-    [Theory]
-    [InlineData(24)]
-    [InlineData(181)]
-    public async Task Enable_WithThresholdOutOfRange_IsRejected(int minutes)
-    {
-        var db = CreateDbContext();
-        SeedReady(db);
-        GrantRoles(db, Owner, RoleNames.GargeSecurity);
-        var (service, _, _) = BuildService(db);
-
-        Assert.Equal(SecuritySetResult.InvalidThreshold, await service.SetAsync(Owner, SensorId, true, minutes, Ct));
+        Assert.Equal(SecuritySetResult.NoAlertChannel, await service.SetAsync(Owner, SensorId, true, Ct));
     }
 
     [Fact]
@@ -133,7 +120,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         SeedReady(db);
         var (service, publisher, _) = BuildService(db);
 
-        await service.SetAsync(Owner, SensorId, true, null, Ct);
+        await service.SetAsync(Owner, SensorId, true, Ct);
 
         Assert.Empty(db.SensorSecurityStates);
         publisher.VerifyNoOtherCalls();
@@ -149,7 +136,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         db.SensorOfflineNotifications.Add(new SensorOfflineNotification { UserId = Owner, SensorId = SensorId, Kind = NotificationKinds.Security });
         await db.SaveChangesAsync(Ct);
 
-        await service.SetAsync(Owner, SensorId, false, null, Ct);
+        await service.SetAsync(Owner, SensorId, false, Ct);
 
         Assert.Equal(SecurityMode.LongSleepSeconds, state.RequestedSleepSeconds);
         Assert.Null(state.ArmedAt);
@@ -169,7 +156,7 @@ public class SecurityModeServiceTests : ControllerTestBase
 
         Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
         VerifyPublished(publisher, 3600, false, null, Times.Once());
-        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -227,7 +214,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
         Assert.Equal(SecurityMode.LongSleepSeconds, (await db.SensorSecurityStates.SingleAsync(Ct)).RequestedSleepSeconds);
         VerifyPublished(publisher, 3600, false, null, Times.Once());
-        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -273,7 +260,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         Assert.Null(state.ArmedAt);
         Assert.Equal((SecurityMode.States.PausedLowBattery, SecurityMode.Reasons.LowBattery), SecurityModeService.ComputeState(true, state, null));
-        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security paused", It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security paused", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -285,7 +272,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
-        await service.SetAsync(Owner, SensorId, true, null, Ct);
+        await service.SetAsync(Owner, SensorId, true, Ct);
 
         await service.ApplyAckAsync((await db.Sensors.FindAsync([SensorId], Ct))!.Name, 600, true, null, Ct);
 
@@ -324,7 +311,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
-        await service.SetAsync(Owner, SensorId, true, null, Ct);
+        await service.SetAsync(Owner, SensorId, true, Ct);
 
         var settings = await service.GetDeviceSettingsAsync(Ct);
 
@@ -377,7 +364,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, publisher, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.UnsupportedSensor, await service.SetAsync(Owner, SensorId, true, null, Ct));
+        Assert.Equal(SecuritySetResult.UnsupportedSensor, await service.SetAsync(Owner, SensorId, true, Ct));
         Assert.Null(await service.FindChargingRuleAsync(SensorId, Ct));
         publisher.VerifyNoOtherCalls();
     }
@@ -394,6 +381,6 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.NoAlertChannel, await service.SetAsync(Owner, SensorId, true, null, Ct));
+        Assert.Equal(SecuritySetResult.NoAlertChannel, await service.SetAsync(Owner, SensorId, true, Ct));
     }
 }
