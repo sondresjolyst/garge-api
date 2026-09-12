@@ -34,6 +34,7 @@ namespace garge_api.Controllers
         private readonly IHubConnectionTracker _hubConnections;
         private readonly IHubContext<DeviceHub> _hub;
         private readonly IAnonymizationService _anonymizer;
+        private readonly IPermissionService _permissions;
 
         public UserController(
             ApplicationDbContext context,
@@ -43,7 +44,8 @@ namespace garge_api.Controllers
             IDeviceOwnershipService ownership,
             IHubConnectionTracker hubConnections,
             IHubContext<DeviceHub> hub,
-            IAnonymizationService anonymizer)
+            IAnonymizationService anonymizer,
+            IPermissionService permissions)
         {
             _context = context;
             _userManager = userManager;
@@ -53,6 +55,7 @@ namespace garge_api.Controllers
             _hubConnections = hubConnections;
             _hub = hub;
             _anonymizer = anonymizer;
+            _permissions = permissions;
         }
 
         /// <summary>
@@ -95,6 +98,8 @@ namespace garge_api.Controllers
             var profileResponse = _mapper.Map<UserProfileDto>(userProfile);
             profileResponse.EmailConfirmed = user.EmailConfirmed;
             profileResponse.PriceZone = userProfile.PriceZone;
+            profileResponse.EmailNotificationsEnabled = userProfile.EmailNotificationsEnabled;
+            profileResponse.Features = await _permissions.GetPermissionsAsync(id);
 
             _logger.LogInformation("User profile returned for {@LogData}", new { id });
             return Ok(profileResponse);
@@ -159,6 +164,7 @@ namespace garge_api.Controllers
             _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
             _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
             _context.UserSensorVoltageThresholds.RemoveRange(_context.UserSensorVoltageThresholds.Where(x => x.UserId == userId));
+            _context.UserSensorSecurities.RemoveRange(_context.UserSensorSecurities.Where(x => x.UserId == userId));
             _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
             _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId));
@@ -272,6 +278,10 @@ namespace garge_api.Controllers
                 .Where(x => x.UserId == id)
                 .ToDictionaryAsync(x => x.SensorId, x => new { x.WarningVoltage, x.CriticalVoltage });
 
+            var securitySettings = await _context.UserSensorSecurities
+                .Where(x => x.UserId == id)
+                .ToDictionaryAsync(x => x.SensorId, x => new { x.Enabled, x.EnabledAt, x.CreatedAt });
+
             var sensors = await _context.UserSensors
                 .Where(us => us.UserId == id)
                 .Join(_context.Sensors, us => us.SensorId, s => s.Id,
@@ -382,7 +392,7 @@ namespace garge_api.Controllers
             var offlineNotifications = await _context.SensorOfflineNotifications
                 .Where(n => n.UserId == id)
                 .OrderBy(n => n.NotifiedAt)
-                .Select(n => new { n.SensorId, n.NotifiedAt, n.ResolvedAt })
+                .Select(n => new { n.SensorId, n.Kind, n.NotifiedAt, n.ResolvedAt })
                 .ToListAsync();
 
             var export = new
@@ -401,6 +411,7 @@ namespace garge_api.Controllers
                     TermsAcceptedIp = user?.TermsAcceptedIp,
                     profile.PriceZone,
                     profile.PushNotificationsEnabled,
+                    profile.EmailNotificationsEnabled,
                     profile.OfflineAlertThresholdHours
                 },
                 Sensors = sensors.Select(s => new
@@ -411,6 +422,9 @@ namespace garge_api.Controllers
                     CustomName = sensorCustomNames.TryGetValue(s.Id, out var cn) ? cn : null,
                     VoltageThresholds = voltageThresholds.TryGetValue(s.Id, out var vt)
                         ? new { vt.WarningVoltage, vt.CriticalVoltage }
+                        : null,
+                    GargeSecurity = securitySettings.TryGetValue(s.Id, out var gs)
+                        ? new { gs.Enabled, gs.EnabledAt, gs.CreatedAt }
                         : null,
                     Readings = sensorReadings
                         .Where(r => r.SensorId == s.Id)
@@ -514,6 +528,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Preferences updated.", typeof(UserProfileDto))]
         [SwaggerResponse(403, "Forbidden.")]
         [SwaggerResponse(404, "User profile not found.")]
+        [SwaggerResponse(409, "Garge Security is on and would be left without an alert channel.")]
         public async Task<IActionResult> UpdatePreferences(string id, [FromBody] UpdateUserPreferencesDto dto)
         {
             if (!User.IsCallerOf(id)) return Forbid();
@@ -522,9 +537,23 @@ namespace garge_api.Controllers
             if (userProfile == null)
                 return NotFound(new { message = "User profile not found!" });
 
+            var pushAfter = dto.PushNotificationsEnabled ?? userProfile.PushNotificationsEnabled;
+            var emailAfter = dto.EmailNotificationsEnabled ?? userProfile.EmailNotificationsEnabled;
+            if (!await SecurityNotifier.HasAlertChannelAsync(_context, id, pushAfter, emailAfter)
+                && await _context.UserSensorSecurities.AnyAsync(x => x.UserId == id && x.Enabled))
+            {
+                return Conflict(new
+                {
+                    code = SecurityMode.ErrorCodes.SecurityNeedsAlertChannel,
+                    message = "Garge Security is on for one of your sensors and needs push or email notifications. Turn Garge Security off first."
+                });
+            }
+
             userProfile.PriceZone = dto.PriceZone;
             if (dto.PushNotificationsEnabled.HasValue)
                 userProfile.PushNotificationsEnabled = dto.PushNotificationsEnabled.Value;
+            if (dto.EmailNotificationsEnabled.HasValue)
+                userProfile.EmailNotificationsEnabled = dto.EmailNotificationsEnabled.Value;
             if (dto.OfflineAlertThresholdHours.HasValue)
                 userProfile.OfflineAlertThresholdHours = dto.OfflineAlertThresholdHours.Value;
             await _context.SaveChangesAsync();
@@ -533,6 +562,8 @@ namespace garge_api.Controllers
             var response = _mapper.Map<UserProfileDto>(userProfile);
             response.EmailConfirmed = user?.EmailConfirmed ?? false;
             response.PriceZone = userProfile.PriceZone;
+            response.EmailNotificationsEnabled = userProfile.EmailNotificationsEnabled;
+            response.Features = await _permissions.GetPermissionsAsync(id);
 
             return Ok(response);
         }

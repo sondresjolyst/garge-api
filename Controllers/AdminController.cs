@@ -25,6 +25,7 @@ namespace garge_api.Controllers
         private readonly IMapper _mapper;
         private readonly IEmailService _emailService;
         private readonly Services.IAppSettingsCache? _settingsCache;
+        private readonly Services.ISecurityModeService? _security;
 
         public AdminController(
             RoleManager<IdentityRole> roleManager,
@@ -33,7 +34,8 @@ namespace garge_api.Controllers
             ILogger<AdminController> logger,
             IMapper mapper,
             IEmailService emailService,
-            Services.IAppSettingsCache? settingsCache = null)
+            Services.IAppSettingsCache? settingsCache = null,
+            Services.ISecurityModeService? security = null)
         {
             _roleManager = roleManager;
             _userManager = userManager;
@@ -42,6 +44,7 @@ namespace garge_api.Controllers
             _mapper = mapper;
             _emailService = emailService;
             _settingsCache = settingsCache;
+            _security = security;
         }
 
         /// <summary>
@@ -202,6 +205,17 @@ namespace garge_api.Controllers
             if (result.Succeeded)
             {
                 _logger.LogInformation("Role removed: {@LogData}", new { roleName, TargetUserId = user.Id, CallerUserId = User.UserId() });
+                if (_security != null)
+                {
+                    try
+                    {
+                        await _security.ReconcileUserAsync(user.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Garge Security reconcile failed after role removal for {TargetUserId}", user.Id);
+                    }
+                }
                 return NoContent();
             }
 
@@ -440,6 +454,53 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.UserId() });
             return Ok(new { message = "Permission assigned successfully!" });
+        }
+
+        /// <summary>
+        /// Gets the Garge Security alert threshold. Admin only, deliberately off the public settings payload.
+        /// </summary>
+        [HttpGet("/api/admin/security-settings")]
+        [SwaggerOperation(Summary = "Gets Garge Security settings.")]
+        [SwaggerResponse(200, "Settings retrieved.", typeof(SecuritySettingsDto))]
+        public async Task<IActionResult> GetSecuritySettings()
+        {
+            var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
+            return Ok(new SecuritySettingsDto { AlertThresholdMinutes = settings.SecurityAlertThresholdMinutes });
+        }
+
+        /// <summary>
+        /// Updates the Garge Security alert threshold. Applies to every armed sensor on the next detector pass.
+        /// </summary>
+        [HttpPut("/api/admin/security-settings")]
+        [SwaggerOperation(Summary = "Updates Garge Security settings.")]
+        [SwaggerResponse(200, "Settings updated.", typeof(SecuritySettingsDto))]
+        [SwaggerResponse(400, "Threshold out of range.")]
+        public async Task<IActionResult> UpdateSecuritySettings([FromBody] UpdateSecuritySettingsDto dto)
+        {
+            _logger.LogInformation("UpdateSecuritySettings called by {@LogData}", new { CallerUserId = User.UserId(), dto.AlertThresholdMinutes });
+
+            if (dto.AlertThresholdMinutes < Constants.SecurityMode.MinThresholdMinutes
+                || dto.AlertThresholdMinutes > Constants.SecurityMode.MaxThresholdMinutes)
+            {
+                return BadRequest(new
+                {
+                    code = Constants.SecurityMode.ErrorCodes.InvalidThreshold,
+                    message = $"The alert threshold must be between {Constants.SecurityMode.MinThresholdMinutes} and {Constants.SecurityMode.MaxThresholdMinutes} minutes."
+                });
+            }
+
+            var settings = await _context.AppSettings.FindAsync(1);
+            if (settings == null)
+            {
+                settings = new AppSettings { Id = 1 };
+                _context.AppSettings.Add(settings);
+            }
+
+            settings.SecurityAlertThresholdMinutes = dto.AlertThresholdMinutes;
+            await _context.SaveChangesAsync();
+            _settingsCache?.Invalidate();
+
+            return Ok(new SecuritySettingsDto { AlertThresholdMinutes = settings.SecurityAlertThresholdMinutes });
         }
 
         /// <summary>

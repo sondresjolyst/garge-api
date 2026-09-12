@@ -1,16 +1,16 @@
 # garge-api
 
-ASP.NET Core 8 Web API backend for the Garge smart garage system. Handles all business logic, database access, authentication, and external integrations (MQTT, webhooks, electricity prices).
+ASP.NET Core Web API backend for the Garge smart garage system. Handles all business logic, database access, authentication, and external integrations (MQTT, webhooks, electricity prices).
 
 ## Tech Stack
 
 | Concern | Library |
 |---|---|
-| Framework | ASP.NET Core 8 Web API |
-| Language | C# 12 (nullable reference types, implicit usings) |
-| Database | PostgreSQL via Entity Framework Core 9 (Npgsql) |
+| Framework | ASP.NET Core Web API (target framework in `garge-api.csproj`) |
+| Language | C# (nullable reference types, implicit usings) |
+| Database | PostgreSQL via Entity Framework Core (Npgsql) |
 | Auth | JWT Bearer + ASP.NET Identity |
-| Mapping | AutoMapper v12 |
+| Mapping | Mapster |
 | Logging | Serilog |
 | Email | SendGrid / Brevo |
 | Rate Limiting | AspNetCoreRateLimit |
@@ -25,7 +25,7 @@ Models/
 ├── <Domain>/         # EF Core entities, organized by domain subdirectory
 └── ApplicationDbContext.cs
 Dtos/                 # Request and response DTO classes
-Profiles/             # AutoMapper mapping profiles
+Profiles/             # Mapster configuration (MappingProfile.cs)
 Services/             # Business logic and background hosted services
 Constants/            # Shared constant values
 Migrations/           # EF Core migrations (auto-generated, committed to repo)
@@ -40,8 +40,7 @@ Migrations/           # EF Core migrations (auto-generated, committed to repo)
 
 ### DTOs and Mapping
 - Define all DTOs in `Dtos/`. Use separate request and response DTOs when their shapes differ.
-- All entity ↔ DTO conversion happens in AutoMapper profiles in `Profiles/`. Do not map manually in controllers or services.
-- Name profiles `<Domain>Profile.cs` (e.g., `SensorProfile.cs`).
+- Entity ↔ DTO mappings are registered with Mapster in the single `Profiles/MappingProfile.cs` (`IRegister`, `config.NewConfig<TSource, TDest>()`). Add new mappings there; do not create per-domain profile files.
 
 ### Database Access
 - All DB access goes through `ApplicationDbContext` injected via DI. No raw ADO.NET or Dapper.
@@ -69,12 +68,11 @@ Migrations/           # EF Core migrations (auto-generated, committed to repo)
 | Entities | Singular PascalCase | `AutomationRule.cs` |
 | DTOs | `<Action><Domain>Dto.cs` | `CreateSensorDto.cs`, `SensorResponseDto.cs` |
 | Services | `<Domain>Service.cs` | `ElectricityPriceFetchService.cs` |
-| AutoMapper profiles | `<Domain>Profile.cs` | `SensorProfile.cs` |
 
 ## What to Avoid
 - Do not return EF entities from controllers — always use DTOs.
 - Do not put business logic in controllers.
-- Do not bypass AutoMapper with manual mapping in multiple places — keep mapping centralized in profiles.
+- Do not scatter mapping code — keep mappings centralized in `Profiles/MappingProfile.cs`.
 - Do not use `Console.WriteLine` — use Serilog.
 - Do not store secrets in `appsettings.json` — use environment variables in production and User Secrets in development.
 - Do not disable nullable reference type warnings — handle nulls explicitly.

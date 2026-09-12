@@ -69,7 +69,7 @@ public class ShopControllerTests : ControllerTestBase
         AppSettings? settings = null)
     {
         var push = new Mock<IWebPushService>();
-        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         var ctrl = new ShopController(

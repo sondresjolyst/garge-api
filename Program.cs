@@ -95,6 +95,7 @@ namespace garge_api
             builder.Services.AddSingleton<IDeviceOwnershipService, DeviceOwnershipService>();
             builder.Services.AddSingleton<CoalescingDispatcher>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
+            builder.Services.AddSingleton<IDeviceSettingsPublisher>(sp => sp.GetRequiredService<CoalescingDispatcher>());
             builder.Services.AddSingleton<BatteryHealthAnalyzerService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<BatteryHealthAnalyzerService>());
             builder.Services.AddHostedService<PostgresNotificationService>();
@@ -184,6 +185,11 @@ namespace garge_api
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
+            builder.Services.AddScoped<IPermissionService, PermissionService>();
+            builder.Services.AddScoped<ISecurityNotifier, SecurityNotifier>();
+            builder.Services.AddScoped<ISecurityModeService, SecurityModeService>();
+            builder.Services.AddScoped<IPipelineHealthService, PipelineHealthService>();
+            builder.Services.AddScoped<ISecurityAlertService, SecurityAlertService>();
             builder.Services.AddHostedService<QuotaReconciliationService>();
             builder.Services.AddHostedService<SuspendedSensorPurgeService>();
             builder.Services.AddHostedService<StatsSnapshotService>();

@@ -40,7 +40,8 @@ public class SensorOwnershipWindowTests : ControllerTestBase
         var capacity = new SubscriptionCapacityService(db, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
 
         var controller = new SensorController(
-            db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object, capacity);
+            db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object, capacity,
+            new PermissionService(db), Mock.Of<ISecurityModeService>());
         controller.ControllerContext = MakeControllerContext(userId, isAdmin);
         return controller;
     }

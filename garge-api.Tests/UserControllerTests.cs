@@ -36,7 +36,7 @@ public class UserControllerTests : ControllerTestBase
         var controller = new UserController(
             db, MockUserManager.Object, MockMapper.Object,
             NullLogger<UserController>.Instance,
-            ownership, tracker.Object, hub.Object, anonymizer);
+            ownership, tracker.Object, hub.Object, anonymizer, new PermissionService(db));
         controller.ControllerContext = MakeControllerContext(callerId);
         return controller;
     }
@@ -296,5 +296,39 @@ public class UserControllerTests : ControllerTestBase
         var result = await CreateUserController(db, callerId: "user-1")
             .UpdateDataRetention("user-2", new UpdateDataRetentionDto { OptOut = true });
         Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_TurningOffLastAlertChannelWhileSecurityIsOn_Returns409()
+    {
+        var db = CreateDbContext();
+        var user = MakeDbUser();
+        db.Users.Add(user);
+        db.UserProfiles.Add(new UserProfile { Id = user.Id, User = user, PushNotificationsEnabled = false, EmailNotificationsEnabled = true });
+        db.UserSensorSecurities.Add(new UserSensorSecurity { UserId = user.Id, SensorId = 1, Enabled = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await CreateUserController(db).UpdatePreferences(user.Id,
+            new UpdateUserPreferencesDto { PriceZone = "NO2", EmailNotificationsEnabled = false });
+
+        Assert.IsType<ConflictObjectResult>(result);
+        Assert.True(db.UserProfiles.Single().EmailNotificationsEnabled);
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_TurningOffBothChannelsWithoutSecurity_IsAllowed()
+    {
+        var db = CreateDbContext();
+        var user = MakeDbUser();
+        db.Users.Add(user);
+        db.UserProfiles.Add(new UserProfile { Id = user.Id, User = user, PushNotificationsEnabled = false, EmailNotificationsEnabled = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        MockMapper.Setup(m => m.Map<UserProfileDto>(It.IsAny<object>())).Returns(new UserProfileDto { Id = user.Id });
+
+        var result = await CreateUserController(db).UpdatePreferences(user.Id,
+            new UpdateUserPreferencesDto { PriceZone = "NO2", EmailNotificationsEnabled = false });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.False(db.UserProfiles.Single().EmailNotificationsEnabled);
     }
 }

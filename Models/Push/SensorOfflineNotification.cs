@@ -11,6 +11,9 @@ namespace garge_api.Models.Push
 
         public int SensorId { get; set; }
 
+        [MaxLength(16)]
+        public string Kind { get; set; } = Constants.NotificationKinds.Offline;
+
         public DateTime NotifiedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime? ResolvedAt { get; set; }

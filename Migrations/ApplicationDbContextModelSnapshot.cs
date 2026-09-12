@@ -17,7 +17,7 @@ namespace garge_api.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.10")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -290,6 +290,9 @@ namespace garge_api.Migrations
                     b.Property<string>("Id")
                         .HasColumnType("text");
 
+                    b.Property<bool>("EmailNotificationsEnabled")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("OfflineAlertThresholdHours")
                         .HasColumnType("integer");
 
@@ -339,6 +342,9 @@ namespace garge_api.Migrations
                     b.Property<bool>("CookieBannerEnabled")
                         .HasColumnType("boolean");
 
+                    b.Property<int>("SecurityAlertThresholdMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<bool>("VatEnabled")
                         .HasColumnType("boolean");
 
@@ -374,6 +380,7 @@ namespace garge_api.Migrations
                             CompanyName = "Garge",
                             CompanyOrgNumber = "934 531 035",
                             CookieBannerEnabled = true,
+                            SecurityAlertThresholdMinutes = 25,
                             VatEnabled = false,
                             VippsTestMode = false
                         });
@@ -818,6 +825,63 @@ namespace garge_api.Migrations
                     b.ToTable("PairingTokens");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Pipeline.PipelineGap", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AdminNotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("AllClearSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EndedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EndedAt");
+
+                    b.ToTable("PipelineGaps");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Pipeline.PipelineHeartbeat", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastDetectorTickAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastHealthyHeartbeatAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastHeartbeatAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("MqttConnected")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PipelineHeartbeats", t =>
+                        {
+                            t.HasCheckConstraint("CK_PipelineHeartbeats_SingleRow", "\"Id\" = 1");
+                        });
+                });
+
             modelBuilder.Entity("garge_api.Models.Push.PushSubscription", b =>
                 {
                     b.Property<int>("Id")
@@ -864,6 +928,11 @@ namespace garge_api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<DateTime>("NotifiedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -879,7 +948,7 @@ namespace garge_api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "SensorId", "ResolvedAt");
+                    b.HasIndex("UserId", "SensorId", "Kind", "ResolvedAt");
 
                     b.ToTable("SensorOfflineNotifications");
                 });
@@ -1164,6 +1233,49 @@ namespace garge_api.Migrations
                     b.ToTable("SensorPhotos");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Sensor.SensorSecurityState", b =>
+                {
+                    b.Property<int>("SensorId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("AppliedSleepSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ArmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("FloorMillivolts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastPublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("OfflineDisarmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReportedFirmwareVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("RequestedSleepSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("SecurityModeReported")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("SensorId");
+
+                    b.HasIndex("ArmedAt");
+
+                    b.ToTable("SensorSecurityStates");
+                });
+
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>
                 {
                     b.Property<string>("UserId")
@@ -1211,6 +1323,35 @@ namespace garge_api.Migrations
                     b.HasIndex("SensorId");
 
                     b.ToTable("UserSensorCustomNames");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Sensor.UserSensorSecurity", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SensorId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("EnabledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("EnforcingAutomationRuleId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("UserId", "SensorId");
+
+                    b.HasIndex("SensorId");
+
+                    b.HasIndex("Enabled", "SensorId");
+
+                    b.ToTable("UserSensorSecurities");
                 });
 
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensorVoltageThreshold", b =>
@@ -1931,6 +2072,17 @@ namespace garge_api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Sensor.SensorSecurityState", b =>
+                {
+                    b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
+                        .WithOne()
+                        .HasForeignKey("garge_api.Models.Sensor.SensorSecurityState", "SensorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Sensor");
+                });
+
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensor", b =>
                 {
                     b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
@@ -1951,6 +2103,25 @@ namespace garge_api.Migrations
                 });
 
             modelBuilder.Entity("garge_api.Models.Sensor.UserSensorCustomName", b =>
+                {
+                    b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
+                        .WithMany()
+                        .HasForeignKey("SensorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Sensor");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Sensor.UserSensorSecurity", b =>
                 {
                     b.HasOne("garge_api.Models.Sensor.Sensor", "Sensor")
                         .WithMany()

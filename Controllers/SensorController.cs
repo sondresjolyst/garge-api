@@ -32,9 +32,11 @@ namespace garge_api.Controllers
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubContext<DeviceHub> _hub;
         private readonly ISubscriptionCapacityService _capacity;
+        private readonly IPermissionService _permissions;
+        private readonly ISecurityModeService _security;
         private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
-        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, ISubscriptionCapacityService capacity)
+        public SensorController(ApplicationDbContext context, IMapper mapper, ILogger<SensorController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, ISubscriptionCapacityService capacity, IPermissionService permissions, ISecurityModeService security)
         {
             _context = context;
             _mapper = mapper;
@@ -42,6 +44,8 @@ namespace garge_api.Controllers
             _ownership = ownership;
             _hub = hub;
             _capacity = capacity;
+            _permissions = permissions;
+            _security = security;
         }
 
         private bool IsAdmin()
@@ -165,6 +169,11 @@ namespace garge_api.Controllers
                     .ToListAsync(ct);
             var accessById = accessRows.ToDictionary(us => us.SensorId, us => DeviceAccess.From(us.IsOwner, us.Permission));
 
+            var securityById = !string.IsNullOrEmpty(currentUserId)
+                    && await _permissions.HasPermissionAsync(currentUserId, PermissionNames.GargeSecurity, ct)
+                ? await _security.GetSummariesAsync(sensorIds, ct)
+                : new Dictionary<int, SensorSecuritySummaryDto>();
+
             // Map sensors and apply the user-specific custom name, suspended flag, and access state.
             var dtos = sensors.Select(sensor =>
             {
@@ -178,6 +187,7 @@ namespace garge_api.Controllers
                 }
                 dto.Suspended = suspendedIds.Contains(sensor.Id);
                 dto.Access = IsAdmin() ? DeviceAccess.Owner : (accessById.TryGetValue(sensor.Id, out var a) ? a : DeviceAccess.Owner);
+                dto.Security = securityById.GetValueOrDefault(sensor.Id);
                 return dto;
             }).ToList();
 
@@ -677,6 +687,8 @@ namespace garge_api.Controllers
                 await _context.SaveChangesAsync();
             }
 
+            await _security.RecomputeDeviceAsync(sensor.ParentName);
+
             _logger.LogInformation("Sensor unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id, CascadedViewers = callerWasOwner });
             return Ok(new { message = "Sensor removed from your account." });
         }
@@ -752,6 +764,8 @@ namespace garge_api.Controllers
 
             _context.UserSensorVoltageThresholds.RemoveRange(
                 _context.UserSensorVoltageThresholds.Where(x => x.UserId == userId && x.SensorId == sensorId));
+            _context.UserSensorSecurities.RemoveRange(
+                _context.UserSensorSecurities.Where(x => x.UserId == userId && x.SensorId == sensorId));
 
             _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId && a.SensorId == sensorId));
             _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId && p.SensorId == sensorId));

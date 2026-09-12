@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Push;
 using garge_api.Models.Sensor;
@@ -21,7 +22,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
     private static (TestableService service, Mock<IWebPushService> push) BuildService(ApplicationDbContext db)
     {
         var push = new Mock<IWebPushService>();
-        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         var sp = new Mock<IServiceProvider>();
@@ -60,7 +61,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.Single(db.SensorOfflineNotifications);
         Assert.Null(db.SensorOfflineNotifications.First().ResolvedAt);
     }
@@ -82,7 +83,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -104,7 +105,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         var resolved = await db.SensorOfflineNotifications.FindAsync([notification.Id], TestContext.Current.CancellationToken);
         Assert.NotNull(resolved!.ResolvedAt);
     }
@@ -122,7 +123,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        push.Verify(p => p.SendAsync("u1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -138,7 +139,7 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);
     }
 
@@ -155,7 +156,45 @@ public class SensorOfflineCheckServiceTests : ControllerTestBase
         var (svc, push) = BuildService(db);
         await svc.RunCheckAsync(TestContext.Current.CancellationToken);
 
-        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Empty(db.SensorOfflineNotifications);
+    }
+    [Fact]
+    public async Task CheckAsync_OpenGargeSecurityAlert_SuppressesOfflineAlert()
+    {
+        var db = CreateDbContext();
+        db.UserProfiles.Add(MakeProfile("u1"));
+        db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
+        db.SensorData.Add(new SensorData { SensorId = 1, Value = "20", Timestamp = DateTime.UtcNow.AddHours(-10) });
+        db.SensorOfflineNotifications.Add(new SensorOfflineNotification
+        {
+            UserId = "u1", SensorId = 1, Kind = NotificationKinds.Security, NotifiedAt = DateTime.UtcNow.AddHours(-9)
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var (svc, push) = BuildService(db);
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
+
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Single(db.SensorOfflineNotifications);
+    }
+
+    [Fact]
+    public async Task CheckAsync_BackOnline_DoesNotResolveGargeSecurityAlert()
+    {
+        var db = CreateDbContext();
+        db.UserProfiles.Add(MakeProfile("u1"));
+        db.UserSensors.Add(new UserSensor { UserId = "u1", SensorId = 1 });
+        db.SensorData.Add(new SensorData { SensorId = 1, Value = "20", Timestamp = DateTime.UtcNow.AddMinutes(-5) });
+        db.SensorOfflineNotifications.Add(new SensorOfflineNotification
+        {
+            UserId = "u1", SensorId = 1, Kind = NotificationKinds.Security, NotifiedAt = DateTime.UtcNow.AddHours(-1)
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var (svc, _) = BuildService(db);
+        await svc.RunCheckAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(db.SensorOfflineNotifications.Single().ResolvedAt);
     }
 }

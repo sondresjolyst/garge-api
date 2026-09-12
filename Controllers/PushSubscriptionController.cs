@@ -76,7 +76,7 @@ namespace garge_api.Controllers
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (userId == null) return Forbid();
 
-            await webPushService.SendAsync(userId, "Test notification", "Push notifications are working!", CancellationToken.None);
+            await webPushService.SendAsync(userId, "Test notification", "Push notifications are working!", null, CancellationToken.None);
             return Ok(new { message = "Sent." });
         }
 

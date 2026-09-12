@@ -21,4 +21,14 @@ namespace garge_api.Hubs
         SensorSummaryDto? Sensor);
 
     public record SensorSummaryDto(int Id, string Name, string Type);
+
+    /// <summary>Hub-wire DTO for the settings garge-operator publishes retained to a device's
+    /// <c>garge/devices/{DeviceName}/settings</c> topic.</summary>
+    public record DeviceSettingsEventDto(
+        int SensorId,
+        string DeviceName,
+        int SleepSeconds,
+        bool SecurityEnabled,
+        int? FloorMillivolts,
+        long Version);
 }
