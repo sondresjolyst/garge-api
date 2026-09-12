@@ -11,7 +11,6 @@ namespace garge_api.Services
     public enum SecuritySetResult
     {
         Ok,
-        InvalidThreshold,
         ChargingAutomationRequired,
         NoAlertChannel,
         UnsupportedSensor,
@@ -24,7 +23,7 @@ namespace garge_api.Services
     public interface ISecurityModeService
     {
         Task<AutomationRule?> FindChargingRuleAsync(int sensorId, CancellationToken ct = default);
-        Task<SecuritySetResult> SetAsync(string userId, int sensorId, bool enabled, int? thresholdMinutes, CancellationToken ct = default);
+        Task<SecuritySetResult> SetAsync(string userId, int sensorId, bool enabled, CancellationToken ct = default);
         Task RemoveAsync(string userId, int sensorId, CancellationToken ct = default);
         Task<SensorSecurityDto> GetAsync(int sensorId, string userId, bool isOwner, CancellationToken ct = default);
         Task<Dictionary<int, SensorSecuritySummaryDto>> GetSummariesAsync(IReadOnlyCollection<int> sensorIds, CancellationToken ct = default);
@@ -40,6 +39,7 @@ namespace garge_api.Services
         IPermissionService permissions,
         IDeviceSettingsPublisher publisher,
         ISecurityNotifier notifier,
+        IAppSettingsCache settings,
         ILogger<SecurityModeService> logger) : ISecurityModeService
     {
         public async Task<AutomationRule?> FindChargingRuleAsync(int sensorId, CancellationToken ct = default)
@@ -70,12 +70,10 @@ namespace garge_api.Services
                 .FirstOrDefault();
         }
 
-        public async Task<SecuritySetResult> SetAsync(string userId, int sensorId, bool enabled, int? thresholdMinutes, CancellationToken ct = default)
+        public async Task<SecuritySetResult> SetAsync(string userId, int sensorId, bool enabled, CancellationToken ct = default)
         {
             if (!await IsVoltageSensorAsync(sensorId, ct))
                 return SecuritySetResult.UnsupportedSensor;
-            if (thresholdMinutes is < SecurityMode.MinThresholdMinutes or > SecurityMode.MaxThresholdMinutes)
-                return SecuritySetResult.InvalidThreshold;
 
             var row = await db.UserSensorSecurities.FirstOrDefaultAsync(r => r.UserId == userId && r.SensorId == sensorId, ct);
             var now = DateTime.UtcNow;
@@ -97,13 +95,11 @@ namespace garge_api.Services
                 }
                 if (!row.Enabled) row.EnabledAt = now;
                 row.Enabled = true;
-                row.ThresholdMinutes = thresholdMinutes ?? row.ThresholdMinutes;
                 row.EnforcingAutomationRuleId = rule.Id;
             }
             else if (row != null)
             {
                 row.Enabled = false;
-                if (thresholdMinutes.HasValue) row.ThresholdMinutes = thresholdMinutes.Value;
                 await ResolveSecurityLatchesAsync(userId, sensorId, now, ct);
             }
 
@@ -143,7 +139,7 @@ namespace garge_api.Services
             {
                 SensorId = sensorId,
                 Enabled = enabled,
-                ThresholdMinutes = row?.ThresholdMinutes ?? SecurityMode.DefaultThresholdMinutes,
+                ThresholdMinutes = (await settings.GetAsync()).SecurityAlertThresholdMinutes,
                 RequestedSleepSeconds = state?.RequestedSleepSeconds ?? SecurityMode.LongSleepSeconds,
                 AppliedSleepSeconds = state?.AppliedSleepSeconds,
                 ArmedAt = state?.ArmedAt,
@@ -230,7 +226,7 @@ namespace garge_api.Services
             {
                 logger.LogInformation("Garge Security auto-disabled {@LogData}", new { UserId = userId, SensorId = sensorId });
                 var name = await SensorDisplayNameAsync(userId, sensorId, ct);
-                await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", ct);
+                await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", $"garge-security-{sensorId}", ct);
             }
         }
 
@@ -380,7 +376,8 @@ namespace garge_api.Services
                 {
                     var name = await SensorDisplayNameAsync(userId, sensorId, ct);
                     await notifier.NotifyUserAsync(userId, "Garge Security paused",
-                        $"{name}: the battery is below its charging level, so the sensor has gone back to checking in every hour. Check that the charger is plugged in and working.", ct);
+                        $"{name}: the battery is below its charging level, so the sensor has gone back to checking in every hour. Check that the charger is plugged in and working.",
+                        $"garge-security-{sensorId}", ct);
                 }
             }
 

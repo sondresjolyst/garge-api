@@ -22,6 +22,7 @@ namespace garge_api.Services
         IPipelineHealthService pipeline,
         ISecurityModeService security,
         ISecurityNotifier notifier,
+        IAppSettingsCache settings,
         ILogger<SecurityAlertService> logger) : ISecurityAlertService
     {
         private static readonly TimeSpan WakePeriod = TimeSpan.FromSeconds(SecurityMode.ShortSleepSeconds);
@@ -66,6 +67,7 @@ namespace garge_api.Services
 
         private async Task CheckArmedSensorsAsync(DateTime now, List<PipelineGap> gaps, CancellationToken ct)
         {
+            var threshold = TimeSpan.FromMinutes((await settings.GetAsync()).SecurityAlertThresholdMinutes);
             var states = await db.SensorSecurityStates.Where(s => s.ArmedAt != null).ToListAsync(ct);
             var openLatches = await db.SensorOfflineNotifications
                 .Where(n => n.Kind == NotificationKinds.Security && n.ResolvedAt == null)
@@ -124,7 +126,7 @@ namespace garge_api.Services
                     if (!entitled.Contains(row.UserId) || !activeOwners.Contains((row.UserId, row.SensorId))) continue;
 
                     var hasOpenLatch = openLatches.Any(l => l.UserId == row.UserId && l.SensorId == row.SensorId && l.ResolvedAt == null);
-                    if (!hasOpenLatch && silence > TimeSpan.FromMinutes(row.ThresholdMinutes))
+                    if (!hasOpenLatch && silence > threshold)
                         Add(newlyStale, row.UserId, (row.SensorId, now - reference));
                 }
             }
@@ -138,7 +140,7 @@ namespace garge_api.Services
                     ? ("Garge Security alert", $"{names[0]} has not checked in for {(int)sensors[0].Quiet.TotalMinutes} minutes.")
                     : ("Garge Security alert", $"{sensors.Count} sensors have stopped checking in: {string.Join(", ", names)}.");
 
-                if (!await notifier.NotifyUserAsync(userId, title, message, ct))
+                if (!await notifier.NotifyUserAsync(userId, title, message, SensorTag(sensors.Select(s => s.SensorId)), ct))
                 {
                     logger.LogWarning("Garge Security alert not delivered; will retry {@LogData}", new { UserId = userId, SensorIds = sensors.Select(s => s.SensorId) });
                     continue;
@@ -162,11 +164,16 @@ namespace garge_api.Services
             {
                 var names = await SensorNamesAsync(userId, sensorIdsBack, ct);
                 var message = names.Count == 1
-                    ? $"{names[0]} is checking in again."
-                    : $"These sensors are checking in again: {string.Join(", ", names)}.";
-                await notifier.NotifyUserAsync(userId, "Garge Security all clear", message, ct);
+                    ? $"{names[0]} is reporting again."
+                    : $"{names.Count} sensors are reporting again: {string.Join(", ", names)}.";
+                await notifier.NotifyUserAsync(userId, "Garge Security: Sensor back online", message, SensorTag(sensorIdsBack), ct);
+                logger.LogInformation("Garge Security all clear sent {@LogData}", new { UserId = userId, SensorIds = sensorIdsBack });
             }
         }
+
+        /// <summary>Groups every message about the same sensors, so an all-clear replaces the alert it clears.</summary>
+        private static string SensorTag(IEnumerable<int> sensorIds) =>
+            "garge-security-" + string.Join('-', sensorIds.Order());
 
         private async Task ReconcileActiveSensorsAsync(CancellationToken ct)
         {
@@ -211,7 +218,8 @@ namespace garge_api.Services
                 foreach (var adminId in adminIds)
                 {
                     await notifier.NotifyUserAsync(adminId, "Garge pipeline outage",
-                        $"No sensor readings have reached the API since {gap.StartedAt:yyyy-MM-dd HH:mm} UTC (operator heartbeat missing or MQTT disconnected). Garge Security alerts are on hold.", ct);
+                        $"No sensor readings have reached the API since {LocalTime.Format(gap.StartedAt)} (operator heartbeat missing or MQTT disconnected). Garge Security alerts are on hold.",
+                        $"garge-pipeline-{gap.Id}", ct);
                 }
                 gap.AdminNotifiedAt = now;
             }
@@ -220,7 +228,8 @@ namespace garge_api.Services
                 foreach (var adminId in adminIds)
                 {
                     await notifier.NotifyUserAsync(adminId, "Garge pipeline restored",
-                        $"Sensor readings are reaching the API again. The outage lasted from {gap.StartedAt:HH:mm} to {gap.EndedAt:HH:mm} UTC.", ct);
+                        $"Sensor readings are reaching the API again. The outage lasted from {LocalTime.Format(gap.StartedAt, "HH:mm")} to {LocalTime.Format(gap.EndedAt!.Value, "HH:mm")}.",
+                        $"garge-pipeline-{gap.Id}", ct);
                 }
                 gap.AllClearSentAt = now;
             }

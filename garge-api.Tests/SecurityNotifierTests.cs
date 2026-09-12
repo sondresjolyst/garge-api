@@ -14,7 +14,7 @@ public class SecurityNotifierTests : ControllerTestBase
     private static (SecurityNotifier Sut, Mock<IWebPushService> Push, Mock<IEmailService> Email) Build(ApplicationDbContext db, bool pushDelivers)
     {
         var push = new Mock<IWebPushService>();
-        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(pushDelivers);
         var email = new Mock<IEmailService>();
         return (new SecurityNotifier(db, push.Object, email.Object, NullLogger<SecurityNotifier>.Instance), push, email);
@@ -35,9 +35,10 @@ public class SecurityNotifierTests : ControllerTestBase
         var db = CreateDbContext();
         AddProfile(db, push: true, email: false);
         await db.SaveChangesAsync(Ct);
-        var (sut, _, email) = Build(db, pushDelivers: true);
+        var (sut, push, email) = Build(db, pushDelivers: true);
 
-        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", Ct));
+        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", "garge-security-1", Ct));
+        push.Verify(p => p.SendAsync("u1", "t", "m", "garge-security-1", It.IsAny<CancellationToken>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
     }
 
@@ -49,7 +50,7 @@ public class SecurityNotifierTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         var (sut, _, email) = Build(db, pushDelivers: false);
 
-        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", Ct));
+        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", null, Ct));
         email.Verify(e => e.SendEmailAsync("u1@example.com", "t", It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }
 
@@ -61,7 +62,7 @@ public class SecurityNotifierTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         var (sut, push, email) = Build(db, pushDelivers: true);
 
-        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", Ct));
+        Assert.True(await sut.NotifyUserAsync("u1", "t", "m", null, Ct));
         push.VerifyNoOtherCalls();
         email.Verify(e => e.SendEmailAsync("u1@example.com", "t", It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }

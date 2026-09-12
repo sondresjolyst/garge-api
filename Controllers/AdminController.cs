@@ -457,6 +457,53 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Gets the Garge Security alert threshold. Admin only, deliberately off the public settings payload.
+        /// </summary>
+        [HttpGet("/api/admin/security-settings")]
+        [SwaggerOperation(Summary = "Gets Garge Security settings.")]
+        [SwaggerResponse(200, "Settings retrieved.", typeof(SecuritySettingsDto))]
+        public async Task<IActionResult> GetSecuritySettings()
+        {
+            var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
+            return Ok(new SecuritySettingsDto { AlertThresholdMinutes = settings.SecurityAlertThresholdMinutes });
+        }
+
+        /// <summary>
+        /// Updates the Garge Security alert threshold. Applies to every armed sensor on the next detector pass.
+        /// </summary>
+        [HttpPut("/api/admin/security-settings")]
+        [SwaggerOperation(Summary = "Updates Garge Security settings.")]
+        [SwaggerResponse(200, "Settings updated.", typeof(SecuritySettingsDto))]
+        [SwaggerResponse(400, "Threshold out of range.")]
+        public async Task<IActionResult> UpdateSecuritySettings([FromBody] UpdateSecuritySettingsDto dto)
+        {
+            _logger.LogInformation("UpdateSecuritySettings called by {@LogData}", new { CallerUserId = User.UserId(), dto.AlertThresholdMinutes });
+
+            if (dto.AlertThresholdMinutes < Constants.SecurityMode.MinThresholdMinutes
+                || dto.AlertThresholdMinutes > Constants.SecurityMode.MaxThresholdMinutes)
+            {
+                return BadRequest(new
+                {
+                    code = Constants.SecurityMode.ErrorCodes.InvalidThreshold,
+                    message = $"The alert threshold must be between {Constants.SecurityMode.MinThresholdMinutes} and {Constants.SecurityMode.MaxThresholdMinutes} minutes."
+                });
+            }
+
+            var settings = await _context.AppSettings.FindAsync(1);
+            if (settings == null)
+            {
+                settings = new AppSettings { Id = 1 };
+                _context.AppSettings.Add(settings);
+            }
+
+            settings.SecurityAlertThresholdMinutes = dto.AlertThresholdMinutes;
+            await _context.SaveChangesAsync();
+            _settingsCache?.Invalidate();
+
+            return Ok(new SecuritySettingsDto { AlertThresholdMinutes = settings.SecurityAlertThresholdMinutes });
+        }
+
+        /// <summary>
         /// Gets app-wide settings. Public — called by the frontend without authentication.
         /// </summary>
         [HttpGet("/api/admin/settings")]

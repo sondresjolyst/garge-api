@@ -10,7 +10,7 @@ namespace garge_api.Services
     /// </summary>
     public interface ISecurityNotifier
     {
-        Task<bool> NotifyUserAsync(string userId, string title, string message, CancellationToken ct = default);
+        Task<bool> NotifyUserAsync(string userId, string title, string message, string? tag = null, CancellationToken ct = default);
     }
 
     public class SecurityNotifier(
@@ -26,7 +26,7 @@ namespace garge_api.Services
         public static async Task<bool> HasAlertChannelAsync(ApplicationDbContext db, string userId, bool pushEnabled, bool emailEnabled, CancellationToken ct = default)
             => emailEnabled || (pushEnabled && await db.PushSubscriptions.AnyAsync(s => s.UserId == userId, ct));
 
-        public async Task<bool> NotifyUserAsync(string userId, string title, string message, CancellationToken ct = default)
+        public async Task<bool> NotifyUserAsync(string userId, string title, string message, string? tag = null, CancellationToken ct = default)
         {
             var profile = await db.UserProfiles
                 .Include(p => p.User)
@@ -38,7 +38,7 @@ namespace garge_api.Services
             {
                 try
                 {
-                    pushDelivered = await push.SendAsync(userId, title, message, ct);
+                    pushDelivered = await push.SendAsync(userId, title, message, tag, ct);
                 }
                 catch (Exception ex)
                 {

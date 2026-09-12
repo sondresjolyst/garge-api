@@ -12,7 +12,11 @@ namespace garge_api.Services
 {
     public interface IWebPushService
     {
-        Task<bool> SendAsync(string userId, string title, string body, CancellationToken ct = default);
+        /// <param name="tag">
+        /// Groups notifications that should replace each other. Notifications sent without one never
+        /// replace anything, so unrelated alerts cannot overwrite each other in the tray.
+        /// </param>
+        Task<bool> SendAsync(string userId, string title, string body, string? tag = null, CancellationToken ct = default);
     }
 
     public class WebPushService(
@@ -21,7 +25,7 @@ namespace garge_api.Services
         IConfiguration configuration,
         ILogger<WebPushService> logger) : IWebPushService
     {
-        public async Task<bool> SendAsync(string userId, string title, string body, CancellationToken ct = default)
+        public async Task<bool> SendAsync(string userId, string title, string body, string? tag = null, CancellationToken ct = default)
         {
             var publicKey = configuration["Vapid:PublicKey"] ?? string.Empty;
             var privateKey = configuration["Vapid:PrivateKey"] ?? string.Empty;
@@ -42,7 +46,7 @@ namespace garge_api.Services
 
             if (subscriptions.Count == 0) return false;
 
-            var payload = JsonSerializer.SerializeToUtf8Bytes(new { title, body });
+            var payload = JsonSerializer.SerializeToUtf8Bytes(new { title, body, tag });
             var toRemove = new List<int>();
             int successCount = 0;
             Exception? lastError = null;

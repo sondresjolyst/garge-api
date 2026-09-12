@@ -12,6 +12,9 @@ namespace garge_api.Models.Admin
         public string? VippsSubscriptionWebhookId { get; set; }
         public string? VippsSubscriptionWebhookSecret { get; set; }
 
+        [Range(Constants.SecurityMode.MinThresholdMinutes, Constants.SecurityMode.MaxThresholdMinutes)]
+        public int SecurityAlertThresholdMinutes { get; set; } = Constants.SecurityMode.DefaultThresholdMinutes;
+
         [MaxLength(100)]
         public string CompanyName { get; set; } = "Garge";
         [MaxLength(200)]

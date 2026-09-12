@@ -150,28 +150,17 @@ public class SensorSecurityControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Enable_WithInvalidThreshold_Returns400()
-    {
-        var db = CreateDbContext();
-        SeedEntitledOwner(db);
-        var (controller, _) = Build(db);
-
-        Assert.Equal(SecurityMode.ErrorCodes.InvalidThreshold,
-            ErrorCode(await controller.UpdateSecurity(SensorId, new UpdateSensorSecurityDto { Enabled = true, ThresholdMinutes = 10 }, Ct)));
-    }
-
-    [Fact]
     public async Task Enable_Succeeds_ReturnsPendingAndRequests600()
     {
         var db = CreateDbContext();
         SeedEntitledOwner(db);
         var (controller, publisher) = Build(db);
 
-        var result = Assert.IsType<OkObjectResult>(await controller.UpdateSecurity(SensorId, new UpdateSensorSecurityDto { Enabled = true, ThresholdMinutes = 40 }, Ct));
+        var result = Assert.IsType<OkObjectResult>(await controller.UpdateSecurity(SensorId, new UpdateSensorSecurityDto { Enabled = true }, Ct));
         var dto = (SensorSecurityDto)result.Value!;
 
         Assert.True(dto.Enabled);
-        Assert.Equal(40, dto.ThresholdMinutes);
+        Assert.Equal(SecurityMode.DefaultThresholdMinutes, dto.ThresholdMinutes);
         Assert.Equal(600, dto.RequestedSleepSeconds);
         Assert.Equal(SecurityMode.States.Pending, dto.State);
         Assert.Equal(SecurityMode.Reasons.AwaitingWake, dto.Reason);
@@ -248,7 +237,7 @@ public class SensorListSecurityFieldTests : ControllerTestBase
         SeedReady(db);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
-        await service.SetAsync(Owner, SensorId, true, null, Ct);
+        await service.SetAsync(Owner, SensorId, true, Ct);
 
         var sensor = Assert.Single(await ListAsync(db, Owner));
 
