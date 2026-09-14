@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.6](https://github.com/sondresjolyst/garge-api/compare/v2.12.5...v2.12.6) (2026-09-13)
+
+
+### Dependencies
+
+* **nuget:** bump `PuppeteerSharp` from 25.8.0 to 25.10.0 ([#412](https://github.com/sondresjolyst/garge-api/issues/412)) ([b2c1c66](https://github.com/sondresjolyst/garge-api/commit/b2c1c66dcf276c9884f10b08c3e00f21e9776865))
+
 ## [2.12.5](https://github.com/sondresjolyst/garge-api/compare/v2.12.4...v2.12.5) (2026-09-06)
 
 
