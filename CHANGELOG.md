@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.7](https://github.com/sondresjolyst/garge-api/compare/v2.12.6...v2.12.7) (2026-09-21)
+
+
+### Dependencies
+
+* **nuget:** bump `Microsoft.NET.Test.Sdk` from 18.9.0 to 18.10.0 ([#422](https://github.com/sondresjolyst/garge-api/issues/422)) ([732859e](https://github.com/sondresjolyst/garge-api/commit/732859e3eb9f063602fa521a4da113ec01aa263f))
+* **nuget:** bump `xunit.v3` from 4.0.0 to 4.0.1 ([#423](https://github.com/sondresjolyst/garge-api/issues/423)) ([b7a43c8](https://github.com/sondresjolyst/garge-api/commit/b7a43c8531185dd415f4e040971b2c95bb65de27))
+* **nuget:** Bump the aspnetcore group with 8 updates ([#421](https://github.com/sondresjolyst/garge-api/issues/421)) ([d2deaad](https://github.com/sondresjolyst/garge-api/commit/d2deaad3c8b5e11a88b46bad4faa0302e3d13a1c))
+
 ## [2.12.6](https://github.com/sondresjolyst/garge-api/compare/v2.12.5...v2.12.6) (2026-09-13)
 
 
