@@ -19,6 +19,7 @@ using System.IO.Compression;
 using garge_api.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Caching.Memory;
 using System.Security.Claims;
@@ -167,6 +168,9 @@ namespace garge_api
                 };
             });
 
+            builder.Services.AddHealthChecks()
+                .AddDbContextCheck<ApplicationDbContext>("db", tags: ["ready"]);
+
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
@@ -311,7 +315,11 @@ namespace garge_api
             if (!app.Environment.IsDevelopment())
             {
                 app.UseHsts();
-                app.UseHttpsRedirection();
+                // Probes reach the pod over plain HTTP and send no X-Forwarded-Proto, so a
+                // redirect would fail them if an HTTPS port is ever configured.
+                app.UseWhen(
+                    context => !context.Request.Path.StartsWithSegments("/health"),
+                    branch => branch.UseHttpsRedirection());
             }
 
             app.UseResponseCompression();
@@ -329,6 +337,17 @@ namespace garge_api
             app.UseIpRateLimiting();
             app.MapControllers();
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
+            // Liveness and startup. Reports that the process is up, with no dependency checks,
+            // so a database outage does not restart the pod.
+            app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false })
+                .AllowAnonymous();
+
+            // Readiness. Fails while the database is unreachable, which takes the pod out of
+            // the Service instead of letting it serve errors.
+            app.MapHealthChecks("/health/ready", new HealthCheckOptions
+            {
+                Predicate = check => check.Tags.Contains("ready")
+            }).AllowAnonymous();
             app.Run();
         }
     }

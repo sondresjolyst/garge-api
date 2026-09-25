@@ -23,6 +23,13 @@
 
         public async Task InvokeAsync(HttpContext context)
         {
+            // Probes run every few seconds for the life of the pod.
+            if (context.Request.Path.StartsWithSegments("/health"))
+            {
+                await _next(context);
+                return;
+            }
+
             _logger.LogInformation("Incoming Request {@LogData}", new { context.Request.Method, context.Request.Path });
 
             foreach (var header in context.Request.Headers)
