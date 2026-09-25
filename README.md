@@ -1,68 +1,89 @@
 # garge-api
 
-ASP.NET Core 10 REST API for the Garge smart garage monitoring system. Handles authentication, sensor data, automation rules, switch control, electricity pricing, and Web Push notifications.
+API for Garge, serving [garge-app](https://github.com/sondresjolyst/garge-app)
+and [garge-operator](https://github.com/sondresjolyst/garge-operator).
 
-## What it does
+## Stack
 
-- Stores sensor readings (battery voltage, temperature, humidity) from MQTT devices in PostgreSQL
-- Evaluates automation rules and triggers switch actions based on sensor values and electricity prices
-- Fetches hourly electricity prices from Nord Pool for demand-responsive automations
-- Sends webhooks when switch state changes (PostgreSQL LISTEN/NOTIFY → HTTP delivery)
-- Sends Web Push notifications when sensors go offline (RFC 8291 / VAPID)
-- Manages user accounts, JWT authentication, email verification, and GDPR data export/deletion
-- Device grouping, custom names, sensor photos, battery health tracking, and activity logs
+ASP.NET Core 10, PostgreSQL through EF Core and Npgsql, ASP.NET Identity with
+JWT, SignalR, Mapster, Serilog, AspNetCoreRateLimit, PuppeteerSharp, Brevo.
 
-## Tech stack
+## Quick start
 
-| Concern | Library |
-|---|---|
-| Framework | ASP.NET Core 10 |
-| Database | PostgreSQL — EF Core 10 (Npgsql) |
-| Auth | ASP.NET Identity + JWT Bearer + refresh tokens |
-| Messaging | MQTT (EMQX) |
-| Email | Brevo (transactional) |
-| Rate limiting | AspNetCoreRateLimit |
-| Mapping | AutoMapper |
-| Logging | Serilog |
-| API docs | Swagger at `/swagger` |
+```bash
+dotnet restore
+dotnet ef database update   # needs a local Postgres, see appsettings.Development.json
+dotnet run                  # Swagger at /swagger
+```
 
-## Configuration
+Migrations do not run at startup. Apply them yourself before a deploy that adds
+any.
 
-Secrets via environment variables or .NET User Secrets in development:
+## Environment
 
-| Key | Description |
-|-----|-------------|
+Production reads these from the cluster secret.
+
+| Variable | Used for |
+| --- | --- |
 | `ConnectionStrings__DefaultConnection` | PostgreSQL connection string |
-| `Jwt__Key` | Secret key for signing JWT tokens |
-| `Jwt__Issuer` | JWT issuer/audience |
-| `BrevoSettings__ApiKey` | Brevo transactional email API key |
-| `BrevoSettings__SenderEmail` | Sender email address |
-| `BrevoSettings__SenderName` | Sender display name |
-| `Vapid__Subject` | Contact URL for VAPID (`https://garge.no`) |
-| `Vapid__PublicKey` | VAPID public key (base64url, 65-byte P-256 uncompressed point) |
-| `Vapid__PrivateKey` | VAPID private key (base64url, 32-byte P-256 scalar) |
+| `Jwt__Key`, `Jwt__Issuer` | JWT signing key and issuer. The key must match the app's `GARGE_API_JWT_SECRET` |
+| `BrevoSettings__ApiKey`, `BrevoSettings__SenderEmail`, `BrevoSettings__SenderName` | Transactional email |
+| `App__FrontendBaseUrl`, `App__ApiBaseUrl` | Used in links and callbacks |
+| `Vapid__PublicKey`, `Vapid__PrivateKey` | Web push |
+| `Vipps__*` | Payment, including the test merchant credentials |
+| `PUPPETEER_NO_SANDBOX` | Set to `1` in the cluster. Chrome's own sandbox cannot start in the pod |
 
-## Generating VAPID keys
+## What it serves
 
-Required for Web Push (sensor offline alerts). Generate a new pair with Node.js:
+| Area | Holds |
+| --- | --- |
+| Sensors | Readings, history, battery health, activity |
+| Switches and automations | Threshold rules that switch power sockets |
+| Electricity | Spot prices and consumption |
+| Shop | Products, orders and invoices, with the invoice rendered to PDF |
+| Push | Web push subscriptions |
+| Pairing and groups | Device ownership |
+| Accounts | Sign-in, JWT and refresh tokens, password reset, roles |
+| `/hubs/devices` | SignalR hub the app and operator connect to |
 
-```bash
-node -e "
-const crypto = require('crypto');
-const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
-const pubDer = publicKey.export({ type: 'spki', format: 'der' });
-const privDer = privateKey.export({ type: 'pkcs8', format: 'der' });
-const b64u = (b) => b.toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-console.log('PublicKey:', b64u(pubDer.slice(-65)));
-console.log('PrivateKey:', b64u(privDer.slice(36, 68)));
-"
-```
+Browse `/swagger` on a running instance for the current surface.
 
-## Running
+## Health
 
-```bash
-dotnet ef database update   # apply migrations
-dotnet run
-```
+| Path | Reports |
+| --- | --- |
+| `/health` | The process is up. No dependency checks, so a database outage does not restart the pod |
+| `/health/ready` | The database connection. Fails while Postgres is unreachable, which takes the pod out of its Service |
 
-API docs available at `http://localhost:5277/swagger`.
+Both are anonymous, and both are blocked at the ingress: only the kubelet
+reaches them, over the pod address.
+
+## PDF invoices
+
+`Services/PuppeteerPdfRenderer.cs` launches the Chrome that the image installs
+and prints the invoice HTML. Chrome writes its profile and crash handler state
+under `$HOME`, so the pod mounts a volume at `/home/app`, and it needs
+`PUPPETEER_NO_SANDBOX=1` because its own sandbox cannot start there. Without
+either, rendering produces no output.
+
+## Deployment
+
+Image [`sondresjo/garge-api`](https://hub.docker.com/r/sondresjo/garge-api) on
+Docker Hub, chart `garge-api` in
+[garge](https://github.com/sondresjolyst/garge), applied by Flux from
+[tumo-flux](https://github.com/sondresjolyst/tumo-flux) to `garge-dev` and
+`garge-prod`.
+
+The container runs as the non-root `app` user with a read-only root filesystem,
+so anything written at runtime needs a volume: `/tmp` and `/home/app`. Data
+protection keys are persisted to the database rather than the filesystem.
+
+A push to `main` builds the `dev` tag. A release-please release builds `vX.Y.Z`,
+tags it `latest` and opens a chart bump against
+[garge](https://github.com/sondresjolyst/garge). Cluster secrets are created by
+[`scripts/garge/bootstrap.sh`](https://github.com/sondresjolyst/tumo-platform/blob/main/scripts/garge/bootstrap.sh)
+in [tumo-platform](https://github.com/sondresjolyst/tumo-platform).
+
+## License
+
+Proprietary. Copyright (c) 2026 Sondre Sjølyst.
