@@ -19,6 +19,7 @@ using System.IO.Compression;
 using garge_api.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Caching.Memory;
 using System.Security.Claims;
@@ -167,7 +168,8 @@ namespace garge_api
                 };
             });
 
-            builder.Services.AddHealthChecks();
+            builder.Services.AddHealthChecks()
+                .AddDbContextCheck<ApplicationDbContext>("db", tags: ["ready"]);
 
             builder.Services.AddAuthorization(options =>
             {
@@ -331,7 +333,17 @@ namespace garge_api
             app.UseIpRateLimiting();
             app.MapControllers();
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
-            app.MapHealthChecks("/health").AllowAnonymous();
+            // Liveness and startup. Reports that the process is up, with no dependency checks,
+            // so a database outage does not restart the pod.
+            app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false })
+                .AllowAnonymous();
+
+            // Readiness. Fails while the database is unreachable, which takes the pod out of
+            // the Service instead of letting it serve errors.
+            app.MapHealthChecks("/health/ready", new HealthCheckOptions
+            {
+                Predicate = check => check.Tags.Contains("ready")
+            }).AllowAnonymous();
             app.Run();
         }
     }
