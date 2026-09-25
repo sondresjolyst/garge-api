@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.8](https://github.com/sondresjolyst/garge-api/compare/v2.12.7...v2.12.8) (2026-09-25)
+
+
+### Bug Fixes
+
+* add an anonymous health endpoint ([#425](https://github.com/sondresjolyst/garge-api/issues/425)) ([045fc83](https://github.com/sondresjolyst/garge-api/commit/045fc837d8a68f12ed98174b1147fbc49a7e1c87))
+
 ## [2.12.7](https://github.com/sondresjolyst/garge-api/compare/v2.12.6...v2.12.7) (2026-09-21)
 
 
