@@ -167,6 +167,8 @@ namespace garge_api
                 };
             });
 
+            builder.Services.AddHealthChecks();
+
             builder.Services.AddAuthorization(options =>
             {
                 options.AddPolicy("Admin", policy => policy.RequireRole("Admin"));
@@ -329,6 +331,7 @@ namespace garge_api
             app.UseIpRateLimiting();
             app.MapControllers();
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
+            app.MapHealthChecks("/health").AllowAnonymous();
             app.Run();
         }
     }
