@@ -12,12 +12,13 @@ JWT, SignalR, Mapster, Serilog, AspNetCoreRateLimit, PuppeteerSharp, Brevo.
 
 ```bash
 dotnet restore
-dotnet ef database update   # needs a local Postgres, see appsettings.Development.json
-dotnet run                  # Swagger at /swagger
+dotnet run                  # needs a local Postgres, see appsettings.Development.json
+                            # Swagger at /swagger
 ```
 
-Migrations do not run at startup. Apply them yourself before a deploy that adds
-any.
+Pending migrations are applied at startup. Set `Database__AutoMigrate=false` to
+skip that and apply them yourself with `dotnet ef database update`. Startup takes
+no lock, so run a single replica while a migration is pending.
 
 ## Environment
 

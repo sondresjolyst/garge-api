@@ -259,6 +259,19 @@ namespace garge_api
                 var postgresNotificationService = scope.ServiceProvider.GetRequiredService<PostgresNotificationService>();
                 logger.LogInformation("PostgresNotificationService started");
 
+                if (app.Configuration.GetValue("Database:AutoMigrate", true))
+                {
+                    var pendingMigrations = (await context.Database.GetPendingMigrationsAsync()).ToList();
+                    if (pendingMigrations.Count > 0)
+                    {
+                        logger.LogInformation(
+                            "Applying {Count} pending migration(s): {Migrations}",
+                            pendingMigrations.Count,
+                            string.Join(", ", pendingMigrations));
+                        await context.Database.MigrateAsync();
+                    }
+                }
+
                 context.EnsureTriggers();
 
                 foreach (var roleName in RoleNames.AllRoles)
