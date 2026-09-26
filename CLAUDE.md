@@ -1,34 +1,40 @@
 # garge-api
 
-ASP.NET Core 8 Web API backend for the Garge smart garage system. Handles all business logic, database access, authentication, and external integrations (MQTT, webhooks, electricity prices).
+ASP.NET Core Web API backend for the Garge smart garage system. Handles all business logic, database access, authentication, and external integrations (MQTT, webhooks, electricity prices).
 
 ## Tech Stack
 
 | Concern | Library |
 |---|---|
-| Framework | ASP.NET Core 8 Web API |
-| Language | C# 12 (nullable reference types, implicit usings) |
-| Database | PostgreSQL via Entity Framework Core 9 (Npgsql) |
+| Framework | ASP.NET Core 10 Web API |
+| Language | C# 14 (nullable reference types, implicit usings) |
+| Database | PostgreSQL via Entity Framework Core 10 (Npgsql) |
 | Auth | JWT Bearer + ASP.NET Identity |
-| Mapping | AutoMapper v12 |
+| Mapping | Mapster |
+| Realtime | SignalR + Postgres `LISTEN`/`NOTIFY` |
 | Logging | Serilog |
-| Email | SendGrid / Brevo |
+| Email | Brevo |
+| PDF | PuppeteerSharp |
 | Rate Limiting | AspNetCoreRateLimit |
-| API Docs | Swagger / Swashbuckle |
-| Password | BCrypt.Net |
+| API Docs | Swashbuckle + Microsoft.AspNetCore.OpenApi |
+| Tests | xUnit v3 on Microsoft.Testing.Platform |
 
 ## Folder Structure
 
 ```
 Controllers/          # HTTP endpoints — one controller per domain
+Hubs/                 # SignalR hubs and their event DTOs
+Authorization/        # Authorization requirements, handlers and result handlers
 Models/
 ├── <Domain>/         # EF Core entities, organized by domain subdirectory
 └── ApplicationDbContext.cs
 Dtos/                 # Request and response DTO classes
-Profiles/             # AutoMapper mapping profiles
+Profiles/             # MappingProfile.cs — the Mapster IRegister configuration
 Services/             # Business logic and background hosted services
+Helpers/              # Small shared utilities
 Constants/            # Shared constant values
 Migrations/           # EF Core migrations (auto-generated, committed to repo)
+garge-api.Tests/      # Test project
 ```
 
 ## Architecture Rules
@@ -40,17 +46,17 @@ Migrations/           # EF Core migrations (auto-generated, committed to repo)
 
 ### DTOs and Mapping
 - Define all DTOs in `Dtos/`. Use separate request and response DTOs when their shapes differ.
-- All entity ↔ DTO conversion happens in AutoMapper profiles in `Profiles/`. Do not map manually in controllers or services.
-- Name profiles `<Domain>Profile.cs` (e.g., `SensorProfile.cs`).
+- Entity ↔ DTO conversion goes through Mapster. Register type adapters in `Profiles/MappingProfile.cs`, which implements `IRegister`; inject `IMapper` where a controller or service needs to map.
+- Do not hand-roll mapping in controllers or services when a registered adapter can do it.
 
 ### Database Access
 - All DB access goes through `ApplicationDbContext` injected via DI. No raw ADO.NET or Dapper.
-- Use EF Core LINQ queries. Raw SQL is a last resort and must be documented with a comment explaining why.
+- Use EF Core LINQ queries. Raw SQL is a last resort and must be documented with a comment explaining why. The Postgres notification triggers in `ApplicationDbContext.EnsureTriggers()` are the standing exception.
 - Generate migrations with `dotnet ef migrations add <Name>` and commit them to the repo.
 
 ### Authentication and Authorization
 - Protect endpoints with `[Authorize]`. Use policy-based auth where role/permission checks are needed.
-- Password hashing via BCrypt — never store or log plaintext passwords.
+- Password hashing is ASP.NET Identity's — never store or log plaintext passwords.
 - Refresh tokens are persisted in the DB and cleaned up by `RefreshTokenCleanupService`.
 
 ### Logging
@@ -69,12 +75,11 @@ Migrations/           # EF Core migrations (auto-generated, committed to repo)
 | Entities | Singular PascalCase | `AutomationRule.cs` |
 | DTOs | `<Action><Domain>Dto.cs` | `CreateSensorDto.cs`, `SensorResponseDto.cs` |
 | Services | `<Domain>Service.cs` | `ElectricityPriceFetchService.cs` |
-| AutoMapper profiles | `<Domain>Profile.cs` | `SensorProfile.cs` |
 
 ## What to Avoid
 - Do not return EF entities from controllers — always use DTOs.
 - Do not put business logic in controllers.
-- Do not bypass AutoMapper with manual mapping in multiple places — keep mapping centralized in profiles.
+- Do not scatter manual mapping across the codebase — keep type adapters in `MappingProfile.cs`.
 - Do not use `Console.WriteLine` — use Serilog.
 - Do not store secrets in `appsettings.json` — use environment variables in production and User Secrets in development.
 - Do not disable nullable reference type warnings — handle nulls explicitly.
