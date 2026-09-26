@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.13.0](https://github.com/sondresjolyst/garge-api/compare/v2.12.8...v2.13.0) (2026-09-26)
+
+
+### Features
+
+* apply pending migrations at startup ([#429](https://github.com/sondresjolyst/garge-api/issues/429)) ([a831331](https://github.com/sondresjolyst/garge-api/commit/a8313315a015d77f57a193347875e0fb394ea721))
+
 ## [2.12.8](https://github.com/sondresjolyst/garge-api/compare/v2.12.7...v2.12.8) (2026-09-25)
 
 
