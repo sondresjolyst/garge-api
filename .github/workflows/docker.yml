@@ -44,8 +44,13 @@ jobs:
       - name: Build
         run: dotnet build --no-restore
 
+      # `dotnet test` reports "Zero tests ran" (exit 5) against xunit.v3 4.0.1 on
+      # the .NET 10 SDK: the Microsoft.Testing.Platform bridge enumerates nothing
+      # while the test application itself runs the whole suite and returns the
+      # right exit code. Run the application directly until that is fixed
+      # upstream, so a failing test actually fails the build.
       - name: Test
-        run: dotnet test --no-build --verbosity normal
+        run: dotnet run --project garge-api.Tests/garge-api.Tests.csproj --no-build
 
   build-and-push:
     if: inputs.tag != ''
