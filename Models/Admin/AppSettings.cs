@@ -15,9 +15,9 @@ namespace garge_api.Models.Admin
         [MaxLength(100)]
         public string CompanyName { get; set; } = "Garge";
         [MaxLength(200)]
-        public string CompanyLegalName { get; set; } = "Sjølyst Innovations";
+        public string CompanyLegalName { get; set; } = "Sjølyst Innovation AS";
         [MaxLength(20)]
-        public string CompanyOrgNumber { get; set; } = "934 531 035";
+        public string CompanyOrgNumber { get; set; } = "938 517 789";
         [MaxLength(500)]
         public string CompanyAddress { get; set; } = "Mårvegen 21a, 4347 Lye";
         [MaxLength(200)]
