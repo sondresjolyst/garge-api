@@ -43,11 +43,9 @@ namespace garge_api.Services
         /// less any time our own pipeline was down, less one wake period.
         /// </summary>
         /// <remarks>
-        /// The wake credit is granted once, not per gap. It exists because a device
-        /// needs up to one wake period after the pipeline returns before a reading can
-        /// arrive; that is true once, however many times the pipeline flapped. Granting
-        /// it per gap let a handful of API restarts across the lookback window exceed
-        /// the whole alert threshold, so nothing alerted.
+        /// The wake credit is granted once, not per gap: a device needs one wake period
+        /// after the pipeline returns before a reading can arrive, however many times
+        /// the pipeline flapped.
         /// </remarks>
         internal static TimeSpan EffectiveSilence(DateTime reference, DateTime now, IEnumerable<PipelineGap> gaps, TimeSpan wakeCredit)
         {
@@ -73,9 +71,7 @@ namespace garge_api.Services
                 mergedEnd = end;
             }
             if (mergedStart == null) return silence;
-
-            silence -= mergedEnd!.Value - mergedStart.Value;
-            return silence - wakeCredit;
+            return silence - (mergedEnd!.Value - mergedStart.Value) - wakeCredit;
         }
 
         private async Task CheckArmedSensorsAsync(DateTime now, List<PipelineGap> gaps, CancellationToken ct)

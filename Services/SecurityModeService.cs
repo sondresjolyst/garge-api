@@ -45,9 +45,7 @@ namespace garge_api.Services
     {
         /// <summary>
         /// The battery floor a charging rule implies, or null when the rule's threshold
-        /// cannot produce a usable one. The automation threshold carries no range of its
-        /// own because the same field also holds temperature and humidity, and the
-        /// firmware deliberately holds no opinion, so this is the only bound.
+        /// cannot produce a usable one. See SecurityMode.MinFloorMillivolts for why.
         /// </summary>
         internal static int? DeriveFloorMillivolts(double threshold)
         {

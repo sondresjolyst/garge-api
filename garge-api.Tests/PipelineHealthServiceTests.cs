@@ -102,8 +102,6 @@ public class PipelineHealthServiceTests : ControllerTestBase
         Assert.Single(db.PipelineGaps);
     }
 
-    // The table is append-only, so without this it grows for the life of the
-    // deployment. Anything ended before the lookback is never read again.
     [Fact]
     public async Task EvaluateAsync_PrunesGapsOlderThanTheLookback()
     {
@@ -119,12 +117,12 @@ public class PipelineHealthServiceTests : ControllerTestBase
 
         await sut.EvaluateAsync(now, Tick, Lookback, Ct);
 
-        var remaining = db.PipelineGaps.ToList();
         // The old closed gap is gone; the recent one and the open one are kept, because
         // an open gap has no end and is always relevant however long it has run.
-        Assert.DoesNotContain(remaining, g => g.StartedAt == ancient.StartedAt && g.EndedAt != null);
-        Assert.Contains(remaining, g => g.StartedAt == justInside.StartedAt);
-        Assert.Contains(remaining, g => g.EndedAt == null);
+        var remaining = db.PipelineGaps.ToList();
+        Assert.DoesNotContain(ancient, remaining);
+        Assert.Contains(justInside, remaining);
+        Assert.Contains(stillOpen, remaining);
     }
 
     [Fact]
@@ -147,32 +145,22 @@ public class PipelineHealthServiceTests : ControllerTestBase
     }
 
     // A flapping pipeline used to earn one wake period per gap, so a few API restarts
-    // inside the lookback window exceeded the alert threshold and nothing alerted.
+    // inside the lookback window forgave 66 min and hid a 25 min alert threshold.
     [Fact]
     public void EffectiveSilence_GrantsOneWakePeriodHoweverManyGaps()
     {
         var now = new DateTime(2026, 9, 11, 12, 0, 0, DateTimeKind.Utc);
-        var reference = now.AddHours(-4);
         var period = TimeSpan.FromMinutes(10);
-
-        var gaps = new List<PipelineGap>();
-        for (var i = 1; i <= 6; i++)
+        var gaps = Enumerable.Range(1, 6).Select(i => new PipelineGap
         {
-            gaps.Add(new PipelineGap
-            {
-                StartedAt = now.AddMinutes(-30 * i),
-                EndedAt = now.AddMinutes(-30 * i).AddMinutes(1),
-                Source = "api"
-            });
-        }
+            StartedAt = now.AddMinutes(-30 * i),
+            EndedAt = now.AddMinutes(-30 * i).AddMinutes(1),
+            Source = "api"
+        }).ToList();
 
         // Four hours quiet, six one-minute gaps, one wake period: 240 - 6 - 10.
         Assert.Equal(TimeSpan.FromMinutes(224),
-            SecurityAlertService.EffectiveSilence(reference, now, gaps, period));
-
-        // Six separate credits would have forgiven 66 min and hidden a 25 min threshold.
-        Assert.True(SecurityAlertService.EffectiveSilence(reference, now, gaps, period)
-            > TimeSpan.FromMinutes(25));
+            SecurityAlertService.EffectiveSilence(now.AddHours(-4), now, gaps, period));
     }
     [Fact]
     public void EffectiveSilence_CountsOverlappingGapsOnce()

@@ -35,7 +35,7 @@ internal static class SecurityTestData
 
     public static AutomationRule AddChargingRule(
         ApplicationDbContext db, int sensorId = SensorId, int targetId = SocketId,
-        string condition = "<", double threshold = 12.65, string action = "on", bool enabled = true) =>
+        string condition = "<", double threshold = ChargingThreshold, string action = "on", bool enabled = true) =>
         db.AutomationRules.Add(new AutomationRule
         {
             TargetType = SwitchTypes.Socket,
@@ -64,11 +64,13 @@ internal static class SecurityTestData
     }
 
     /// <summary>Sensor + socket + charging rule + entitled owner with push and email on.</summary>
-    public static void SeedReady(ApplicationDbContext db)
+    public const double ChargingThreshold = 12.65;
+
+    public static void SeedReady(ApplicationDbContext db, double threshold = ChargingThreshold)
     {
         AddSensor(db);
         AddSocket(db);
-        AddChargingRule(db);
+        AddChargingRule(db, threshold: threshold);
         AddOwner(db);
         db.SaveChanges();
     }

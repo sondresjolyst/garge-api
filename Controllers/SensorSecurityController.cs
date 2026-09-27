@@ -107,7 +107,7 @@ namespace garge_api.Controllers
                 case SecuritySetResult.InvalidThreshold:
                     return BadRequest(new
                     {
-                        code = SecurityMode.ErrorCodes.InvalidThreshold,
+                        code = SecurityMode.ErrorCodes.InvalidChargingThreshold,
                         message = "The charging automation's battery level is outside the range Garge Security can use. Set it to a normal battery voltage."
                     });
                 case SecuritySetResult.NoAlertChannel:
