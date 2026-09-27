@@ -16,8 +16,13 @@ namespace garge_api.Constants
         // A floor under the minimum can never trip, which is merely useless. One over
         // the maximum trips on every reading, which parks the device on the unarmed
         // interval while the app still reports it armed.
+        //
+        // The maximum is the sensor hardware's ceiling, not a battery-chemistry limit:
+        // an ADS1115 at GAIN_ONE behind the 39k/10k divider reads at most 4.096 * 4.9
+        // plus the diode drop, so 21.17 V on voltmeter_ads1115 and 20.27 V on
+        // voltmeter_ads1115_v2. A floor above that can never be cleared by any reading.
         public const int MinFloorMillivolts = 3000;
-        public const int MaxFloorMillivolts = 30000;
+        public const int MaxFloorMillivolts = 20000;
         public static readonly TimeSpan OfflineDisarmAfter = TimeSpan.FromDays(7);
         public static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
         public static readonly TimeSpan AdminGapNotifyAfter = TimeSpan.FromMinutes(5);

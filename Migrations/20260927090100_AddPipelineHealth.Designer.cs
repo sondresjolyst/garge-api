@@ -12,8 +12,8 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260912102142_GlobalSecurityAlertThreshold")]
-    partial class GlobalSecurityAlertThreshold
+    [Migration("20260927090100_AddPipelineHealth")]
+    partial class AddPipelineHealth
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -345,9 +345,6 @@ namespace garge_api.Migrations
                     b.Property<bool>("CookieBannerEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("SecurityAlertThresholdMinutes")
-                        .HasColumnType("integer");
-
                     b.Property<bool>("VatEnabled")
                         .HasColumnType("boolean");
 
@@ -383,7 +380,6 @@ namespace garge_api.Migrations
                             CompanyName = "Garge",
                             CompanyOrgNumber = "934 531 035",
                             CookieBannerEnabled = true,
-                            SecurityAlertThresholdMinutes = 25,
                             VatEnabled = false,
                             VippsTestMode = false
                         });
@@ -1346,6 +1342,9 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("EnforcingAutomationRuleId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ThresholdMinutes")
                         .HasColumnType("integer");
 
                     b.HasKey("UserId", "SensorId");

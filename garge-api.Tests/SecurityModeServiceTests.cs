@@ -25,13 +25,13 @@ public class SecurityModeServiceTests : ControllerTestBase
     [Theory]
     [InlineData(12.65, 12550)]   // the normal case
     [InlineData(3.1, 3000)]      // exactly the minimum
-    [InlineData(30.1, 30000)]    // exactly the maximum
+    [InlineData(20.1, 20000)]    // exactly the maximum, the ADS1115 ceiling
     public void DeriveFloorMillivolts_AcceptsUsableThresholds(double volts, int expected)
         => Assert.Equal(expected, SecurityModeService.DeriveFloorMillivolts(volts));
 
     [Theory]
     [InlineData(3.09)]                    // one millivolt under the minimum
-    [InlineData(30.11)]                   // one millivolt over the maximum
+    [InlineData(20.11)]                   // one millivolt over the maximum
     [InlineData(0)]
     [InlineData(-12.0)]
     [InlineData(double.NaN)]
@@ -48,7 +48,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var db = CreateDbContext();
         AddSensor(db);
         AddSocket(db);
-        AddChargingRule(db, threshold: 100.0);   // 99 900 mV floor
+        AddChargingRule(db, threshold: 25.0);    // 24 900 mV, above what the ADS can read
         AddOwner(db);
         await db.SaveChangesAsync(Ct);
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
