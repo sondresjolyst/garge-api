@@ -161,11 +161,19 @@ namespace garge_api.Controllers
 
             foreach (var sensor in sensors)
             {
-                var alreadyClaimed = await _context.UserSensors.AnyAsync(us => us.UserId == token.UserId && us.SensorId == sensor.Id);
+                // Checked first: a user may hold a shared, non-owner row on a device
+                // someone else owns, and that must stay a skip.
                 var ownedByOther = await _context.UserSensors.AnyAsync(us => us.SensorId == sensor.Id && us.IsOwner && us.UserId != token.UserId);
-                if (alreadyClaimed || ownedByOther)
+                if (ownedByOther)
                 {
                     result.Skipped++;
+                    continue;
+                }
+
+                var alreadyClaimed = await _context.UserSensors.AnyAsync(us => us.UserId == token.UserId && us.SensorId == sensor.Id);
+                if (alreadyClaimed)
+                {
+                    result.AlreadyOwnedSensorIds.Add(sensor.Id);
                     continue;
                 }
 
@@ -188,11 +196,17 @@ namespace garge_api.Controllers
 
             foreach (var switchEntity in switches)
             {
-                var alreadyClaimed = await _context.UserSwitches.AnyAsync(us => us.UserId == token.UserId && us.SwitchId == switchEntity.Id);
                 var ownedByOther = await _context.UserSwitches.AnyAsync(us => us.SwitchId == switchEntity.Id && us.IsOwner && us.UserId != token.UserId);
-                if (alreadyClaimed || ownedByOther)
+                if (ownedByOther)
                 {
                     result.Skipped++;
+                    continue;
+                }
+
+                var alreadyClaimed = await _context.UserSwitches.AnyAsync(us => us.UserId == token.UserId && us.SwitchId == switchEntity.Id);
+                if (alreadyClaimed)
+                {
+                    result.AlreadyOwnedSwitchIds.Add(switchEntity.Id);
                     continue;
                 }
 
@@ -229,12 +243,26 @@ namespace garge_api.Controllers
                 await _hub.Clients.Group(DeviceHub.UserGroup(token.UserId)).SendAsync("device-created", new { kind = "switch", id = switchId });
             }
 
+            // Ownership is unchanged for these, so no cache invalidation, but the
+            // caller still needs the event: the setup wizard advances on it, and
+            // without it a user re-pairing a device they own waits for nothing.
+            foreach (var sensorId in result.AlreadyOwnedSensorIds)
+            {
+                await _hub.Clients.Group(DeviceHub.UserGroup(token.UserId)).SendAsync("device-created", new { kind = "sensor", id = sensorId });
+            }
+            foreach (var switchId in result.AlreadyOwnedSwitchIds)
+            {
+                await _hub.Clients.Group(DeviceHub.UserGroup(token.UserId)).SendAsync("device-created", new { kind = "switch", id = switchId });
+            }
+
             _logger.LogInformation("ClaimPairing devices assigned to user {@LogData}", new
             {
                 token.UserId,
                 parentName,
                 ClaimedSensors = result.ClaimedSensorIds.Count,
                 ClaimedSwitches = result.ClaimedSwitchIds.Count,
+                AlreadyOwnedSensors = result.AlreadyOwnedSensorIds.Count,
+                AlreadyOwnedSwitches = result.AlreadyOwnedSwitchIds.Count,
                 result.Skipped
             });
             return Ok(result);
