@@ -321,7 +321,7 @@ public class SecurityAlertServiceTests : ControllerTestBase
         Assert.Equal((SecurityMode.States.Offline, (string?)null), SecurityModeService.ComputeState(true, state, null));
         Assert.NotNull((await h.Db.SensorOfflineNotifications.SingleAsync(Ct)).ResolvedAt);
 
-        await h.Security.ApplyAckAsync((await h.Db.Sensors.SingleAsync(Ct)).Name, 600, true, null, Ct);
+        await h.Security.ApplyAckAsync((await h.Db.Sensors.SingleAsync(Ct)).Name, 600, true, null, ct: Ct);
 
         Assert.NotNull(state.ArmedAt);
         Assert.Null(state.OfflineDisarmedAt);

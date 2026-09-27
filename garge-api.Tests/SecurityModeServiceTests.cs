@@ -39,6 +39,50 @@ public class SecurityModeServiceTests : ControllerTestBase
     public void DeriveFloorMillivolts_RefusesUnusableThresholds(double volts)
         => Assert.Null(SecurityModeService.DeriveFloorMillivolts(volts));
 
+    // A device reporting a floor other than the one it was sent is not guarding the
+    // battery the server thinks it is, so it must not read as armed.
+    [Fact]
+    public async Task Ack_WithAFloorOtherThanRequested_DoesNotArm()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, 9999, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Null(state.ArmedAt);
+    }
+
+    [Fact]
+    public async Task Ack_WithTheRequestedFloor_Arms()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var requested = (await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts;
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, requested, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.NotNull(state.ArmedAt);
+    }
+
+    // Firmware that predates floor reporting omits the field. Those devices have to
+    // keep arming, or the fleet stops working the moment the server is deployed.
+    [Fact]
+    public async Task Ack_WithNoFloorReported_StillArms()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, null, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.NotNull(state.ArmedAt);
+    }
+
     [Theory]
     [InlineData(25.0)]   // 24 900 mV, above what the ADS1115 can read
     [InlineData(1.1)]    // 1 000 mV, a floor no reading can fall below
@@ -272,10 +316,10 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
 
-        Assert.True(await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", Ct));
+        Assert.True(await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", ct: Ct));
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         var armedAt = state.ArmedAt;
-        await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", Ct);
+        await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", ct: Ct);
 
         Assert.NotNull(armedAt);
         Assert.Equal(armedAt, state.ArmedAt);
@@ -289,7 +333,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
 
-        await service.ApplyAckAsync(sensorName, 3600, false, null, Ct);
+        await service.ApplyAckAsync(sensorName, 3600, false, null, ct: Ct);
 
         Assert.Null((await db.SensorSecurityStates.SingleAsync(Ct)).ArmedAt);
     }
@@ -300,10 +344,10 @@ public class SecurityModeServiceTests : ControllerTestBase
         var db = CreateDbContext();
         var (service, _, notifier) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
-        await service.ApplyAckAsync(sensorName, 600, true, null, Ct);
+        await service.ApplyAckAsync(sensorName, 600, true, null, ct: Ct);
 
-        await service.ApplyAckAsync(sensorName, 3600, true, null, Ct);
-        await service.ApplyAckAsync(sensorName, 3600, true, null, Ct);
+        await service.ApplyAckAsync(sensorName, 3600, true, null, ct: Ct);
+        await service.ApplyAckAsync(sensorName, 3600, true, null, ct: Ct);
 
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         Assert.Null(state.ArmedAt);
@@ -322,7 +366,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = BuildService(db);
         await service.SetAsync(Owner, SensorId, true, Ct);
 
-        await service.ApplyAckAsync((await db.Sensors.FindAsync([SensorId], Ct))!.Name, 600, true, null, Ct);
+        await service.ApplyAckAsync((await db.Sensors.FindAsync([SensorId], Ct))!.Name, 600, true, null, ct: Ct);
 
         var states = await db.SensorSecurityStates.ToListAsync(Ct);
         Assert.Equal(2, states.Count);
@@ -337,7 +381,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         var (service, _, _) = BuildService(db);
 
-        Assert.True(await service.ApplyAckAsync((await db.Sensors.SingleAsync(Ct)).Name, 3600, false, null, Ct));
+        Assert.True(await service.ApplyAckAsync((await db.Sensors.SingleAsync(Ct)).Name, 3600, false, null, ct: Ct));
         Assert.Empty(db.SensorSecurityStates);
     }
 
@@ -347,7 +391,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var db = CreateDbContext();
         var (service, _, _) = BuildService(db);
 
-        Assert.False(await service.ApplyAckAsync("nope", 600, true, null, Ct));
+        Assert.False(await service.ApplyAckAsync("nope", 600, true, null, ct: Ct));
     }
 
     [Fact]

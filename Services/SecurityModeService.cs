@@ -31,7 +31,7 @@ namespace garge_api.Services
         Task ReconcileSensorAsync(int sensorId, CancellationToken ct = default);
         Task ReconcileUserAsync(string userId, CancellationToken ct = default);
         Task RecomputeDeviceAsync(string parentName, CancellationToken ct = default);
-        Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, CancellationToken ct = default);
+        Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, int? floorMillivolts = null, CancellationToken ct = default);
         Task<List<DeviceSettingsDto>> GetDeviceSettingsAsync(CancellationToken ct = default);
     }
 
@@ -354,7 +354,7 @@ namespace garge_api.Services
             logger.LogInformation("Garge Security settings published {@LogData}", new { Device = parentName, SleepSeconds = requested, FloorMillivolts = publishedFloor });
         }
 
-        public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, CancellationToken ct = default)
+        public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, int? floorMillivolts = null, CancellationToken ct = default)
         {
             var sensor = await db.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName, ct);
             if (sensor == null) return false;
@@ -379,7 +379,15 @@ namespace garge_api.Services
                 state.SecurityModeReported = securityEnabled;
                 state.ReportedFirmwareVersion = version;
 
+                // A device reporting a floor other than the one it was sent is not
+                // guarding the battery we think it is, so it does not count as armed.
+                // Firmware that reports no floor at all leaves this unchecked, so an
+                // older fleet keeps working.
+                var floorAgrees = floorMillivolts == null
+                    || floorMillivolts == state.FloorMillivolts;
+
                 if (securityEnabled
+                    && floorAgrees
                     && sleepSeconds == SecurityMode.ShortSleepSeconds
                     && state.RequestedSleepSeconds == SecurityMode.ShortSleepSeconds)
                 {
@@ -388,6 +396,11 @@ namespace garge_api.Services
                 }
                 else
                 {
+                    if (!floorAgrees)
+                    {
+                        logger.LogWarning("Garge Security not armed: the device reports a different floor {@LogData}",
+                            new { state.SensorId, Reported = floorMillivolts, Requested = state.FloorMillivolts });
+                    }
                     state.ArmedAt = null;
                 }
 

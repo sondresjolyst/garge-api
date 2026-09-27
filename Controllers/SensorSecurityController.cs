@@ -158,7 +158,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Sensor not found.")]
         public async Task<IActionResult> ReportSettings(string sensorName, [FromBody] ReportedSettingsDto dto, CancellationToken ct = default)
         {
-            var found = await _security.ApplyAckAsync(sensorName, dto.SleepSeconds, dto.SecurityEnabled, dto.Version, ct);
+            var found = await _security.ApplyAckAsync(sensorName, dto.SleepSeconds, dto.SecurityEnabled, dto.Version, dto.FloorMillivolts, ct);
             if (!found)
             {
                 _logger.LogWarning("ReportSettings not found: {@LogData}", new { sensorName = LogSanitizer.Sanitize(sensorName) });
