@@ -23,20 +23,45 @@ namespace garge_api.Tests;
 /// </summary>
 public class PairingControllerTests : ControllerTestBase
 {
-    private PairingController CreateController(ApplicationDbContext db, string userId)
+    private PairingController CreateController(ApplicationDbContext db, string userId) =>
+        CreateController(db, userId, out _);
+
+    private PairingController CreateController(
+        ApplicationDbContext db, string userId, out Mock<IClientProxy> proxy)
     {
         var ownership = new Mock<IDeviceOwnershipService>();
 
-        var proxy = new Mock<IClientProxy>();
+        proxy = new Mock<IClientProxy>();
         proxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var capturedProxy = proxy;
         var clients = new Mock<IHubClients>();
-        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(proxy.Object);
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(capturedProxy.Object);
         var hub = new Mock<IHubContext<DeviceHub>>();
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
         var controller = new PairingController(db, NullLogger<PairingController>.Instance, ownership.Object, hub.Object);
         controller.ControllerContext = MakeControllerContext(userId);
         return controller;
+    }
+
+    /// <summary>The hub payload is an anonymous object, so match it by reflection.</summary>
+    private static bool IsDeviceCreated(object?[] args, string kind, int id)
+    {
+        if (args.Length != 1 || args[0] is null) return false;
+        var payload = args[0]!;
+        var type = payload.GetType();
+        return type.GetProperty("kind")?.GetValue(payload) as string == kind
+            && type.GetProperty("id")?.GetValue(payload) is int actual
+            && actual == id;
+    }
+
+    private static void AssertDeviceCreated(
+        Mock<IClientProxy> proxy, string kind, int id, Func<Times> times)
+    {
+        proxy.Verify(pr => pr.SendCoreAsync(
+            "device-created",
+            It.Is<object?[]>(a => IsDeviceCreated(a, kind, id)),
+            It.IsAny<CancellationToken>()), times);
     }
 
     private static Sensor MakeSensor(int id, string parentName = "gw") => new()
@@ -260,8 +285,11 @@ public class PairingControllerTests : ControllerTestBase
         Assert.Null(period.EndedAt);
     }
 
+    // Re-pairing a device you already own adds no ownership, but the setup wizard
+    // advances on device-created and would otherwise wait for an event that never
+    // comes, leaving the user stuck on "Waiting for your device".
     [Fact]
-    public async Task ClaimPairing_UserAlreadyHasDevice_SkipsWithoutDuplicateRows()
+    public async Task ClaimPairing_UserAlreadyHasDevice_ReportsItAndRaisesDeviceCreated()
     {
         using var db = CreateDbContext();
         db.Users.Add(MakeUser("user-1"));
@@ -270,13 +298,66 @@ public class PairingControllerTests : ControllerTestBase
         db.PairingTokens.Add(MakeToken("user-1"));
         await db.SaveChangesAsync();
 
-        var result = await CreateController(db, "op").ClaimPairing(Claim());
+        var controller = CreateController(db, "op", out var proxy);
+        var result = await controller.ClaimPairing(Claim());
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var dto = Assert.IsType<PairingClaimResultDto>(ok.Value);
         Assert.Empty(dto.ClaimedSensorIds);
-        Assert.Equal(1, dto.Skipped);
+        Assert.Equal(new[] { 1 }, dto.AlreadyOwnedSensorIds);
+        Assert.Equal(0, dto.Skipped);
         Assert.Single(db.UserSensors.Where(us => us.UserId == "user-1" && us.SensorId == 1));
+        AssertDeviceCreated(proxy, "sensor", 1, Times.Once);
+    }
+
+    [Fact]
+    public async Task ClaimPairing_UserAlreadyHasSwitch_ReportsItAndRaisesDeviceCreated()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.Switches.Add(MakeSwitch(2));
+        db.DiscoveredDevices.Add(new DiscoveredDevice
+        {
+            DiscoveredBy = "gw", Target = "garge_socket_2", Type = "switch", Timestamp = DateTime.UtcNow
+        });
+        db.UserSwitches.Add(new UserSwitch { UserId = "user-1", SwitchId = 2, IsOwner = true });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, "op", out var proxy);
+        var result = await controller.ClaimPairing(Claim());
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<PairingClaimResultDto>(ok.Value);
+        Assert.Equal(new[] { 2 }, dto.AlreadyOwnedSwitchIds);
+        Assert.Equal(0, dto.Skipped);
+        Assert.Single(db.UserSwitches.Where(us => us.UserId == "user-1" && us.SwitchId == 2));
+        AssertDeviceCreated(proxy, "switch", 2, Times.Once);
+    }
+
+    // A shared, non-owner row on someone else's device must stay a skip: the
+    // already-owned path must not fire for a device the user does not own.
+    [Fact]
+    public async Task ClaimPairing_SharedSensorOwnedByAnotherUser_SkipsAndRaisesNothing()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.Users.Add(MakeUser("owner"));
+        db.Sensors.Add(MakeSensor(1));
+        db.UserSensors.Add(new UserSensor { UserId = "owner", SensorId = 1, IsOwner = true });
+        db.UserSensors.Add(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = false });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, "op", out var proxy);
+        var result = await controller.ClaimPairing(Claim());
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<PairingClaimResultDto>(ok.Value);
+        Assert.Empty(dto.ClaimedSensorIds);
+        Assert.Empty(dto.AlreadyOwnedSensorIds);
+        Assert.Equal(1, dto.Skipped);
+        AssertDeviceCreated(proxy, "sensor", 1, Times.Never);
     }
 
     [Fact]
