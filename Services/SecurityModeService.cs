@@ -31,7 +31,7 @@ namespace garge_api.Services
         Task ReconcileSensorAsync(int sensorId, CancellationToken ct = default);
         Task ReconcileUserAsync(string userId, CancellationToken ct = default);
         Task RecomputeDeviceAsync(string parentName, CancellationToken ct = default);
-        Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, CancellationToken ct = default);
+        Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default);
         Task<List<DeviceSettingsDto>> GetDeviceSettingsAsync(CancellationToken ct = default);
     }
 
@@ -315,8 +315,10 @@ namespace garge_api.Services
                     states.Add(state);
                     changed = true;
                 }
-                if (state.RequestedSleepSeconds != requested)
+                if (state.RequestedSleepSeconds != requested || state.FloorMillivolts != publishedFloor)
                 {
+                    // Until the device acks the new floor it is still guarding the old
+                    // one, so it is not armed on what the app now shows.
                     state.ArmedAt = null;
                     state.OfflineDisarmedAt = null;
                     changed = true;
@@ -354,7 +356,7 @@ namespace garge_api.Services
             logger.LogInformation("Garge Security settings published {@LogData}", new { Device = parentName, SleepSeconds = requested, FloorMillivolts = publishedFloor });
         }
 
-        public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, CancellationToken ct = default)
+        public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default)
         {
             var sensor = await db.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName, ct);
             if (sensor == null) return false;
@@ -370,6 +372,7 @@ namespace garge_api.Services
 
             var now = DateTime.UtcNow;
             var newlyPaused = new List<int>();
+            var floorMismatch = false;
             foreach (var state in states)
             {
                 var wasPaused = IsPausedLowBattery(state);
@@ -379,7 +382,15 @@ namespace garge_api.Services
                 state.SecurityModeReported = securityEnabled;
                 state.ReportedFirmwareVersion = version;
 
+                // A device reporting a floor other than the one it was sent is not
+                // guarding the battery we think it is, so it does not count as armed.
+                // A bridge that reports no floor at all leaves this unchecked, so
+                // firmware that does not send one keeps arming.
+                var floorAgrees = !floorReported
+                    || floorMillivolts == state.FloorMillivolts;
+
                 if (securityEnabled
+                    && floorAgrees
                     && sleepSeconds == SecurityMode.ShortSleepSeconds
                     && state.RequestedSleepSeconds == SecurityMode.ShortSleepSeconds)
                 {
@@ -388,13 +399,37 @@ namespace garge_api.Services
                 }
                 else
                 {
+                    if (!floorAgrees)
+                    {
+                        logger.LogWarning("Garge Security not armed: the device reports a different floor {@LogData}",
+                            new { state.SensorId, Reported = floorMillivolts, Requested = state.FloorMillivolts });
+                        // Nothing else republishes: the stored state already holds the
+                        // floor we want, so a recompute finds nothing changed. Without a
+                        // newer version the device ignores the retained message it
+                        // already applied, and the sensor would sit unarmed and silent
+                        // for good. One republish per ack is bounded by the wake period.
+                        floorMismatch = true;
+                    }
                     state.ArmedAt = null;
                 }
 
                 if (!wasPaused && IsPausedLowBattery(state))
                     newlyPaused.Add(state.SensorId);
             }
+            if (floorMismatch)
+            {
+                foreach (var state in states) state.RequestedAt = now;
+            }
             await db.SaveChangesAsync(ct);
+
+            if (floorMismatch && !string.IsNullOrWhiteSpace(sensor.ParentName))
+            {
+                var first = states.OrderBy(s => s.SensorId).First();
+                publisher.EnqueueDeviceSettingsForBridges(new DeviceSettingsEventDto(
+                    first.SensorId, sensor.ParentName, first.RequestedSleepSeconds,
+                    first.RequestedSleepSeconds == SecurityMode.ShortSleepSeconds,
+                    first.FloorMillivolts, ToUnixMs(now)));
+            }
 
             foreach (var sensorId in newlyPaused)
             {

@@ -39,6 +39,131 @@ public class SecurityModeServiceTests : ControllerTestBase
     public void DeriveFloorMillivolts_RefusesUnusableThresholds(double volts)
         => Assert.Null(SecurityModeService.DeriveFloorMillivolts(volts));
 
+    // A device reporting a floor other than the one it was sent is not guarding the
+    // battery the server thinks it is, so it must not read as armed.
+    [Fact]
+    public async Task Ack_WithAFloorOtherThanRequested_DoesNotArm()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, 9999, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Null(state.ArmedAt);
+    }
+
+    // A device that reports no floor while one was requested is not guarding the
+    // battery either: it lost the setting.
+    [Fact]
+    public async Task Ack_ReportingNoFloorWhileOneIsRequested_DoesNotArm()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        Assert.NotNull((await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, null, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Null(state.ArmedAt);
+    }
+
+    // An armed sensor that starts reporting a different floor has to disarm, or the
+    // app keeps claiming a battery is watched that is not.
+    [Fact]
+    public async Task Ack_WithAFloorOtherThanRequested_DisarmsAnArmedSensor()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var requested = (await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts;
+        Assert.NotNull(requested);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, requested, ct: Ct);
+        Assert.NotNull((await db.SensorSecurityStates.SingleAsync(Ct)).ArmedAt);
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, requested + 100, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Null(state.ArmedAt);
+    }
+
+    // The stored floor already matches what is wanted, so nothing else republishes.
+    // Without a newer version the device ignores the retained message it applied, and
+    // the sensor would stay unarmed and silent for good.
+    [Fact]
+    public async Task Ack_WithAFloorOtherThanRequested_RepublishesTheSettings()
+    {
+        var db = CreateDbContext();
+        var (service, publisher, _) = await EnabledAsync(db);
+        var requested = (await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts;
+        Assert.NotNull(requested);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        var versionBefore = (await db.SensorSecurityStates.SingleAsync(Ct)).RequestedAt;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, requested + 100, ct: Ct);
+
+        // Once on enable and once for this mismatch, both carrying the wanted floor.
+        VerifyPublished(publisher, SecurityMode.ShortSleepSeconds, true, requested, Times.Exactly(2));
+        Assert.True((await db.SensorSecurityStates.SingleAsync(Ct)).RequestedAt > versionBefore);
+    }
+
+    [Fact]
+    public async Task Ack_WithTheRequestedFloor_Arms()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var requested = (await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts;
+        Assert.NotNull(requested);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, requested, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.NotNull(state.ArmedAt);
+    }
+
+    // A new charging level means a new floor, and the device is still guarding the old
+    // one until it acks. Reading armed in between claims a battery is watched at a level
+    // nothing is watching it at.
+    [Fact]
+    public async Task ANewChargingLevel_DisarmsUntilTheDeviceAcksIt()
+    {
+        var db = CreateDbContext();
+        var (service, publisher, _) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        var firstFloor = (await db.SensorSecurityStates.SingleAsync(Ct)).FloorMillivolts;
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, true, firstFloor, ct: Ct);
+        Assert.NotNull((await db.SensorSecurityStates.SingleAsync(Ct)).ArmedAt);
+
+        var rule = await db.AutomationRules.SingleAsync(Ct);
+        rule.Threshold = 13.2;
+        await db.SaveChangesAsync(Ct);
+        await service.RecomputeDeviceAsync(Device, Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Null(state.ArmedAt);
+        Assert.Equal(13100, state.FloorMillivolts);
+        VerifyPublished(publisher, SecurityMode.ShortSleepSeconds, true, 13100, Times.Once());
+    }
+
+    // A bridge that reports no floor at all runs against firmware that predates floor
+    // reporting. Those devices have to keep arming, or the fleet stops working the
+    // moment the server is deployed.
+    [Fact]
+    public async Task Ack_WithNoFloorReported_StillArms()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, false, null, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.NotNull(state.ArmedAt);
+    }
+
     [Theory]
     [InlineData(25.0)]   // 24 900 mV, above what the ADS1115 can read
     [InlineData(1.1)]    // 1 000 mV, a floor no reading can fall below
@@ -272,10 +397,10 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
 
-        Assert.True(await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", Ct));
+        Assert.True(await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", ct: Ct));
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         var armedAt = state.ArmedAt;
-        await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", Ct);
+        await service.ApplyAckAsync(sensorName, 600, true, "v1.15.0", ct: Ct);
 
         Assert.NotNull(armedAt);
         Assert.Equal(armedAt, state.ArmedAt);
@@ -289,7 +414,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
 
-        await service.ApplyAckAsync(sensorName, 3600, false, null, Ct);
+        await service.ApplyAckAsync(sensorName, 3600, false, null, ct: Ct);
 
         Assert.Null((await db.SensorSecurityStates.SingleAsync(Ct)).ArmedAt);
     }
@@ -300,10 +425,10 @@ public class SecurityModeServiceTests : ControllerTestBase
         var db = CreateDbContext();
         var (service, _, notifier) = await EnabledAsync(db);
         var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
-        await service.ApplyAckAsync(sensorName, 600, true, null, Ct);
+        await service.ApplyAckAsync(sensorName, 600, true, null, ct: Ct);
 
-        await service.ApplyAckAsync(sensorName, 3600, true, null, Ct);
-        await service.ApplyAckAsync(sensorName, 3600, true, null, Ct);
+        await service.ApplyAckAsync(sensorName, 3600, true, null, ct: Ct);
+        await service.ApplyAckAsync(sensorName, 3600, true, null, ct: Ct);
 
         var state = await db.SensorSecurityStates.SingleAsync(Ct);
         Assert.Null(state.ArmedAt);
@@ -322,7 +447,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var (service, _, _) = BuildService(db);
         await service.SetAsync(Owner, SensorId, true, Ct);
 
-        await service.ApplyAckAsync((await db.Sensors.FindAsync([SensorId], Ct))!.Name, 600, true, null, Ct);
+        await service.ApplyAckAsync((await db.Sensors.FindAsync([SensorId], Ct))!.Name, 600, true, null, ct: Ct);
 
         var states = await db.SensorSecurityStates.ToListAsync(Ct);
         Assert.Equal(2, states.Count);
@@ -337,7 +462,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         await db.SaveChangesAsync(Ct);
         var (service, _, _) = BuildService(db);
 
-        Assert.True(await service.ApplyAckAsync((await db.Sensors.SingleAsync(Ct)).Name, 3600, false, null, Ct));
+        Assert.True(await service.ApplyAckAsync((await db.Sensors.SingleAsync(Ct)).Name, 3600, false, null, ct: Ct));
         Assert.Empty(db.SensorSecurityStates);
     }
 
@@ -347,7 +472,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         var db = CreateDbContext();
         var (service, _, _) = BuildService(db);
 
-        Assert.False(await service.ApplyAckAsync("nope", 600, true, null, Ct));
+        Assert.False(await service.ApplyAckAsync("nope", 600, true, null, ct: Ct));
     }
 
     [Fact]
