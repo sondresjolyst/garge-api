@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.13.1](https://github.com/sondresjolyst/garge-api/compare/v2.13.0...v2.13.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **pairing:** report devices the user already owns as a successful claim ([#436](https://github.com/sondresjolyst/garge-api/issues/436)) ([57d354a](https://github.com/sondresjolyst/garge-api/commit/57d354a2a90c0d46825e2f99d4905b4b41f1fba4))
+
+
+### Dependencies
+
+* **nuget:** bump `Microsoft.NET.Test.Sdk` from 18.10.0 to 18.10.1 ([#433](https://github.com/sondresjolyst/garge-api/issues/433)) ([7821e03](https://github.com/sondresjolyst/garge-api/commit/7821e031e859342ce7decf929ce9d0d6417d2366))
+* **nuget:** bump `PuppeteerSharp` from 25.10.0 to 25.11.0 ([#434](https://github.com/sondresjolyst/garge-api/issues/434)) ([1eb1949](https://github.com/sondresjolyst/garge-api/commit/1eb19493003ffd69c40c6ef0c86852372166d23d))
+* **nuget:** bump `System.IdentityModel.Tokens.Jwt` from 8.22.0 to 8.23.0 ([#435](https://github.com/sondresjolyst/garge-api/issues/435)) ([9d99b9c](https://github.com/sondresjolyst/garge-api/commit/9d99b9c9069f18358a8d2ec5f933d1642c30ba9f))
+
 ## [2.13.0](https://github.com/sondresjolyst/garge-api/compare/v2.12.8...v2.13.0) (2026-09-26)
 
 
