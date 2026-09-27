@@ -2,6 +2,7 @@ using Mapster;
 using MapsterMapper;
 using garge_api.Controllers;
 using garge_api.Models;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -69,9 +70,10 @@ public abstract class ControllerTestBase
             NullLogger<AuthController>.Instance);
 
     protected static AutomationController CreateAutomationController(
-        ApplicationDbContext db, string userId = "user-1", bool isAdmin = false)
+        ApplicationDbContext db, string userId = "user-1", bool isAdmin = false, ISecurityModeService? security = null)
     {
-        var controller = new AutomationController(db, NullLogger<AutomationController>.Instance, RealMapper);
+        var controller = new AutomationController(db, NullLogger<AutomationController>.Instance, RealMapper,
+            security ?? Mock.Of<ISecurityModeService>());
         controller.ControllerContext = MakeControllerContext(userId, isAdmin);
         return controller;
     }
@@ -104,6 +106,21 @@ public abstract class ControllerTestBase
             Audience = TestJwtIssuer
         };
         return handler.WriteToken(handler.CreateToken(descriptor));
+    }
+
+    protected static void GrantRoles(ApplicationDbContext db, string userId, params string[] roleNames)
+    {
+        foreach (var roleName in roleNames)
+        {
+            var role = db.Roles.Local.FirstOrDefault(r => r.Name == roleName) ?? db.Roles.FirstOrDefault(r => r.Name == roleName);
+            if (role == null)
+            {
+                role = new IdentityRole { Id = Guid.NewGuid().ToString(), Name = roleName, NormalizedName = roleName.ToUpperInvariant() };
+                db.Roles.Add(role);
+            }
+            db.UserRoles.Add(new IdentityUserRole<string> { UserId = userId, RoleId = role.Id });
+        }
+        db.SaveChanges();
     }
 
     protected static User MakeUser(string id = "user-1", string email = "test@example.com") => new()

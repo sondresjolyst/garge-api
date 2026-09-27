@@ -33,7 +33,8 @@ public class SensorSuspensionTests : ControllerTestBase
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
         var capacity = new SubscriptionCapacityService(db, new MemoryCache(new MemoryCacheOptions()));
-        var controller = new SensorController(db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object, capacity);
+        var controller = new SensorController(db, MockMapper.Object, NullLogger<SensorController>.Instance, ownership.Object, hub.Object, capacity,
+            new PermissionService(db), Mock.Of<ISecurityModeService>());
         controller.ControllerContext = MakeControllerContext(userId, isAdmin);
         return controller;
     }

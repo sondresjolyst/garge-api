@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Push;
 using Microsoft.EntityFrameworkCore;
@@ -8,16 +9,35 @@ namespace garge_api.Services
         IServiceScopeFactory scopeFactory,
         ILogger<SensorOfflineCheckService> logger) : BackgroundService
     {
+        internal static readonly TimeSpan Tick = TimeSpan.FromMinutes(2);
+        internal const int OfflineCheckEveryTicks = 15;
+        internal const int ReconcileEveryTicks = 5;
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            var tick = 0;
             while (!stoppingToken.IsCancellationRequested)
             {
-                try { await CheckAsync(stoppingToken); }
-                catch (Exception ex) { logger.LogError(ex, "SensorOfflineCheckService error"); }
+                try { await CheckSecurityAsync(tick % ReconcileEveryTicks == 0, stoppingToken); }
+                catch (Exception ex) { logger.LogError(ex, "Garge Security check error"); }
 
-                try { await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken); }
+                if (tick % OfflineCheckEveryTicks == 0)
+                {
+                    try { await CheckAsync(stoppingToken); }
+                    catch (Exception ex) { logger.LogError(ex, "SensorOfflineCheckService error"); }
+                }
+                tick++;
+
+                try { await Task.Delay(Tick, stoppingToken); }
                 catch (OperationCanceledException) { break; }
             }
+        }
+
+        protected virtual async Task CheckSecurityAsync(bool reconcile, CancellationToken ct)
+        {
+            using var scope = scopeFactory.CreateScope();
+            var alerts = scope.ServiceProvider.GetRequiredService<ISecurityAlertService>();
+            await alerts.RunAsync(DateTime.UtcNow, Tick, reconcile, ct);
         }
 
         protected virtual async Task CheckAsync(CancellationToken ct)
@@ -52,13 +72,17 @@ namespace garge_api.Services
                         .FirstOrDefaultAsync(ct);
 
                     var activeNotification = await db.SensorOfflineNotifications
-                        .Where(n => n.UserId == user.Id && n.SensorId == sensorId && n.ResolvedAt == null)
+                        .Where(n => n.UserId == user.Id && n.SensorId == sensorId && n.Kind == NotificationKinds.Offline && n.ResolvedAt == null)
                         .FirstOrDefaultAsync(ct);
 
                     bool isOffline = latest == null || now - latest.Value > threshold;
 
                     if (isOffline && activeNotification == null)
                     {
+                        var securityAlertOpen = await db.SensorOfflineNotifications
+                            .AnyAsync(n => n.UserId == user.Id && n.SensorId == sensorId && n.Kind == NotificationKinds.Security && n.ResolvedAt == null, ct);
+                        if (securityAlertOpen) continue;
+
                         var customName = await db.UserSensorCustomNames
                             .Where(x => x.UserId == user.Id && x.SensorId == sensorId)
                             .Select(x => x.CustomName)
@@ -74,6 +98,7 @@ namespace garge_api.Services
                                 user.Id,
                                 "Sensor offline",
                                 $"{name} has not reported in over {user.OfflineAlertThresholdHours}h.",
+                                $"garge-offline-{sensorId}",
                                 ct);
                         }
                         catch (Exception ex)

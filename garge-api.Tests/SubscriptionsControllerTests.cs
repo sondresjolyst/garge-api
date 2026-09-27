@@ -58,7 +58,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         IInvoiceService? invoice = null, ISubscriptionEmailService? subEmail = null)
     {
         var push = new Mock<IWebPushService>();
-        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         var ctrl = new SubscriptionsController(

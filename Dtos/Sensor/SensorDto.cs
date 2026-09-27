@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using garge_api.Models;
 
 namespace garge_api.Dtos.Sensor
@@ -29,5 +30,9 @@ namespace garge_api.Dtos.Sensor
         /// or <c>read</c> (Read share). Drives which controls the client shows.
         /// </summary>
         public string Access { get; set; } = DeviceAccess.Owner;
+
+        /// <summary>Garge Security summary. Only present for callers entitled to the feature, on sensors with a security row.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SensorSecuritySummaryDto? Security { get; set; }
     }
 }

@@ -10,6 +10,8 @@ namespace garge_api.Dtos.User
 
         public bool? PushNotificationsEnabled { get; set; }
 
+        public bool? EmailNotificationsEnabled { get; set; }
+
         [Range(1, 168)]
         public int? OfflineAlertThresholdHours { get; set; }
     }

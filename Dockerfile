@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget \
         gnupg \
         ca-certificates \
+        tzdata \
         fonts-liberation \
         fonts-noto-color-emoji \
         libnss3 \

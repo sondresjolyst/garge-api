@@ -72,6 +72,21 @@ public class SuspendedSensorPurgeServiceTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Purge_ForceUnclaim_RemovesGargeSecuritySettings()
+    {
+        using var db = CreateDbContext();
+        AddUser(db, "u", optedOut: true);
+        db.Sensors.Add(MakeSensor(1));
+        db.UserSensors.Add(new UserSensor { UserId = "u", SensorId = 1, IsOwner = true, SuspendedAt = DateTime.UtcNow.AddDays(-200) });
+        db.UserSensorSecurities.Add(new UserSensorSecurity { UserId = "u", SensorId = 1, Enabled = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await SuspendedSensorPurgeService.PurgeExpiredAsync(db, Anonymizer(db), Ownership(), Capacity(db), SixMonths, TestContext.Current.CancellationToken);
+
+        Assert.Empty(db.UserSensorSecurities);
+    }
+
+    [Fact]
     public async Task Purge_NotOptedOut_PastCap_LeftAlone()
     {
         // Default user keeps history for the lifetime of the claim — never purged, even past the cap.

@@ -24,7 +24,8 @@ public class SensorCapacityEndpointTests : ControllerTestBase
         var capacity = new SubscriptionCapacityService(db, new MemoryCache(new MemoryCacheOptions()));
         var controller = new SensorController(
             db, MockMapper.Object, NullLogger<SensorController>.Instance,
-            new Mock<IDeviceOwnershipService>().Object, hub.Object, capacity);
+            new Mock<IDeviceOwnershipService>().Object, hub.Object, capacity,
+            new PermissionService(db), Mock.Of<ISecurityModeService>());
         controller.ControllerContext = MakeControllerContext(userId);
         return controller;
     }

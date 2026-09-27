@@ -9,12 +9,13 @@ namespace garge_api.Constants
         public const string SwitchAdmin = "SwitchAdmin";
         public const string MqttAdmin = "MqttAdmin";
         public const string AutomationAdmin = "AutomationAdmin";
+        public const string GargeSecurity = "GargeSecurity";
 
         public static readonly string[] AllRoles =
         {
             "Default", "Electricity",
             "Admin", "SensorAdmin", "MqttAdmin", "AutomationAdmin", "SwitchAdmin",
-            "ComplimentaryUser", "DeviceBridge"
+            "ComplimentaryUser", "DeviceBridge", GargeSecurity
         };
 
         public static readonly string[] SubscriptionBypassRoles =
@@ -25,7 +26,8 @@ namespace garge_api.Constants
 
         public static readonly Dictionary<string, string[]> RolePermissions = new()
         {
-            { "Default", new string[] { "Electricity" } },
+            { "Default", new string[] { PermissionNames.Electricity } },
+            { GargeSecurity, new string[] { PermissionNames.GargeSecurity } },
         };
 
         public static readonly HashSet<string> KnownPermissions =
