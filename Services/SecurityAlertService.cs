@@ -38,7 +38,18 @@ namespace garge_api.Services
             await CheckArmedSensorsAsync(now, gaps, ct);
         }
 
-        internal static TimeSpan EffectiveSilence(DateTime reference, DateTime now, IEnumerable<PipelineGap> gaps, TimeSpan perGapCredit)
+        /// <summary>
+        /// How long a sensor has really been quiet: the window since its last reading,
+        /// less any time our own pipeline was down, less one wake period.
+        /// </summary>
+        /// <remarks>
+        /// The wake credit is granted once, not per gap. It exists because a device
+        /// needs up to one wake period after the pipeline returns before a reading can
+        /// arrive; that is true once, however many times the pipeline flapped. Granting
+        /// it per gap let a handful of API restarts across the lookback window exceed
+        /// the whole alert threshold, so nothing alerted.
+        /// </remarks>
+        internal static TimeSpan EffectiveSilence(DateTime reference, DateTime now, IEnumerable<PipelineGap> gaps, TimeSpan wakeCredit)
         {
             var overlaps = gaps
                 .Select(g => (
@@ -57,12 +68,14 @@ namespace garge_api.Services
                     if (end > mergedEnd) mergedEnd = end;
                     continue;
                 }
-                if (mergedStart != null) silence -= (mergedEnd!.Value - mergedStart.Value) + perGapCredit;
+                if (mergedStart != null) silence -= mergedEnd!.Value - mergedStart.Value;
                 mergedStart = start;
                 mergedEnd = end;
             }
-            if (mergedStart != null) silence -= (mergedEnd!.Value - mergedStart.Value) + perGapCredit;
-            return silence;
+            if (mergedStart == null) return silence;
+
+            silence -= mergedEnd!.Value - mergedStart.Value;
+            return silence - wakeCredit;
         }
 
         private async Task CheckArmedSensorsAsync(DateTime now, List<PipelineGap> gaps, CancellationToken ct)

@@ -310,14 +310,18 @@ namespace garge_api.Services
                 return;
             }
 
-            foreach (var state in states) state.LastPublishedAt = now;
-            await db.SaveChangesAsync(ct);
-
             if (string.IsNullOrWhiteSpace(parentName))
             {
+                // Checked before LastPublishedAt is written: marking a publish that did
+                // not happen would leave `changed` false on the next pass, so the settings
+                // would never be retried.
                 logger.LogWarning("Garge Security settings not published: sensor has no device name {@LogData}", new { SensorIds = sensorIds });
+                await db.SaveChangesAsync(ct);
                 return;
             }
+
+            foreach (var state in states) state.LastPublishedAt = now;
+            await db.SaveChangesAsync(ct);
 
             publisher.EnqueueDeviceSettingsForBridges(new DeviceSettingsEventDto(
                 sensorIds.Min(), parentName, requested, securityOn, publishedFloor, ToUnixMs(now)));

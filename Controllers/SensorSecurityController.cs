@@ -139,8 +139,14 @@ namespace garge_api.Controllers
         /// <summary>
         /// Records the settings a device reports it is running (from its MQTT config). Called by garge-operator.
         /// </summary>
+        /// <remarks>
+        /// Bridge-only, like GetDeviceSettings below. The body names the sensor and is
+        /// trusted, and a report of anything other than the armed interval clears
+        /// ArmedAt for every sensor on that device, which is what the alert sweep
+        /// selects on — so a human role here could disarm another user's security.
+        /// </remarks>
         [HttpPost("name/{sensorName}/reported-settings")]
-        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.SensorAdmin}")]
+        [Authorize(Roles = $"{RoleNames.Admin},{DeviceHub.BridgeRole}")]
         [SwaggerOperation(Summary = "Records the settings a device reports it is running.")]
         [SwaggerResponse(204, "Recorded.")]
         [SwaggerResponse(404, "Sensor not found.")]

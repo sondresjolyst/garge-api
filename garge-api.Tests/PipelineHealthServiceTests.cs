@@ -103,7 +103,7 @@ public class PipelineHealthServiceTests : ControllerTestBase
     }
 
     [Fact]
-    public void EffectiveSilence_SubtractsOnlyOverlappingGapsPlusOneWakePeriod()
+    public void EffectiveSilence_SubtractsOverlappingGapsAndOneWakePeriod()
     {
         var now = new DateTime(2026, 9, 11, 12, 0, 0, DateTimeKind.Utc);
         var reference = now.AddMinutes(-30);
@@ -113,9 +113,41 @@ public class PipelineHealthServiceTests : ControllerTestBase
         var before = new PipelineGap { StartedAt = now.AddMinutes(-90), EndedAt = now.AddMinutes(-60), Source = "operator" };
         var ongoing = new PipelineGap { StartedAt = now.AddMinutes(-5), Source = "operator" };
 
+        // A gap entirely before the window forgives nothing.
         Assert.Equal(TimeSpan.FromMinutes(30), SecurityAlertService.EffectiveSilence(reference, now, [before], period));
+        // 30 min window, less a 5 min gap, less one 10 min wake period.
         Assert.Equal(TimeSpan.FromMinutes(15), SecurityAlertService.EffectiveSilence(reference, now, [overlapping], period));
-        Assert.Equal(TimeSpan.FromMinutes(0), SecurityAlertService.EffectiveSilence(reference, now, [overlapping, ongoing], period));
+        // Two separate 5 min gaps still earn a single wake period: 30 - 5 - 5 - 10.
+        Assert.Equal(TimeSpan.FromMinutes(10), SecurityAlertService.EffectiveSilence(reference, now, [overlapping, ongoing], period));
+    }
+
+    // A flapping pipeline used to earn one wake period per gap, so a few API restarts
+    // inside the lookback window exceeded the alert threshold and nothing alerted.
+    [Fact]
+    public void EffectiveSilence_GrantsOneWakePeriodHoweverManyGaps()
+    {
+        var now = new DateTime(2026, 9, 11, 12, 0, 0, DateTimeKind.Utc);
+        var reference = now.AddHours(-4);
+        var period = TimeSpan.FromMinutes(10);
+
+        var gaps = new List<PipelineGap>();
+        for (var i = 1; i <= 6; i++)
+        {
+            gaps.Add(new PipelineGap
+            {
+                StartedAt = now.AddMinutes(-30 * i),
+                EndedAt = now.AddMinutes(-30 * i).AddMinutes(1),
+                Source = "api"
+            });
+        }
+
+        // Four hours quiet, six one-minute gaps, one wake period: 240 - 6 - 10.
+        Assert.Equal(TimeSpan.FromMinutes(224),
+            SecurityAlertService.EffectiveSilence(reference, now, gaps, period));
+
+        // Six separate credits would have forgiven 66 min and hidden a 25 min threshold.
+        Assert.True(SecurityAlertService.EffectiveSilence(reference, now, gaps, period)
+            > TimeSpan.FromMinutes(25));
     }
     [Fact]
     public void EffectiveSilence_CountsOverlappingGapsOnce()
