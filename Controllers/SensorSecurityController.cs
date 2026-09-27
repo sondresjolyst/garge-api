@@ -104,6 +104,12 @@ namespace garge_api.Controllers
                         code = SecurityMode.ErrorCodes.ChargingAutomationRequired,
                         message = "Garge Security needs an enabled automation that turns on a charger socket when this battery gets low."
                     });
+                case SecuritySetResult.InvalidThreshold:
+                    return BadRequest(new
+                    {
+                        code = SecurityMode.ErrorCodes.InvalidThreshold,
+                        message = "The charging automation's battery level is outside the range Garge Security can use. Set it to a normal battery voltage."
+                    });
                 case SecuritySetResult.NoAlertChannel:
                     return Conflict(new
                     {

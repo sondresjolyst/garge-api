@@ -102,6 +102,31 @@ public class PipelineHealthServiceTests : ControllerTestBase
         Assert.Single(db.PipelineGaps);
     }
 
+    // The table is append-only, so without this it grows for the life of the
+    // deployment. Anything ended before the lookback is never read again.
+    [Fact]
+    public async Task EvaluateAsync_PrunesGapsOlderThanTheLookback()
+    {
+        var db = CreateDbContext();
+        var sut = Build(db);
+        var now = new DateTime(2026, 9, 11, 12, 0, 0, DateTimeKind.Utc);
+
+        var ancient = new PipelineGap { StartedAt = now.AddDays(-20), EndedAt = now.AddDays(-19), Source = "api" };
+        var justInside = new PipelineGap { StartedAt = now.AddDays(-7), EndedAt = now.AddDays(-7).AddMinutes(5), Source = "api" };
+        var stillOpen = new PipelineGap { StartedAt = now.AddDays(-30), Source = "operator" };
+        db.PipelineGaps.AddRange(ancient, justInside, stillOpen);
+        await db.SaveChangesAsync(Ct);
+
+        await sut.EvaluateAsync(now, Tick, Lookback, Ct);
+
+        var remaining = db.PipelineGaps.ToList();
+        // The old closed gap is gone; the recent one and the open one are kept, because
+        // an open gap has no end and is always relevant however long it has run.
+        Assert.DoesNotContain(remaining, g => g.StartedAt == ancient.StartedAt && g.EndedAt != null);
+        Assert.Contains(remaining, g => g.StartedAt == justInside.StartedAt);
+        Assert.Contains(remaining, g => g.EndedAt == null);
+    }
+
     [Fact]
     public void EffectiveSilence_SubtractsOverlappingGapsAndOneWakePeriod()
     {

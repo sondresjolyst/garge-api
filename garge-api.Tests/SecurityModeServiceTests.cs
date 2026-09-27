@@ -22,6 +22,84 @@ public class SecurityModeServiceTests : ControllerTestBase
         return (service, publisher, notifier);
     }
 
+    [Theory]
+    [InlineData(12.65, 12550)]   // the normal case
+    [InlineData(3.1, 3000)]      // exactly the minimum
+    [InlineData(30.1, 30000)]    // exactly the maximum
+    public void DeriveFloorMillivolts_AcceptsUsableThresholds(double volts, int expected)
+        => Assert.Equal(expected, SecurityModeService.DeriveFloorMillivolts(volts));
+
+    [Theory]
+    [InlineData(3.09)]                    // one millivolt under the minimum
+    [InlineData(30.11)]                   // one millivolt over the maximum
+    [InlineData(0)]
+    [InlineData(-12.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void DeriveFloorMillivolts_RefusesUnusableThresholds(double volts)
+        => Assert.Null(SecurityModeService.DeriveFloorMillivolts(volts));
+
+    // The automation threshold has no range of its own, because the same field also
+    // carries temperature and humidity. A floor over the maximum would trip on every
+    // reading, parking the device on the unarmed interval while the app said armed.
+    [Fact]
+    public async Task Enable_WithThresholdAboveBatteryRange_DoesNotArm()
+    {
+        var db = CreateDbContext();
+        AddSensor(db);
+        AddSocket(db);
+        AddChargingRule(db, threshold: 100.0);   // 99 900 mV floor
+        AddOwner(db);
+        await db.SaveChangesAsync(Ct);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        var (service, _, _) = BuildService(db);
+
+        var result = await service.SetAsync(Owner, SensorId, true, Ct);
+
+        Assert.Equal(SecuritySetResult.InvalidThreshold, result);
+        Assert.Empty(db.SensorSecurityStates);
+        Assert.Empty(db.UserSensorSecurities.Where(r => r.Enabled));
+    }
+
+    [Fact]
+    public async Task Enable_WithThresholdBelowBatteryRange_DoesNotArm()
+    {
+        var db = CreateDbContext();
+        AddSensor(db);
+        AddSocket(db);
+        AddChargingRule(db, threshold: 1.1);     // 1 000 mV floor, can never trip
+        AddOwner(db);
+        await db.SaveChangesAsync(Ct);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        var (service, _, _) = BuildService(db);
+
+        var result = await service.SetAsync(Owner, SensorId, true, Ct);
+
+        Assert.Equal(SecuritySetResult.InvalidThreshold, result);
+        Assert.Empty(db.SensorSecurityStates);
+    }
+
+    // The boundary itself must still arm, so a legitimate low threshold is not refused.
+    [Fact]
+    public async Task Enable_WithThresholdAtTheBatteryRangeEdge_Arms()
+    {
+        var db = CreateDbContext();
+        AddSensor(db);
+        AddSocket(db);
+        var volts = (SecurityMode.MinFloorMillivolts + SecurityMode.FloorMarginMillivolts) / 1000.0;
+        AddChargingRule(db, threshold: volts);
+        AddOwner(db);
+        await db.SaveChangesAsync(Ct);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        var (service, _, _) = BuildService(db);
+
+        await service.SetAsync(Owner, SensorId, true, Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Equal(SecurityMode.ShortSleepSeconds, state.RequestedSleepSeconds);
+        Assert.Equal(SecurityMode.MinFloorMillivolts, state.FloorMillivolts);
+    }
+
     [Fact]
     public async Task Enable_WithChargingRule_Requests600AndPublishesFloorFromRuleThreshold()
     {

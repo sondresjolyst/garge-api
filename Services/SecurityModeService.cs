@@ -14,6 +14,7 @@ namespace garge_api.Services
         ChargingAutomationRequired,
         NoAlertChannel,
         UnsupportedSensor,
+        InvalidThreshold,
     }
 
     /// <summary>
@@ -42,6 +43,21 @@ namespace garge_api.Services
         IAppSettingsCache settings,
         ILogger<SecurityModeService> logger) : ISecurityModeService
     {
+        /// <summary>
+        /// The battery floor a charging rule implies, or null when the rule's threshold
+        /// cannot produce a usable one. The automation threshold carries no range of its
+        /// own because the same field also holds temperature and humidity, and the
+        /// firmware deliberately holds no opinion, so this is the only bound.
+        /// </summary>
+        internal static int? DeriveFloorMillivolts(double threshold)
+        {
+            if (!double.IsFinite(threshold)) return null;
+            var millivolts = Math.Round(threshold * 1000) - SecurityMode.FloorMarginMillivolts;
+            if (millivolts < SecurityMode.MinFloorMillivolts || millivolts > SecurityMode.MaxFloorMillivolts)
+                return null;
+            return (int)millivolts;
+        }
+
         public async Task<AutomationRule?> FindChargingRuleAsync(int sensorId, CancellationToken ct = default)
         {
             if (!await IsVoltageSensorAsync(sensorId, ct)) return null;
@@ -82,6 +98,10 @@ namespace garge_api.Services
             {
                 var rule = await FindChargingRuleAsync(sensorId, ct);
                 if (rule == null) return SecuritySetResult.ChargingAutomationRequired;
+                // Without this the toggle returns Ok and RecomputeDeviceAsync then
+                // declines to arm, leaving the user told it is on while nothing watches.
+                if (DeriveFloorMillivolts(rule.Threshold) == null)
+                    return SecuritySetResult.InvalidThreshold;
 
                 var profile = await db.UserProfiles.FirstOrDefaultAsync(p => p.Id == userId, ct);
                 if (profile == null || !await SecurityNotifier.HasAlertChannelAsync(
@@ -264,8 +284,16 @@ namespace garge_api.Services
             {
                 var rule = await FindChargingRuleAsync(wantingSensorId, ct);
                 if (rule == null) continue;
-                var candidate = (int)Math.Round(rule.Threshold * 1000) - SecurityMode.FloorMarginMillivolts;
-                floor = floor.HasValue ? Math.Max(floor.Value, candidate) : candidate;
+                // Re-checked here as well as in SetAsync: a rule can be edited into an
+                // unusable threshold after the sensor was armed.
+                var candidate = DeriveFloorMillivolts(rule.Threshold);
+                if (candidate == null)
+                {
+                    logger.LogWarning("Garge Security ignoring an unusable charging threshold {@LogData}",
+                        new { SensorId = wantingSensorId, rule.Threshold });
+                    continue;
+                }
+                floor = floor.HasValue ? Math.Max(floor.Value, candidate.Value) : candidate.Value;
             }
 
             var securityOn = wanting.Count > 0 && floor.HasValue;

@@ -65,6 +65,21 @@ namespace garge_api.Services
             await db.SaveChangesAsync(ct);
 
             var since = now - lookback;
+
+            // The table is append-only otherwise. A gap that ended before the lookback
+            // can never be returned below, so keeping it only grows the table; the
+            // retention window is the lookback itself.
+            var stale = await db.PipelineGaps
+                .Where(g => g.EndedAt != null && g.EndedAt <= since)
+                .ToListAsync(ct);
+            if (stale.Count > 0)
+            {
+                db.PipelineGaps.RemoveRange(stale);
+                await db.SaveChangesAsync(ct);
+                logger.LogInformation("Pruned pipeline gaps older than the lookback {@LogData}",
+                    new { Count = stale.Count, LookbackDays = lookback.TotalDays });
+            }
+
             return await db.PipelineGaps
                 .Where(g => g.EndedAt == null || g.EndedAt > since)
                 .OrderBy(g => g.StartedAt)

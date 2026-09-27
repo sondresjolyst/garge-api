@@ -8,6 +8,16 @@ namespace garge_api.Constants
         public const int MinThresholdMinutes = 25;
         public const int MaxThresholdMinutes = 180;
         public const int FloorMarginMillivolts = 100;
+
+        // Bounds the battery floor derived from a charging rule's threshold. The
+        // firmware deliberately holds no opinion on the range, and the automation
+        // threshold cannot carry one because the same field also holds temperature
+        // and humidity values, so this is the only place a nonsense floor is caught.
+        // A floor under the minimum can never trip, which is merely useless. One over
+        // the maximum trips on every reading, which parks the device on the unarmed
+        // interval while the app still reports it armed.
+        public const int MinFloorMillivolts = 3000;
+        public const int MaxFloorMillivolts = 30000;
         public static readonly TimeSpan OfflineDisarmAfter = TimeSpan.FromDays(7);
         public static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(2);
         public static readonly TimeSpan AdminGapNotifyAfter = TimeSpan.FromMinutes(5);
