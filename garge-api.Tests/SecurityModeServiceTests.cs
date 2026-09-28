@@ -124,6 +124,167 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.NotNull(state.ArmedAt);
     }
 
+    // Firmware that takes no settings never acks, so arming it would leave the sensor
+    // reading pending for good and the app blaming a firmware update that cannot fix it.
+    [Fact]
+    public async Task Set_OnHardwareThatCannotTakeSettings_IsRefused()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        (await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable = false;
+        await db.SaveChangesAsync(Ct);
+        var (service, publisher, _) = BuildService(db);
+
+        var result = await service.SetAsync(Owner, SensorId, true, Ct);
+
+        Assert.Equal(SecuritySetResult.UnsupportedHardware, result);
+        Assert.Empty(await db.UserSensorSecurities.ToListAsync(Ct));
+        publisher.VerifyNoOtherCalls();
+    }
+
+    // Null is a device the bridge has not heard from, not one known to be incapable.
+    [Fact]
+    public async Task Set_WithCapabilityUnknown_IsAllowed()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        Assert.Null((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+        var (service, _, _) = BuildService(db);
+
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, Ct));
+    }
+
+    // Turning it off has to keep working on hardware that cannot take settings: a sensor
+    // enabled before the bridge knew better still needs a way out.
+    [Fact]
+    public async Task Set_Off_OnHardwareThatCannotTakeSettings_IsAllowed()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        (await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable = false;
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, false, Ct));
+        Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+    }
+
+    [Fact]
+    public async Task SetCapability_RecordsItAndReportsItToTheOwner()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        var (service, _, _) = BuildService(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.False((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+        Assert.False((await service.GetAsync(SensorId, Owner, true, Ct)).Capable);
+    }
+
+    // A sensor turned on before the bridge knew the hardware would otherwise sit enabled
+    // and unarmed for good, which is the failure this whole flag exists to prevent.
+    [Fact]
+    public async Task SetCapability_False_TurnsOffASensorAlreadyOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off",
+            It.Is<string>(m => m.Contains("hardware does not support")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Garge Security is per owner, so a shared sensor has a row each and each owner has
+    // to be turned off and told.
+    [Fact]
+    public async Task SetCapability_False_TurnsOffEveryOwnerAndTellsThemAll()
+    {
+        const string secondOwner = "owner-2";
+        var db = CreateDbContext();
+        SeedReady(db);
+        AddOwner(db, secondOwner);
+        db.SaveChanges();
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        GrantRoles(db, secondOwner, RoleNames.GargeSecurity);
+        var (service, _, notifier) = BuildService(db);
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, Ct));
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(secondOwner, SensorId, true, Ct));
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.All(await db.UserSensorSecurities.ToListAsync(Ct), r => Assert.False(r.Enabled));
+        foreach (var userId in new[] { Owner, secondOwner })
+        {
+            notifier.Verify(n => n.NotifyUserAsync(userId, "Garge Security turned off",
+                It.Is<string>(m => m.Contains("hardware does not support")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+    }
+
+    // One failed EEPROM.begin makes a working ADS board report itself incapable for a
+    // boot. A device that has acked settings before has proven its hardware, so that
+    // report must not turn its owners off.
+    [Fact]
+    public async Task SetCapability_False_LeavesASensorThatHasAckedSettingsOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, ct: Ct);
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.Verify(n => n.NotifyUserAsync(It.IsAny<string>(), "Garge Security turned off",
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetCapability_True_LeavesASensorOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, true, Ct));
+
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.VerifyNoOtherCalls();
+    }
+
+    // The bridge posts this from every config message, so an unchanged value must stay a
+    // success and write nothing.
+    [Fact]
+    public async Task SetCapability_Repeated_StaysSuccessful()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        var (service, _, _) = BuildService(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+        Assert.False((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+    }
+
+    [Fact]
+    public async Task SetCapability_ForAnUnknownSensor_ReportsNotFound()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        var (service, _, _) = BuildService(db);
+
+        Assert.False(await service.SetCapabilityAsync("garge_nosuchdevice_voltage", true, Ct));
+    }
+
     // A new charging level means a new floor, and the device is still guarding the old
     // one until it acks. Reading armed in between claims a battery is watched at a level
     // nothing is watching it at.
@@ -174,7 +335,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.InvalidThreshold, await service.SetAsync(Owner, SensorId, true, Ct));
+        Assert.Equal(SecuritySetResult.InvalidChargingThreshold, await service.SetAsync(Owner, SensorId, true, Ct));
         Assert.Empty(db.SensorSecurityStates);
         Assert.Empty(db.UserSensorSecurities.Where(r => r.Enabled));
     }
@@ -434,6 +595,22 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.Null(state.ArmedAt);
         Assert.Equal((SecurityMode.States.PausedLowBattery, SecurityMode.Reasons.LowBattery), SecurityModeService.ComputeState(true, state, null));
         notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security paused", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Paused means "not on the armed cadence", not "on 3600". Keying it to the firmware's
+    // unarmed interval would stop reporting the moment that interval changed.
+    [Fact]
+    public async Task Ack_WithAnIntervalOtherThanTheArmedOne_ReadsAsPaused()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
+        await service.ApplyAckAsync(sensorName, SecurityMode.ShortSleepSeconds, true, null, ct: Ct);
+
+        await service.ApplyAckAsync(sensorName, 7200, true, null, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Equal((SecurityMode.States.PausedLowBattery, SecurityMode.Reasons.LowBattery), SecurityModeService.ComputeState(true, state, null));
     }
 
     [Fact]

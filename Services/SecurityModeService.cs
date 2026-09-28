@@ -14,7 +14,8 @@ namespace garge_api.Services
         ChargingAutomationRequired,
         NoAlertChannel,
         UnsupportedSensor,
-        InvalidThreshold,
+        UnsupportedHardware,
+        InvalidChargingThreshold,
     }
 
     /// <summary>
@@ -32,6 +33,7 @@ namespace garge_api.Services
         Task ReconcileUserAsync(string userId, CancellationToken ct = default);
         Task RecomputeDeviceAsync(string parentName, CancellationToken ct = default);
         Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default);
+        Task<bool> SetCapabilityAsync(string sensorName, bool capable, CancellationToken ct = default);
         Task<List<DeviceSettingsDto>> GetDeviceSettingsAsync(CancellationToken ct = default);
     }
 
@@ -89,6 +91,13 @@ namespace garge_api.Services
             if (!await IsVoltageSensorAsync(sensorId, ct))
                 return SecuritySetResult.UnsupportedSensor;
 
+            // A device whose firmware takes no settings never acks, so turning this on
+            // would leave the sensor reading pending for good. Only a device the bridge
+            // has seen report itself incapable is refused; null is a device the bridge
+            // has not heard from yet.
+            if (enabled && await db.Sensors.AnyAsync(s => s.Id == sensorId && s.SecurityCapable == false, ct))
+                return SecuritySetResult.UnsupportedHardware;
+
             var row = await db.UserSensorSecurities.FirstOrDefaultAsync(r => r.UserId == userId && r.SensorId == sensorId, ct);
             var now = DateTime.UtcNow;
 
@@ -99,7 +108,7 @@ namespace garge_api.Services
                 // Without this the toggle returns Ok and RecomputeDeviceAsync then
                 // declines to arm, leaving the user told it is on while nothing watches.
                 if (DeriveFloorMillivolts(rule.Threshold) == null)
-                    return SecuritySetResult.InvalidThreshold;
+                    return SecuritySetResult.InvalidChargingThreshold;
 
                 var profile = await db.UserProfiles.FirstOrDefaultAsync(p => p.Id == userId, ct);
                 if (profile == null || !await SecurityNotifier.HasAlertChannelAsync(
@@ -152,18 +161,15 @@ namespace garge_api.Services
 
             var enabled = row?.Enabled ?? false;
             var (stateName, reason) = ComputeState(enabled, state, latestReading);
+            var capable = await db.Sensors.Where(s => s.Id == sensorId).Select(s => s.SecurityCapable).FirstOrDefaultAsync(ct);
 
             return new SensorSecurityDto
             {
                 SensorId = sensorId,
                 Enabled = enabled,
-                ThresholdMinutes = (await settings.GetAsync()).SecurityAlertThresholdMinutes,
-                RequestedSleepSeconds = state?.RequestedSleepSeconds ?? SecurityMode.LongSleepSeconds,
-                AppliedSleepSeconds = state?.AppliedSleepSeconds,
-                ArmedAt = state?.ArmedAt,
-                LastReportedAt = latestReading,
                 State = stateName,
                 Reason = reason,
+                Capable = capable,
                 EnforcingRule = await BuildEnforcingRuleAsync(sensorId, userId, ct),
                 IsOwner = isOwner,
             };
@@ -207,6 +213,8 @@ namespace garge_api.Services
                     enabledRows.Select(r => r.UserId), PermissionNames.GargeSecurity, ct);
                 var owners = await OwnerPairsAsync([sensorId], ct);
                 var rule = await FindChargingRuleAsync(sensorId, ct);
+                var capable = await db.Sensors.Where(s => s.Id == sensorId).Select(s => s.SecurityCapable).FirstOrDefaultAsync(ct);
+                var provenState = await db.SensorSecurityStates.FirstOrDefaultAsync(s => s.SensorId == sensorId, ct);
                 var now = DateTime.UtcNow;
 
                 foreach (var row in enabledRows)
@@ -221,6 +229,12 @@ namespace garge_api.Services
                     string? message = null;
                     if (!entitled.Contains(row.UserId))
                         message = "Garge Security is no longer available on your account, so it has been turned off.";
+                    // Firmware that takes no settings never acks, so the sensor would sit
+                    // enabled and unarmed with nothing watching the battery. A device that
+                    // has acked before is proven, so a single incapable report — a failed
+                    // EEPROM.begin on one boot, say — does not turn it off.
+                    else if (capable == false && provenState?.AppliedSleepSeconds == null)
+                        message = "This sensor's hardware does not support Garge Security, so it has been turned off.";
                     else if (rule == null)
                         message = "The charging automation it needs was removed or changed, so Garge Security has been turned off.";
 
@@ -243,8 +257,17 @@ namespace garge_api.Services
             foreach (var (userId, message) in disabled)
             {
                 logger.LogInformation("Garge Security auto-disabled {@LogData}", new { UserId = userId, SensorId = sensorId });
-                var name = await SensorDisplayNameAsync(userId, sensorId, ct);
-                await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", $"garge-security-{sensorId}", ct);
+                try
+                {
+                    var name = await SensorDisplayNameAsync(userId, sensorId, ct);
+                    await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", $"garge-security-{sensorId}", ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The rows are already disabled and nothing re-runs this, so one
+                    // owner's failure must not cost the rest theirs.
+                    logger.LogError(ex, "Garge Security auto-disable notice failed {@LogData}", new { UserId = userId, SensorId = sensorId });
+                }
             }
         }
 
@@ -317,14 +340,10 @@ namespace garge_api.Services
                 }
                 if (state.RequestedSleepSeconds != requested || state.FloorMillivolts != publishedFloor)
                 {
-                    // Until the device acks the new floor it is still guarding the old
-                    // one, so it is not armed on what the app now shows.
+                    // Until the device acks the new settings it is still running the old
+                    // ones, so it is not armed on what the app now shows.
                     state.ArmedAt = null;
                     state.OfflineDisarmedAt = null;
-                    changed = true;
-                }
-                if (state.RequestedSleepSeconds != requested || state.FloorMillivolts != publishedFloor)
-                {
                     state.RequestedSleepSeconds = requested;
                     state.FloorMillivolts = publishedFloor;
                     state.RequestedAt = now;
@@ -354,6 +373,26 @@ namespace garge_api.Services
             publisher.EnqueueDeviceSettingsForBridges(new DeviceSettingsEventDto(
                 sensorIds.Min(), parentName, requested, securityOn, publishedFloor, ToUnixMs(now)));
             logger.LogInformation("Garge Security settings published {@LogData}", new { Device = parentName, SleepSeconds = requested, FloorMillivolts = publishedFloor });
+        }
+
+        /// <summary>
+        /// Records whether a device's firmware takes Garge Security settings, as the
+        /// bridge reads it from the device's config message.
+        /// </summary>
+        public async Task<bool> SetCapabilityAsync(string sensorName, bool capable, CancellationToken ct = default)
+        {
+            var sensor = await db.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName, ct);
+            if (sensor == null) return false;
+            if (sensor.SecurityCapable == capable) return true;
+
+            sensor.SecurityCapable = capable;
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Garge Security capability recorded {@LogData}", new { sensor.Id, Capable = capable });
+
+            // A sensor turned on before the bridge knew the hardware has to be turned off
+            // and its owner told, or it reads as on while nothing is watching.
+            if (!capable) await ReconcileSensorAsync(sensor.Id, ct);
+            return true;
         }
 
         public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default)
@@ -506,7 +545,8 @@ namespace garge_api.Services
         private static bool IsPausedLowBattery(SensorSecurityState state) =>
             state.RequestedSleepSeconds == SecurityMode.ShortSleepSeconds
             && state.SecurityModeReported
-            && state.AppliedSleepSeconds == SecurityMode.LongSleepSeconds;
+            && state.AppliedSleepSeconds != null
+            && state.AppliedSleepSeconds != state.RequestedSleepSeconds;
 
         private async Task RecomputeForSensorAsync(int sensorId, CancellationToken ct)
         {
