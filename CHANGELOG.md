@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.14.1](https://github.com/sondresjolyst/garge-api/compare/v2.14.0...v2.14.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* stop excluding Migrations folder from Docker build context ([#440](https://github.com/sondresjolyst/garge-api/issues/440)) ([c6e418a](https://github.com/sondresjolyst/garge-api/commit/c6e418ad567d4e06da57f5fa45c2c2b0ab4ec5dd))
+
 ## [2.14.0](https://github.com/sondresjolyst/garge-api/compare/v2.13.1...v2.14.0) (2026-09-27)
 
 
