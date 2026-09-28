@@ -15,7 +15,7 @@ namespace garge_api.Services
         NoAlertChannel,
         UnsupportedSensor,
         UnsupportedHardware,
-        InvalidThreshold,
+        InvalidChargingThreshold,
     }
 
     /// <summary>
@@ -108,7 +108,7 @@ namespace garge_api.Services
                 // Without this the toggle returns Ok and RecomputeDeviceAsync then
                 // declines to arm, leaving the user told it is on while nothing watches.
                 if (DeriveFloorMillivolts(rule.Threshold) == null)
-                    return SecuritySetResult.InvalidThreshold;
+                    return SecuritySetResult.InvalidChargingThreshold;
 
                 var profile = await db.UserProfiles.FirstOrDefaultAsync(p => p.Id == userId, ct);
                 if (profile == null || !await SecurityNotifier.HasAlertChannelAsync(
@@ -333,14 +333,10 @@ namespace garge_api.Services
                 }
                 if (state.RequestedSleepSeconds != requested || state.FloorMillivolts != publishedFloor)
                 {
-                    // Until the device acks the new floor it is still guarding the old
-                    // one, so it is not armed on what the app now shows.
+                    // Until the device acks the new settings it is still running the old
+                    // ones, so it is not armed on what the app now shows.
                     state.ArmedAt = null;
                     state.OfflineDisarmedAt = null;
-                    changed = true;
-                }
-                if (state.RequestedSleepSeconds != requested || state.FloorMillivolts != publishedFloor)
-                {
                     state.RequestedSleepSeconds = requested;
                     state.FloorMillivolts = publishedFloor;
                     state.RequestedAt = now;
@@ -542,7 +538,8 @@ namespace garge_api.Services
         private static bool IsPausedLowBattery(SensorSecurityState state) =>
             state.RequestedSleepSeconds == SecurityMode.ShortSleepSeconds
             && state.SecurityModeReported
-            && state.AppliedSleepSeconds == SecurityMode.LongSleepSeconds;
+            && state.AppliedSleepSeconds != null
+            && state.AppliedSleepSeconds != state.RequestedSleepSeconds;
 
         private async Task RecomputeForSensorAsync(int sensorId, CancellationToken ct)
         {

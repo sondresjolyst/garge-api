@@ -290,7 +290,7 @@ public class SecurityModeServiceTests : ControllerTestBase
         GrantRoles(db, Owner, RoleNames.GargeSecurity);
         var (service, _, _) = BuildService(db);
 
-        Assert.Equal(SecuritySetResult.InvalidThreshold, await service.SetAsync(Owner, SensorId, true, Ct));
+        Assert.Equal(SecuritySetResult.InvalidChargingThreshold, await service.SetAsync(Owner, SensorId, true, Ct));
         Assert.Empty(db.SensorSecurityStates);
         Assert.Empty(db.UserSensorSecurities.Where(r => r.Enabled));
     }
@@ -550,6 +550,22 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.Null(state.ArmedAt);
         Assert.Equal((SecurityMode.States.PausedLowBattery, SecurityMode.Reasons.LowBattery), SecurityModeService.ComputeState(true, state, null));
         notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security paused", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Paused means "not on the armed cadence", not "on 3600". Keying it to the firmware's
+    // unarmed interval would stop reporting the moment that interval changed.
+    [Fact]
+    public async Task Ack_WithAnIntervalOtherThanTheArmedOne_ReadsAsPaused()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        var sensorName = (await db.Sensors.SingleAsync(Ct)).Name;
+        await service.ApplyAckAsync(sensorName, SecurityMode.ShortSleepSeconds, true, null, ct: Ct);
+
+        await service.ApplyAckAsync(sensorName, 7200, true, null, ct: Ct);
+
+        var state = await db.SensorSecurityStates.SingleAsync(Ct);
+        Assert.Equal((SecurityMode.States.PausedLowBattery, SecurityMode.Reasons.LowBattery), SecurityModeService.ComputeState(true, state, null));
     }
 
     [Fact]
