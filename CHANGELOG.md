@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.14.0](https://github.com/sondresjolyst/garge-api/compare/v2.13.1...v2.14.0) (2026-09-27)
+
+
+### Features
+
+* add garge security mode ([#410](https://github.com/sondresjolyst/garge-api/issues/410)) ([bbb03fd](https://github.com/sondresjolyst/garge-api/commit/bbb03fdcfa5d2aa7b3c8a716a67325310933c96c))
+* arm only when the device confirms the floor it was sent ([#439](https://github.com/sondresjolyst/garge-api/issues/439)) ([2b1bfed](https://github.com/sondresjolyst/garge-api/commit/2b1bfed8f3c80b378ad9542d11b34ffca1efed2e))
+
 ## [2.13.1](https://github.com/sondresjolyst/garge-api/compare/v2.13.0...v2.13.1) (2026-09-27)
 
 
