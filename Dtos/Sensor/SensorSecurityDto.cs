@@ -4,12 +4,6 @@ namespace garge_api.Dtos.Sensor
     {
         public int SensorId { get; set; }
         public bool Enabled { get; set; }
-        /// <summary>Global alert threshold, set by an admin.</summary>
-        public int ThresholdMinutes { get; set; }
-        public int RequestedSleepSeconds { get; set; }
-        public int? AppliedSleepSeconds { get; set; }
-        public DateTime? ArmedAt { get; set; }
-        public DateTime? LastReportedAt { get; set; }
 
         /// <summary><c>off</c>, <c>pending</c>, <c>armed</c>, <c>paused_low_battery</c> or <c>offline</c>.</summary>
         public required string State { get; set; }

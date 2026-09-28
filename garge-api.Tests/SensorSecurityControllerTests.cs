@@ -188,8 +188,6 @@ public class SensorSecurityControllerTests : ControllerTestBase
         var dto = (SensorSecurityDto)result.Value!;
 
         Assert.True(dto.Enabled);
-        Assert.Equal(SecurityMode.DefaultThresholdMinutes, dto.ThresholdMinutes);
-        Assert.Equal(600, dto.RequestedSleepSeconds);
         Assert.Equal(SecurityMode.States.Pending, dto.State);
         Assert.Equal(SecurityMode.Reasons.AwaitingWake, dto.Reason);
         Assert.True(dto.IsOwner);
@@ -234,7 +232,6 @@ public class SensorSecurityControllerTests : ControllerTestBase
 
         var dto = (SensorSecurityDto)Assert.IsType<OkObjectResult>(await controller.GetSecurity(SensorId, Ct)).Value!;
         Assert.Equal(SecurityMode.States.Armed, dto.State);
-        Assert.NotNull(dto.ArmedAt);
     }
 }
 

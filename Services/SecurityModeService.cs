@@ -167,11 +167,6 @@ namespace garge_api.Services
             {
                 SensorId = sensorId,
                 Enabled = enabled,
-                ThresholdMinutes = (await settings.GetAsync()).SecurityAlertThresholdMinutes,
-                RequestedSleepSeconds = state?.RequestedSleepSeconds ?? SecurityMode.LongSleepSeconds,
-                AppliedSleepSeconds = state?.AppliedSleepSeconds,
-                ArmedAt = state?.ArmedAt,
-                LastReportedAt = latestReading,
                 State = stateName,
                 Reason = reason,
                 Capable = capable,
