@@ -218,6 +218,7 @@ namespace garge_api.Services
                     enabledRows.Select(r => r.UserId), PermissionNames.GargeSecurity, ct);
                 var owners = await OwnerPairsAsync([sensorId], ct);
                 var rule = await FindChargingRuleAsync(sensorId, ct);
+                var capable = await db.Sensors.Where(s => s.Id == sensorId).Select(s => s.SecurityCapable).FirstOrDefaultAsync(ct);
                 var now = DateTime.UtcNow;
 
                 foreach (var row in enabledRows)
@@ -232,6 +233,10 @@ namespace garge_api.Services
                     string? message = null;
                     if (!entitled.Contains(row.UserId))
                         message = "Garge Security is no longer available on your account, so it has been turned off.";
+                    // Firmware that takes no settings never acks, so the sensor would sit
+                    // enabled and unarmed with nothing watching the battery.
+                    else if (capable == false)
+                        message = "This sensor's hardware does not support Garge Security, so it has been turned off.";
                     else if (rule == null)
                         message = "The charging automation it needs was removed or changed, so Garge Security has been turned off.";
 
@@ -380,6 +385,10 @@ namespace garge_api.Services
             sensor.SecurityCapable = capable;
             await db.SaveChangesAsync(ct);
             logger.LogInformation("Garge Security capability recorded {@LogData}", new { sensor.Id, Capable = capable });
+
+            // A sensor turned on before the bridge knew the hardware has to be turned off
+            // and its owner told, or it reads as on while nothing is watching.
+            if (!capable) await ReconcileSensorAsync(sensor.Id, ct);
             return true;
         }
 

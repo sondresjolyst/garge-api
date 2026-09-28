@@ -106,6 +106,34 @@ public class SensorSecurityControllerTests : ControllerTestBase
         Assert.Equal(SecurityMode.ErrorCodes.ChargingAutomationRequired, ErrorCode(result));
     }
 
+    // The switch has no default, so a missing case would fall through to a 200 telling
+    // the user the toggle worked.
+    [Fact]
+    public async Task Enable_OnHardwareThatCannotTakeSettings_Returns400WithCode()
+    {
+        var db = CreateDbContext();
+        SeedEntitledOwner(db);
+        (await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable = false;
+        await db.SaveChangesAsync(Ct);
+        var (controller, _) = Build(db);
+
+        var result = await controller.UpdateSecurity(SensorId, new UpdateSensorSecurityDto { Enabled = true }, Ct);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(SecurityMode.ErrorCodes.UnsupportedHardware, ErrorCode(result));
+    }
+
+    [Fact]
+    public async Task ReportCapability_ForAnUnknownSensor_Returns404()
+    {
+        var db = CreateDbContext();
+        SeedEntitledOwner(db);
+        var (controller, _) = Build(db);
+
+        Assert.IsType<NotFoundObjectResult>(
+            await controller.ReportCapability("garge_nosuchdevice_voltage", new SecurityCapabilityDto { Capable = false }, Ct));
+    }
+
     [Fact]
     public async Task Enable_WithGreaterThanRuleOnly_Returns400()
     {

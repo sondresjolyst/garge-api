@@ -185,6 +185,51 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.False((await service.GetAsync(SensorId, Owner, true, Ct)).Capable);
     }
 
+    // A sensor turned on before the bridge knew the hardware would otherwise sit enabled
+    // and unarmed for good, which is the failure this whole flag exists to prevent.
+    [Fact]
+    public async Task SetCapability_False_TurnsOffASensorAlreadyOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.Verify(n => n.NotifyUserAsync(Owner, "Garge Security turned off",
+            It.Is<string>(m => m.Contains("hardware does not support")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetCapability_True_LeavesASensorOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, true, Ct));
+
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.VerifyNoOtherCalls();
+    }
+
+    // The bridge posts this from every config message, so an unchanged value must stay a
+    // success and write nothing.
+    [Fact]
+    public async Task SetCapability_Repeated_StaysSuccessful()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        var (service, _, _) = BuildService(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+        Assert.False((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+    }
+
     [Fact]
     public async Task SetCapability_ForAnUnknownSensor_ReportsNotFound()
     {
