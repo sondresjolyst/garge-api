@@ -214,6 +214,7 @@ namespace garge_api.Services
                 var owners = await OwnerPairsAsync([sensorId], ct);
                 var rule = await FindChargingRuleAsync(sensorId, ct);
                 var capable = await db.Sensors.Where(s => s.Id == sensorId).Select(s => s.SecurityCapable).FirstOrDefaultAsync(ct);
+                var provenState = await db.SensorSecurityStates.FirstOrDefaultAsync(s => s.SensorId == sensorId, ct);
                 var now = DateTime.UtcNow;
 
                 foreach (var row in enabledRows)
@@ -229,8 +230,10 @@ namespace garge_api.Services
                     if (!entitled.Contains(row.UserId))
                         message = "Garge Security is no longer available on your account, so it has been turned off.";
                     // Firmware that takes no settings never acks, so the sensor would sit
-                    // enabled and unarmed with nothing watching the battery.
-                    else if (capable == false)
+                    // enabled and unarmed with nothing watching the battery. A device that
+                    // has acked before is proven, so a single incapable report — a failed
+                    // EEPROM.begin on one boot, say — does not turn it off.
+                    else if (capable == false && provenState?.AppliedSleepSeconds == null)
                         message = "This sensor's hardware does not support Garge Security, so it has been turned off.";
                     else if (rule == null)
                         message = "The charging automation it needs was removed or changed, so Garge Security has been turned off.";
@@ -254,8 +257,17 @@ namespace garge_api.Services
             foreach (var (userId, message) in disabled)
             {
                 logger.LogInformation("Garge Security auto-disabled {@LogData}", new { UserId = userId, SensorId = sensorId });
-                var name = await SensorDisplayNameAsync(userId, sensorId, ct);
-                await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", $"garge-security-{sensorId}", ct);
+                try
+                {
+                    var name = await SensorDisplayNameAsync(userId, sensorId, ct);
+                    await notifier.NotifyUserAsync(userId, "Garge Security turned off", $"{name}: {message}", $"garge-security-{sensorId}", ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // The rows are already disabled and nothing re-runs this, so one
+                    // owner's failure must not cost the rest theirs.
+                    logger.LogError(ex, "Garge Security auto-disable notice failed {@LogData}", new { UserId = userId, SensorId = sensorId });
+                }
             }
         }
 

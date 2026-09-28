@@ -202,6 +202,51 @@ public class SecurityModeServiceTests : ControllerTestBase
             It.Is<string>(m => m.Contains("hardware does not support")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // Garge Security is per owner, so a shared sensor has a row each and each owner has
+    // to be turned off and told.
+    [Fact]
+    public async Task SetCapability_False_TurnsOffEveryOwnerAndTellsThemAll()
+    {
+        const string secondOwner = "owner-2";
+        var db = CreateDbContext();
+        SeedReady(db);
+        AddOwner(db, secondOwner);
+        db.SaveChanges();
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        GrantRoles(db, secondOwner, RoleNames.GargeSecurity);
+        var (service, _, notifier) = BuildService(db);
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, Ct));
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(secondOwner, SensorId, true, Ct));
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.All(await db.UserSensorSecurities.ToListAsync(Ct), r => Assert.False(r.Enabled));
+        foreach (var userId in new[] { Owner, secondOwner })
+        {
+            notifier.Verify(n => n.NotifyUserAsync(userId, "Garge Security turned off",
+                It.Is<string>(m => m.Contains("hardware does not support")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+    }
+
+    // One failed EEPROM.begin makes a working ADS board report itself incapable for a
+    // boot. A device that has acked settings before has proven its hardware, so that
+    // report must not turn its owners off.
+    [Fact]
+    public async Task SetCapability_False_LeavesASensorThatHasAckedSettingsOn()
+    {
+        var db = CreateDbContext();
+        var (service, _, notifier) = await EnabledAsync(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+        await service.ApplyAckAsync(name, SecurityMode.ShortSleepSeconds, true, null, ct: Ct);
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.True((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+        notifier.Verify(n => n.NotifyUserAsync(It.IsAny<string>(), "Garge Security turned off",
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task SetCapability_True_LeavesASensorOn()
     {
