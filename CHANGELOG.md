@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.0](https://github.com/sondresjolyst/garge-api/compare/v2.14.1...v2.15.0) (2026-09-28)
+
+
+### Features
+
+* record whether a device can take Garge Security settings ([#442](https://github.com/sondresjolyst/garge-api/issues/442)) ([cef8223](https://github.com/sondresjolyst/garge-api/commit/cef82234b0ee375e932f4e49425fdf24b93b1464))
+
 ## [2.14.1](https://github.com/sondresjolyst/garge-api/compare/v2.14.0...v2.14.1) (2026-09-28)
 
 
