@@ -56,6 +56,7 @@ namespace garge_api.Constants
             public const string InvalidThreshold = "invalid_threshold";
             public const string InvalidChargingThreshold = "invalid_charging_threshold";
             public const string UnsupportedSensor = "unsupported_sensor";
+            public const string UnsupportedHardware = "unsupported_hardware";
             public const string SecurityNeedsAlertChannel = "security_needs_alert_channel";
         }
     }

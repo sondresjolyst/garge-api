@@ -17,6 +17,12 @@ namespace garge_api.Dtos.Sensor
         /// <summary><c>firmware_too_old</c>, <c>awaiting_wake</c>, <c>low_battery</c>, or null.</summary>
         public string? Reason { get; set; }
 
+        /// <summary>
+        /// False when the device runs firmware that takes no Garge Security settings, so
+        /// it can never arm. Null until the bridge has seen one of its config messages.
+        /// </summary>
+        public bool? Capable { get; set; }
+
         public EnforcingRuleDto? EnforcingRule { get; set; }
         public bool IsOwner { get; set; }
     }

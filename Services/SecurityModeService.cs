@@ -14,6 +14,7 @@ namespace garge_api.Services
         ChargingAutomationRequired,
         NoAlertChannel,
         UnsupportedSensor,
+        UnsupportedHardware,
         InvalidThreshold,
     }
 
@@ -32,6 +33,7 @@ namespace garge_api.Services
         Task ReconcileUserAsync(string userId, CancellationToken ct = default);
         Task RecomputeDeviceAsync(string parentName, CancellationToken ct = default);
         Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default);
+        Task<bool> SetCapabilityAsync(string sensorName, bool capable, CancellationToken ct = default);
         Task<List<DeviceSettingsDto>> GetDeviceSettingsAsync(CancellationToken ct = default);
     }
 
@@ -88,6 +90,13 @@ namespace garge_api.Services
         {
             if (!await IsVoltageSensorAsync(sensorId, ct))
                 return SecuritySetResult.UnsupportedSensor;
+
+            // A device whose firmware takes no settings never acks, so turning this on
+            // would leave the sensor reading pending for good. Only a device the bridge
+            // has seen report itself incapable is refused; null is a device the bridge
+            // has not heard from yet.
+            if (enabled && await db.Sensors.AnyAsync(s => s.Id == sensorId && s.SecurityCapable == false, ct))
+                return SecuritySetResult.UnsupportedHardware;
 
             var row = await db.UserSensorSecurities.FirstOrDefaultAsync(r => r.UserId == userId && r.SensorId == sensorId, ct);
             var now = DateTime.UtcNow;
@@ -152,6 +161,7 @@ namespace garge_api.Services
 
             var enabled = row?.Enabled ?? false;
             var (stateName, reason) = ComputeState(enabled, state, latestReading);
+            var capable = await db.Sensors.Where(s => s.Id == sensorId).Select(s => s.SecurityCapable).FirstOrDefaultAsync(ct);
 
             return new SensorSecurityDto
             {
@@ -164,6 +174,7 @@ namespace garge_api.Services
                 LastReportedAt = latestReading,
                 State = stateName,
                 Reason = reason,
+                Capable = capable,
                 EnforcingRule = await BuildEnforcingRuleAsync(sensorId, userId, ct),
                 IsOwner = isOwner,
             };
@@ -354,6 +365,22 @@ namespace garge_api.Services
             publisher.EnqueueDeviceSettingsForBridges(new DeviceSettingsEventDto(
                 sensorIds.Min(), parentName, requested, securityOn, publishedFloor, ToUnixMs(now)));
             logger.LogInformation("Garge Security settings published {@LogData}", new { Device = parentName, SleepSeconds = requested, FloorMillivolts = publishedFloor });
+        }
+
+        /// <summary>
+        /// Records whether a device's firmware takes Garge Security settings, as the
+        /// bridge reads it from the device's config message.
+        /// </summary>
+        public async Task<bool> SetCapabilityAsync(string sensorName, bool capable, CancellationToken ct = default)
+        {
+            var sensor = await db.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName, ct);
+            if (sensor == null) return false;
+            if (sensor.SecurityCapable == capable) return true;
+
+            sensor.SecurityCapable = capable;
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("Garge Security capability recorded {@LogData}", new { sensor.Id, Capable = capable });
+            return true;
         }
 
         public async Task<bool> ApplyAckAsync(string sensorName, int sleepSeconds, bool securityEnabled, string? version, bool floorReported = false, int? floorMillivolts = null, CancellationToken ct = default)

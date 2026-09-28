@@ -33,6 +33,12 @@ namespace garge_api.Models.Sensor
         [Required]
         public required string ParentName { get; set; }
 
+        /// <summary>
+        /// Whether the device behind this sensor runs firmware that takes Garge Security
+        /// settings. Null until the bridge has seen one of its config messages.
+        /// </summary>
+        public bool? SecurityCapable { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

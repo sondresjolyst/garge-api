@@ -124,6 +124,77 @@ public class SecurityModeServiceTests : ControllerTestBase
         Assert.NotNull(state.ArmedAt);
     }
 
+    // Firmware that takes no settings never acks, so arming it would leave the sensor
+    // reading pending for good and the app blaming a firmware update that cannot fix it.
+    [Fact]
+    public async Task Set_OnHardwareThatCannotTakeSettings_IsRefused()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        (await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable = false;
+        await db.SaveChangesAsync(Ct);
+        var (service, publisher, _) = BuildService(db);
+
+        var result = await service.SetAsync(Owner, SensorId, true, Ct);
+
+        Assert.Equal(SecuritySetResult.UnsupportedHardware, result);
+        Assert.Empty(await db.UserSensorSecurities.ToListAsync(Ct));
+        publisher.VerifyNoOtherCalls();
+    }
+
+    // Null is a device the bridge has not heard from, not one known to be incapable.
+    [Fact]
+    public async Task Set_WithCapabilityUnknown_IsAllowed()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        Assert.Null((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+        var (service, _, _) = BuildService(db);
+
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, true, Ct));
+    }
+
+    // Turning it off has to keep working on hardware that cannot take settings: a sensor
+    // enabled before the bridge knew better still needs a way out.
+    [Fact]
+    public async Task Set_Off_OnHardwareThatCannotTakeSettings_IsAllowed()
+    {
+        var db = CreateDbContext();
+        var (service, _, _) = await EnabledAsync(db);
+        (await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable = false;
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(SecuritySetResult.Ok, await service.SetAsync(Owner, SensorId, false, Ct));
+        Assert.False((await db.UserSensorSecurities.SingleAsync(Ct)).Enabled);
+    }
+
+    [Fact]
+    public async Task SetCapability_RecordsItAndReportsItToTheOwner()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        GrantRoles(db, Owner, RoleNames.GargeSecurity);
+        var (service, _, _) = BuildService(db);
+        var name = (await db.Sensors.FindAsync([SensorId], Ct))!.Name;
+
+        Assert.True(await service.SetCapabilityAsync(name, false, Ct));
+
+        Assert.False((await db.Sensors.FindAsync([SensorId], Ct))!.SecurityCapable);
+        Assert.False((await service.GetAsync(SensorId, Owner, true, Ct)).Capable);
+    }
+
+    [Fact]
+    public async Task SetCapability_ForAnUnknownSensor_ReportsNotFound()
+    {
+        var db = CreateDbContext();
+        SeedReady(db);
+        var (service, _, _) = BuildService(db);
+
+        Assert.False(await service.SetCapabilityAsync("garge_nosuchdevice_voltage", true, Ct));
+    }
+
     // A new charging level means a new floor, and the device is still guarding the old
     // one until it acks. Reading armed in between claims a battery is watched at a level
     // nothing is watching it at.

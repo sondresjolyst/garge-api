@@ -98,6 +98,12 @@ namespace garge_api.Controllers
                         code = SecurityMode.ErrorCodes.UnsupportedSensor,
                         message = "Garge Security is only available on battery voltage sensors."
                     });
+                case SecuritySetResult.UnsupportedHardware:
+                    return BadRequest(new
+                    {
+                        code = SecurityMode.ErrorCodes.UnsupportedHardware,
+                        message = "This sensor's hardware does not support Garge Security."
+                    });
                 case SecuritySetResult.ChargingAutomationRequired:
                     return BadRequest(new
                     {
@@ -139,6 +145,27 @@ namespace garge_api.Controllers
             if (!isOwner) return Forbid();
 
             await _security.RemoveAsync(userId!, sensorId, ct);
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Records whether a device's firmware takes Garge Security settings. Called by garge-operator
+        /// from every device config message.
+        /// </summary>
+        /// <remarks>Bridge-only, for the same reason as ReportSettings below.</remarks>
+        [HttpPost("name/{sensorName}/security-capability")]
+        [Authorize(Roles = $"{RoleNames.Admin},{DeviceHub.BridgeRole}")]
+        [SwaggerOperation(Summary = "Records whether a device can take Garge Security settings.")]
+        [SwaggerResponse(204, "Recorded.")]
+        [SwaggerResponse(404, "Sensor not found.")]
+        public async Task<IActionResult> ReportCapability(string sensorName, [FromBody] SecurityCapabilityDto dto, CancellationToken ct = default)
+        {
+            var found = await _security.SetCapabilityAsync(sensorName, dto.Capable, ct);
+            if (!found)
+            {
+                _logger.LogWarning("ReportCapability not found: {@LogData}", new { sensorName = LogSanitizer.Sanitize(sensorName) });
+                return NotFound(new { message = "Sensor not found!" });
+            }
             return NoContent();
         }
 
