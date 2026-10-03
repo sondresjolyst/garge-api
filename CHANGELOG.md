@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.16.0](https://github.com/sondresjolyst/garge-api/compare/v2.15.0...v2.16.0) (2026-10-03)
+
+
+### Features
+
+* lease one gateway per shared device, with per-target broker ACLs ([#444](https://github.com/sondresjolyst/garge-api/issues/444)) ([354b5fe](https://github.com/sondresjolyst/garge-api/commit/354b5fe92425bdd0c3ac9f2fd9e1584935131121))
+
 ## [2.15.0](https://github.com/sondresjolyst/garge-api/compare/v2.14.1...v2.15.0) (2026-09-28)
 
 
