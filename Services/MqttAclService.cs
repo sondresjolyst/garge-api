@@ -24,6 +24,14 @@ namespace garge_api.Services
         /// has to be disconnected as well for the change to bite.
         /// </summary>
         Task<bool> RevokeDiscoveredDeviceAclAsync(string gatewayDeviceName, string target, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Stages removal of every gateway's rows for one target except the holder's. Before the
+        /// lease existed these rows were granted to every gateway that discovered a device, and a
+        /// handover only takes them from the gateway it demotes, so the rest would keep write
+        /// access to a device they must not touch.
+        /// </summary>
+        Task<int> PruneAclsForOtherGatewaysAsync(string target, string holderDeviceName, CancellationToken cancellationToken = default);
     }
 
     public class MqttAclService : IMqttAclService
@@ -116,6 +124,29 @@ namespace garge_api.Services
             _logger.LogInformation("Revoked discovered-device ACL {@LogData}",
                 new { GatewayDeviceName = gatewayDeviceName, Target = target, Rows = rows.Count });
             return true;
+        }
+
+        public async Task<int> PruneAclsForOtherGatewaysAsync(string target, string holderDeviceName, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(holderDeviceName))
+            {
+                return 0;
+            }
+
+            var topic = DeviceTopicFilter(target);
+            var stale = await _context.EMQXMqttAcls
+                .Where(a => a.Topic == topic && a.Username != holderDeviceName)
+                .ToListAsync(cancellationToken);
+
+            if (stale.Count == 0)
+            {
+                return 0;
+            }
+
+            _context.EMQXMqttAcls.RemoveRange(stale);
+            _logger.LogInformation("Pruned ACL rows for gateways that do not hold the lease {@LogData}",
+                new { Target = target, Holder = holderDeviceName, Rows = stale.Count });
+            return stale.Count;
         }
 
         private static bool Matches(EMQXMqttAcl acl, string username, string topic, short retain) =>

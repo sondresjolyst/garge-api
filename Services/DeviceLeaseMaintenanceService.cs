@@ -37,9 +37,26 @@ namespace garge_api.Services
             var acls = scope.ServiceProvider.GetRequiredService<IMqttAclService>();
             var broker = scope.ServiceProvider.GetRequiredService<IEmqxAdminClient>();
 
+            // Rows granted before the lease existed went to every gateway that discovered a
+            // device, and a handover only takes them from the gateway it demotes. Pruning here
+            // leaves exactly the holder's rows, which is what the broker needs before it can be
+            // told to deny anything it has no rule for.
+            var pruned = 0;
+            foreach (var (holder, targets) in await leases.LiveLeasesByControllerAsync(ct))
+            {
+                foreach (var target in targets)
+                {
+                    pruned += await acls.PruneAclsForOtherGatewaysAsync(target, holder, ct);
+                }
+            }
+
             var handovers = await leases.PromoteExpiredLeasesAsync(ct);
             if (handovers.Count == 0)
             {
+                if (pruned > 0)
+                {
+                    await db.SaveChangesAsync(ct);
+                }
                 return;
             }
 

@@ -136,6 +136,62 @@ public class MqttAclServiceTests : ControllerTestBase
         Assert.Empty(db.EMQXMqttAcls);
     }
 
+    [Fact]
+    public async Task PruneAclsForOtherGateways_LeavesOnlyTheHoldersRows()
+    {
+        using var db = CreateDbContext();
+        var other = "garge_ffffffffffff";
+        var service = CreateService(db);
+        // What the state looks like before the lease existed: every gateway that discovered the
+        // device was granted its topics.
+        await service.EnsureDiscoveredDeviceAclAsync(Gateway, Target);
+        await service.EnsureDiscoveredDeviceAclAsync(other, Target);
+        await db.SaveChangesAsync();
+        Assert.Equal(4, db.EMQXMqttAcls.Count());
+
+        var pruned = await service.PruneAclsForOtherGatewaysAsync(Target, Gateway);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(2, pruned);
+        Assert.Equal(2, db.EMQXMqttAcls.Count());
+        Assert.All(db.EMQXMqttAcls, a => Assert.Equal(Gateway, a.Username));
+    }
+
+    [Fact]
+    public async Task PruneAclsForOtherGateways_LeavesOtherTargetsAlone()
+    {
+        using var db = CreateDbContext();
+        var otherTarget = "wiz_SHRGBC_d8a01127d90e";
+        var service = CreateService(db);
+        await service.EnsureDiscoveredDeviceAclAsync(Gateway, Target);
+        await service.EnsureDiscoveredDeviceAclAsync("garge_ffffffffffff", otherTarget);
+        await db.SaveChangesAsync();
+
+        var pruned = await service.PruneAclsForOtherGatewaysAsync(Target, Gateway);
+        await db.SaveChangesAsync();
+
+        // A different device's lease is none of this target's business.
+        Assert.Equal(0, pruned);
+        Assert.Equal(4, db.EMQXMqttAcls.Count());
+    }
+
+    [Fact]
+    public async Task PruneAclsForOtherGateways_DoesNotTouchTheGatewaysOwnPrefix()
+    {
+        using var db = CreateDbContext();
+        var service = CreateService(db);
+        await service.EnsureTopicAclAsync("garge_ffffffffffff", MqttAclService.DeviceTopicFilter("garge_ffffffffffff"));
+        await service.EnsureDiscoveredDeviceAclAsync(Gateway, Target);
+        await db.SaveChangesAsync();
+
+        await service.PruneAclsForOtherGatewaysAsync(Target, Gateway);
+        await db.SaveChangesAsync();
+
+        // A gateway always keeps its own prefix; only the shared target's rows are at stake.
+        Assert.Contains(db.EMQXMqttAcls, a => a.Username == "garge_ffffffffffff");
+        Assert.Equal(4, db.EMQXMqttAcls.Count());
+    }
+
     [Theory]
     [InlineData("", Target)]
     [InlineData(Gateway, "")]
