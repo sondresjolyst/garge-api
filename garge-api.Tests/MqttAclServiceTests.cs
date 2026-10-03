@@ -136,29 +136,6 @@ public class MqttAclServiceTests : ControllerTestBase
         Assert.Empty(db.EMQXMqttAcls);
     }
 
-    [Fact]
-    public async Task EnsureDiscoveredDeviceAcls_GrantsEveryDistinctTargetOfTheGateway()
-    {
-        using var db = CreateDbContext();
-        var other = "wiz_SHRGBC_d8a01127d90e";
-        db.DiscoveredDevices.AddRange(
-            new DiscoveredDevice { DiscoveredBy = Gateway, Target = Target, Type = "switch", Timestamp = DateTime.UtcNow },
-            new DiscoveredDevice { DiscoveredBy = Gateway, Target = other, Type = "light", Timestamp = DateTime.UtcNow },
-            new DiscoveredDevice { DiscoveredBy = "garge_other", Target = "wiz_SOCKET_ffffffffffff", Type = "switch", Timestamp = DateTime.UtcNow });
-        await db.SaveChangesAsync();
-
-        var granted = await CreateService(db).EnsureDiscoveredDeviceAclsAsync(Gateway);
-        await db.SaveChangesAsync();
-
-        Assert.Equal(2, granted);
-        var topics = db.EMQXMqttAcls.Select(a => a.Topic).Distinct().OrderBy(t => t).ToList();
-        Assert.Equal(
-            new[] { $"garge/devices/{other}/#", $"garge/devices/{Target}/#" },
-            topics);
-        // Another gateway's discovery must not grant anything to this one.
-        Assert.All(db.EMQXMqttAcls, a => Assert.Equal(Gateway, a.Username));
-    }
-
     [Theory]
     [InlineData("", Target)]
     [InlineData(Gateway, "")]

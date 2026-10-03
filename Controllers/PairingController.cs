@@ -1,4 +1,4 @@
-using garge_api.Constants;
+﻿using garge_api.Constants;
 using garge_api.Dtos.Pairing;
 using garge_api.Helpers;
 using garge_api.Hubs;
@@ -36,14 +36,16 @@ namespace garge_api.Controllers
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubContext<DeviceHub> _hub;
         private readonly IMqttAclService _mqttAcls;
+        private readonly IDeviceLeaseService _leases;
 
-        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, IMqttAclService mqttAcls)
+        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, IMqttAclService mqttAcls, IDeviceLeaseService leases)
         {
             _context = context;
             _logger = logger;
             _ownership = ownership;
             _hub = hub;
             _mqttAcls = mqttAcls;
+            _leases = leases;
         }
 
         /// <summary>
@@ -369,10 +371,18 @@ namespace garge_api.Controllers
             // Two rows (retain 1 and 0) mirror the provisioning script; upsert is idempotent.
             await _mqttAcls.EnsureTopicAclAsync(deviceName, MqttAclService.DeviceTopicFilter(deviceName));
 
-            // A device discovered before the per-target grant existed holds discovery rows with
-            // no matching ACL, and it only rediscovers on its own schedule, so pairing catches up
-            // on the targets it already reported.
-            var backfilled = await _mqttAcls.EnsureDiscoveredDeviceAclsAsync(deviceName);
+            // A device that already holds leases may be missing their rows, because the grant was
+            // added later or the rows were rotated away, and it only rediscovers on its own
+            // schedule. Pairing catches those up. Targets it does not hold are left alone: the
+            // lease, not the pairing, decides who may act on a shared device.
+            var backfilled = 0;
+            foreach (var controlledTarget in await _leases.ControlledTargetsAsync(deviceName))
+            {
+                if (await _mqttAcls.EnsureDiscoveredDeviceAclAsync(deviceName, controlledTarget))
+                {
+                    backfilled++;
+                }
+            }
 
             await _context.SaveChangesAsync();
 

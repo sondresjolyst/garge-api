@@ -15,14 +15,15 @@ namespace garge_api.Services
         /// <summary>Stages the ACL rows for one topic filter, skipping any that already exist.</summary>
         Task EnsureTopicAclAsync(string username, string topic, CancellationToken cancellationToken = default);
 
-        /// <summary>
-        /// Stages ACL rows for every device <paramref name="gatewayDeviceName"/> has discovered,
-        /// skipping targets a different user owns. Returns the number of targets granted.
-        /// </summary>
-        Task<int> EnsureDiscoveredDeviceAclsAsync(string gatewayDeviceName, CancellationToken cancellationToken = default);
-
         /// <summary>Stages the ACL rows for a discovered target, unless a different user owns it.</summary>
         Task<bool> EnsureDiscoveredDeviceAclAsync(string gatewayDeviceName, string target, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Stages removal of a gateway's rows for one target, used when it loses the lease.
+        /// Removing the rows does not end a subscription the gateway already holds, so the client
+        /// has to be disconnected as well for the change to bite.
+        /// </summary>
+        Task<bool> RevokeDiscoveredDeviceAclAsync(string gatewayDeviceName, string target, CancellationToken cancellationToken = default);
     }
 
     public class MqttAclService : IMqttAclService
@@ -94,24 +95,27 @@ namespace garge_api.Services
             return true;
         }
 
-        public async Task<int> EnsureDiscoveredDeviceAclsAsync(string gatewayDeviceName, CancellationToken cancellationToken = default)
+        public async Task<bool> RevokeDiscoveredDeviceAclAsync(string gatewayDeviceName, string target, CancellationToken cancellationToken = default)
         {
-            var targets = await _context.DiscoveredDevices
-                .Where(d => d.DiscoveredBy == gatewayDeviceName)
-                .Select(d => d.Target)
-                .Distinct()
-                .ToListAsync(cancellationToken);
-
-            var granted = 0;
-            foreach (var target in targets)
+            if (string.IsNullOrWhiteSpace(gatewayDeviceName) || string.IsNullOrWhiteSpace(target))
             {
-                if (await EnsureDiscoveredDeviceAclAsync(gatewayDeviceName, target, cancellationToken))
-                {
-                    granted++;
-                }
+                return false;
             }
 
-            return granted;
+            var topic = DeviceTopicFilter(target);
+            var rows = await _context.EMQXMqttAcls
+                .Where(a => a.Username == gatewayDeviceName && a.Topic == topic)
+                .ToListAsync(cancellationToken);
+
+            if (rows.Count == 0)
+            {
+                return false;
+            }
+
+            _context.EMQXMqttAcls.RemoveRange(rows);
+            _logger.LogInformation("Revoked discovered-device ACL {@LogData}",
+                new { GatewayDeviceName = gatewayDeviceName, Target = target, Rows = rows.Count });
+            return true;
         }
 
         private static bool Matches(EMQXMqttAcl acl, string username, string topic, short retain) =>

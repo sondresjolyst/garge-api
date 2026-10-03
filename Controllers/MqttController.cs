@@ -23,12 +23,16 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<MqttController> _logger;
         private readonly IMqttAclService _mqttAcls;
+        private readonly IDeviceLeaseService _leases;
+        private readonly IDeviceCommandService _commands;
 
-        public MqttController(ApplicationDbContext context, ILogger<MqttController> logger, IMqttAclService mqttAcls)
+        public MqttController(ApplicationDbContext context, ILogger<MqttController> logger, IMqttAclService mqttAcls, IDeviceLeaseService leases, IDeviceCommandService commands)
         {
             _context = context;
             _logger = logger;
             _mqttAcls = mqttAcls;
+            _leases = leases;
+            _commands = commands;
         }
 
         /// <summary>
@@ -170,10 +174,7 @@ namespace garge_api.Controllers
             try
             {
                 _context.DiscoveredDevices.Add(device);
-                // The gateway publishes this target's config and state, and subscribes to its
-                // command topic, and those live at the broker root rather than under the
-                // gateway's own prefix, so they need rows of their own.
-                await _mqttAcls.EnsureDiscoveredDeviceAclAsync(dto.DiscoveredBy, dto.Target);
+                await GrantAclIfLeaseHolderAsync(dto.DiscoveredBy, dto.Target);
                 await _context.SaveChangesAsync();
                 _logger.LogInformation("Discovered device created: {@LogData}", new
                 {
@@ -193,11 +194,11 @@ namespace garge_api.Controllers
                     dto.Type
                 });
 
-                // A device that was discovered before this ACL grant existed reports the
-                // conflict on every rediscovery, so the rows are granted here too rather than
-                // only on the first one.
+                // A device discovered before this grant existed reports the conflict on every
+                // rediscovery, and rediscovery is also what renews its lease, so both happen
+                // here rather than only on the first discovery.
                 _context.Entry(device).State = EntityState.Detached;
-                await _mqttAcls.EnsureDiscoveredDeviceAclAsync(dto.DiscoveredBy, dto.Target);
+                await GrantAclIfLeaseHolderAsync(dto.DiscoveredBy, dto.Target);
                 await _context.SaveChangesAsync();
 
                 return Conflict(new { message = "Discovered device already exists for this combination." });
@@ -212,6 +213,116 @@ namespace garge_api.Controllers
                 });
                 return StatusCode(500, new { message = "An unexpected error occurred while creating the discovered device." });
             }
+        }
+
+        /// <summary>
+        /// Records the state a target device should be in. The operator delivers it and keeps
+        /// reissuing until the device is observed to agree, because a command on a device's
+        /// <c>/set</c> topic is not retained and is lost outright if no gateway is listening.
+        /// </summary>
+        [HttpPut("devices/{target}/desired-state")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin},{RoleNames.SwitchAdmin}")]
+        [SwaggerOperation(Summary = "Records the state a target device should be in.")]
+        [SwaggerResponse(200, "The recorded intent.", typeof(PendingDeviceCommandDto))]
+        [SwaggerResponse(400, "State is missing.")]
+        public async Task<IActionResult> PutDesiredState(string target, [FromBody] SetDeviceStateDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(dto.State))
+            {
+                return BadRequest(new { message = "Target and state are required." });
+            }
+
+            var intent = await _commands.SetDesiredStateAsync(target.Trim(), dto.State.Trim().ToUpperInvariant());
+            var controller = await _leases.ControllerOfAsync(intent.Target);
+
+            return Ok(ToPendingDto(intent, controller));
+        }
+
+        /// <summary>
+        /// Records the state a target device was observed in. The controlling gateway reports
+        /// this from the device's own push, so it reflects the device rather than what any gateway
+        /// believes, and it is what settles an outstanding command.
+        /// </summary>
+        [HttpPut("devices/{target}/observed-state")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
+        [SwaggerOperation(Summary = "Records the state a target device was observed in.")]
+        [SwaggerResponse(200, "The updated intent.", typeof(PendingDeviceCommandDto))]
+        [SwaggerResponse(204, "No command is outstanding for this device.")]
+        [SwaggerResponse(400, "State is missing.")]
+        public async Task<IActionResult> PutObservedState(string target, [FromBody] SetDeviceStateDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(target) || string.IsNullOrWhiteSpace(dto.State))
+            {
+                return BadRequest(new { message = "Target and state are required." });
+            }
+
+            var intent = await _commands.RecordObservedStateAsync(target.Trim(), dto.State.Trim().ToUpperInvariant());
+            if (intent == null)
+            {
+                return NoContent();
+            }
+
+            return Ok(ToPendingDto(intent, await _leases.ControllerOfAsync(intent.Target)));
+        }
+
+        /// <summary>
+        /// The commands still waiting to be delivered, with the gateway allowed to carry each one.
+        /// </summary>
+        [HttpGet("devices/pending-commands")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
+        [SwaggerOperation(Summary = "Lists the device commands still waiting to be delivered.")]
+        [SwaggerResponse(200, "The outstanding commands.", typeof(IEnumerable<PendingDeviceCommandDto>))]
+        public async Task<IActionResult> GetPendingCommands()
+        {
+            var pending = await _commands.PendingAsync();
+            var result = new List<PendingDeviceCommandDto>(pending.Count);
+
+            foreach (var intent in pending)
+            {
+                result.Add(ToPendingDto(intent, await _leases.ControllerOfAsync(intent.Target)));
+            }
+
+            return Ok(result);
+        }
+
+        /// <summary>Counts one delivery attempt, so a command cannot be retried forever.</summary>
+        [HttpPost("devices/{target}/command-attempt")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
+        [SwaggerOperation(Summary = "Counts one delivery attempt for a device command.")]
+        [SwaggerResponse(204, "Counted, or no command is outstanding.")]
+        public async Task<IActionResult> PostCommandAttempt(string target)
+        {
+            await _commands.RecordAttemptAsync(target.Trim());
+            return NoContent();
+        }
+
+        private static PendingDeviceCommandDto ToPendingDto(DeviceDesiredState intent, string? controller) => new()
+        {
+            Target = intent.Target,
+            DesiredState = intent.DesiredState,
+            ObservedState = intent.ObservedState,
+            ControllerDeviceName = controller,
+            Attempts = intent.Attempts,
+            DesiredStateAt = intent.DesiredStateAt
+        };
+
+        /// <summary>
+        /// Reports the gateway as seeing the target, which renews or takes the lease, and grants
+        /// the broker rows only to whichever gateway ends up holding it. A standby is recorded as
+        /// a candidate for a later handover but is given no access, so one device answers the
+        /// target's command topic rather than several.
+        /// </summary>
+        private async Task GrantAclIfLeaseHolderAsync(string gatewayDeviceName, string target)
+        {
+            var controller = await _leases.ReportSeenAsync(gatewayDeviceName, target);
+            if (controller != gatewayDeviceName)
+            {
+                _logger.LogInformation("Discovered device left to its lease holder {@LogData}",
+                    new { DiscoveredBy = gatewayDeviceName, Target = target, Controller = controller });
+                return;
+            }
+
+            await _mqttAcls.EnsureDiscoveredDeviceAclAsync(gatewayDeviceName, target);
         }
     }
 }
