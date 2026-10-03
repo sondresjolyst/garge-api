@@ -53,6 +53,11 @@ namespace garge_api.Services
                 await acls.EnsureDiscoveredDeviceAclAsync(handover.NewController, handover.Target, ct);
             }
 
+            // A renewal landing between the read and this save overwrites the promotion, so the
+            // lease can end up with one gateway and the moved ACL rows with another. It settles
+            // itself: whichever gateway holds the lease is granted its rows again on its next
+            // report, which a live gateway makes every cycle. Guarding it with a row version
+            // would mean a column named xmin, which Postgres reserves.
             await db.SaveChangesAsync(ct);
 
             // Only after the rows are committed, so a client that reconnects immediately is

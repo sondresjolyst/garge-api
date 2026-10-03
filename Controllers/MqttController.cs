@@ -171,19 +171,11 @@ namespace garge_api.Controllers
                 Timestamp = dto.Timestamp
             };
 
+            var alreadyKnown = false;
             try
             {
                 _context.DiscoveredDevices.Add(device);
-                await GrantAclIfLeaseHolderAsync(dto.DiscoveredBy, dto.Target);
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Discovered device created: {@LogData}", new
-                {
-                    device.Id,
-                    device.DiscoveredBy,
-                    device.Target,
-                    device.Type
-                });
-                return Ok(new { device.Id });
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
             {
@@ -193,15 +185,8 @@ namespace garge_api.Controllers
                     dto.Target,
                     dto.Type
                 });
-
-                // A device discovered before this grant existed reports the conflict on every
-                // rediscovery, and rediscovery is also what renews its lease, so both happen
-                // here rather than only on the first discovery.
                 _context.Entry(device).State = EntityState.Detached;
-                await GrantAclIfLeaseHolderAsync(dto.DiscoveredBy, dto.Target);
-                await _context.SaveChangesAsync();
-
-                return Conflict(new { message = "Discovered device already exists for this combination." });
+                alreadyKnown = true;
             }
             catch (Exception ex)
             {
@@ -213,6 +198,38 @@ namespace garge_api.Controllers
                 });
                 return StatusCode(500, new { message = "An unexpected error occurred while creating the discovered device." });
             }
+
+            // Saved separately from the discovery row, and on the already-exists path too: a
+            // device only rediscovers on its own schedule, and rediscovery is what renews its
+            // lease, so a conflict here must not cost it the renewal.
+            try
+            {
+                await GrantAclIfLeaseHolderAsync(dto.DiscoveredBy, dto.Target);
+            }
+            catch (Exception ex)
+            {
+                // The discovery row is already saved and the next report retries the lease, so
+                // the caller is told the discovery landed rather than being failed outright.
+                _logger.LogError(ex, "Error recording the device lease for {@LogData}", new
+                {
+                    dto.DiscoveredBy,
+                    dto.Target
+                });
+            }
+
+            if (alreadyKnown)
+            {
+                return Conflict(new { message = "Discovered device already exists for this combination." });
+            }
+
+            _logger.LogInformation("Discovered device created: {@LogData}", new
+            {
+                device.Id,
+                device.DiscoveredBy,
+                device.Target,
+                device.Type
+            });
+            return Ok(new { device.Id });
         }
 
         /// <summary>
@@ -342,10 +359,41 @@ namespace garge_api.Controllers
             {
                 _logger.LogInformation("Discovered device left to its lease holder {@LogData}",
                     new { DiscoveredBy = gatewayDeviceName, Target = target, Controller = controller });
+                await _context.SaveChangesAsync();
                 return;
             }
 
             await _mqttAcls.EnsureDiscoveredDeviceAclAsync(gatewayDeviceName, target);
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
+            {
+                // Two gateways reporting the same target for the first time both see no lease
+                // and both insert one; the unique index on Target is what keeps a single holder,
+                // so the loser simply becomes a standby. Its own rediscovery renews nothing and
+                // the holder keeps the device.
+                _logger.LogInformation("Device lease taken by another gateway first {@LogData}",
+                    new { DiscoveredBy = gatewayDeviceName, Target = target });
+                DetachStagedLeaseAndAcls();
+            }
+        }
+
+        /// <summary>
+        /// Drops the rows staged for a lease another gateway won. Left attached, they would be
+        /// retried by the next save on this context and fail again.
+        /// </summary>
+        private void DetachStagedLeaseAndAcls()
+        {
+            foreach (var entry in _context.ChangeTracker.Entries()
+                         .Where(e => e.State == EntityState.Added &&
+                                     (e.Entity is DeviceController || e.Entity is EMQXMqttAcl))
+                         .ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
         }
     }
 }
