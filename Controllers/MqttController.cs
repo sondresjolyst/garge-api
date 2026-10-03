@@ -241,6 +241,7 @@ namespace garge_api.Controllers
         [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin},{RoleNames.SwitchAdmin}")]
         [SwaggerOperation(Summary = "Records the state a target device should be in.")]
         [SwaggerResponse(200, "The recorded intent.", typeof(PendingDeviceCommandDto))]
+        [SwaggerResponse(204, "The target is not a discovered device, so no intent is tracked.")]
         [SwaggerResponse(400, "State is missing.")]
         public async Task<IActionResult> PutDesiredState(string target, [FromBody] SetDeviceStateDto dto)
         {
@@ -250,9 +251,14 @@ namespace garge_api.Controllers
             }
 
             var intent = await _commands.SetDesiredStateAsync(target.Trim(), dto.State.Trim().ToUpperInvariant());
-            var controller = await _leases.ControllerOfAsync(intent.Target);
+            if (intent == null)
+            {
+                // Not a discovered device, so it is published to directly and has no lease to
+                // wait on; tracking it would leave a command pending for good.
+                return NoContent();
+            }
 
-            return Ok(ToPendingDto(intent, controller));
+            return Ok(ToPendingDto(intent, await _leases.ControllerOfAsync(intent.Target)));
         }
 
         /// <summary>

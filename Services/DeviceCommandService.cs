@@ -12,8 +12,12 @@ namespace garge_api.Services
     /// </summary>
     public interface IDeviceCommandService
     {
-        /// <summary>Records the state a target should be in. Resets the retry count.</summary>
-        Task<DeviceDesiredState> SetDesiredStateAsync(string target, string desiredState, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Records the state a target should be in, and resets the retry count. Returns null for
+        /// a target no gateway has reported: only a discovered device is reached through a
+        /// gateway's lease, so only those need redelivering.
+        /// </summary>
+        Task<DeviceDesiredState?> SetDesiredStateAsync(string target, string desiredState, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Records the state a target was observed in, taken from the device's own push rather
@@ -51,8 +55,15 @@ namespace garge_api.Services
             _time = time ?? TimeProvider.System;
         }
 
-        public async Task<DeviceDesiredState> SetDesiredStateAsync(string target, string desiredState, CancellationToken cancellationToken = default)
+        public async Task<DeviceDesiredState?> SetDesiredStateAsync(string target, string desiredState, CancellationToken cancellationToken = default)
         {
+            // A switch that is not a discovered device is published to directly and has no lease
+            // to wait on, so tracking intent for it would leave a command pending forever.
+            if (!await _context.DiscoveredDevices.AnyAsync(d => d.Target == target, cancellationToken))
+            {
+                return null;
+            }
+
             var now = _time.GetUtcNow().UtcDateTime;
             var row = await _context.DeviceDesiredStates.FirstOrDefaultAsync(d => d.Target == target, cancellationToken);
 
