@@ -1,4 +1,4 @@
-using garge_api.Controllers;
+﻿using garge_api.Controllers;
 using garge_api.Dtos.Mqtt;
 using garge_api.Models;
 using garge_api.Models.Mqtt;
@@ -108,7 +108,7 @@ public class MqttControllerDiscoveryTests : ControllerTestBase
         var result = await CreateController(db).PostDiscoveredDevice(Discovery(GatewayA));
 
         Assert.IsType<OkObjectResult>(result);
-        // The lease is still recorded — the gateway can see the device — but naming someone
+        // The lease is still recorded, since the gateway can see the device, but naming someone
         // else's switch as a target must not hand over access to it.
         Assert.Equal(GatewayA, db.DeviceControllers.Single().ControllerDeviceName);
         Assert.Empty(db.EMQXMqttAcls);

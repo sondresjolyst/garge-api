@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 
@@ -6,8 +6,8 @@ namespace garge_api.Services
 {
     /// <summary>
     /// The broker's own management API, used to disconnect a client. Removing an ACL row does not
-    /// end a subscription the client already holds — the broker authorises a subscription when it
-    /// is made — so a gateway that loses a lease keeps receiving that device's commands until its
+    /// end a subscription the client already holds. The broker authorises a subscription when
+    /// it is made, so a gateway that loses a lease keeps receiving that device's commands until its
     /// session ends. Disconnecting it forces the subscription to be re-authorised on reconnect.
     /// </summary>
     public interface IEmqxAdminClient

@@ -1,11 +1,11 @@
-using garge_api.Models;
+﻿using garge_api.Models;
 
 namespace garge_api.Services
 {
     /// <summary>
     /// Hands a lapsed device lease to a standby gateway. A lease lapses when its holder stops
-    /// reporting the target — the gateway lost power, left the network, or moved out of UDP range
-    /// of the device — and until someone takes over, the device answers nothing.
+    /// reporting the target. The gateway lost power, left the network, or moved out of UDP
+    /// range of the device. Until someone takes over, the device answers nothing.
     /// </summary>
     public class DeviceLeaseMaintenanceService(
         IServiceScopeFactory scopeFactory,

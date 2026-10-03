@@ -1,4 +1,4 @@
-using garge_api.Models;
+﻿using garge_api.Models;
 using garge_api.Models.Mqtt;
 using Microsoft.EntityFrameworkCore;
 
@@ -21,7 +21,7 @@ namespace garge_api.Services
         Task<string> ReportSeenAsync(string gatewayDeviceName, string target, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// The gateway holding a live lease on this target, or null when nobody does — in which
+        /// The gateway holding a live lease on this target, or null when nobody does, in which
         /// case a command for it cannot be delivered yet.
         /// </summary>
         Task<string?> ControllerOfAsync(string target, CancellationToken cancellationToken = default);
