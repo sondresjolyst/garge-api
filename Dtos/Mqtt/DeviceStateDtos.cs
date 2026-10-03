@@ -20,4 +20,14 @@ namespace garge_api.Dtos.Mqtt
         public int Attempts { get; set; }
         public DateTime DesiredStateAt { get; set; }
     }
+
+    /// <summary>
+    /// The targets one gateway is allowed to act on. A gateway not holding a device's lease does
+    /// not see it here, and so stays a standby for it.
+    /// </summary>
+    public class DeviceControlListDto
+    {
+        public required string GatewayDeviceName { get; set; }
+        public required IReadOnlyList<string> Targets { get; set; }
+    }
 }

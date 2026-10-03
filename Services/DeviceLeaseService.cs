@@ -30,6 +30,12 @@ namespace garge_api.Services
         Task<IReadOnlyList<string>> ControlledTargetsAsync(string gatewayDeviceName, CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Every live lease grouped by the gateway holding it, so each gateway can be told which
+        /// targets it may act on.
+        /// </summary>
+        Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> LiveLeasesByControllerAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Promotes a standby for every lease that has lapsed, choosing deterministically among
         /// the gateways that discovered the target. Returns the targets whose holder changed.
         /// Stages changes; the caller saves.
@@ -129,6 +135,22 @@ namespace garge_api.Services
                 .Select(c => c.Target)
                 .OrderBy(t => t)
                 .ToListAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> LiveLeasesByControllerAsync(CancellationToken cancellationToken = default)
+        {
+            var now = _time.GetUtcNow().UtcDateTime;
+
+            var live = await _context.DeviceControllers
+                .Where(c => c.LeaseExpiresAt > now)
+                .Select(c => new { c.ControllerDeviceName, c.Target })
+                .ToListAsync(cancellationToken);
+
+            return live
+                .GroupBy(c => c.ControllerDeviceName)
+                .ToDictionary(
+                    g => g.Key,
+                    g => (IReadOnlyList<string>)g.Select(c => c.Target).OrderBy(t => t, StringComparer.Ordinal).ToList());
         }
 
         public async Task<IReadOnlyList<LeaseHandover>> PromoteExpiredLeasesAsync(CancellationToken cancellationToken = default)

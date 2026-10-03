@@ -285,6 +285,29 @@ namespace garge_api.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Which targets each gateway may currently act on. A gateway that discovered a device
+        /// but does not hold its lease is absent from its own list, which is how it knows to stay
+        /// a standby: report the device, but publish nothing for it and answer no commands.
+        /// </summary>
+        [HttpGet("devices/controls")]
+        [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
+        [SwaggerOperation(Summary = "Lists the targets each gateway currently controls.")]
+        [SwaggerResponse(200, "The controlled targets per gateway.", typeof(IEnumerable<DeviceControlListDto>))]
+        public async Task<IActionResult> GetDeviceControls()
+        {
+            var leases = await _leases.LiveLeasesByControllerAsync();
+
+            return Ok(leases
+                .Select(pair => new DeviceControlListDto
+                {
+                    GatewayDeviceName = pair.Key,
+                    Targets = pair.Value
+                })
+                .OrderBy(dto => dto.GatewayDeviceName, StringComparer.Ordinal)
+                .ToList());
+        }
+
         /// <summary>Counts one delivery attempt, so a command cannot be retried forever.</summary>
         [HttpPost("devices/{target}/command-attempt")]
         [Authorize(Roles = $"{RoleNames.Admin},{RoleNames.MqttAdmin}")]
