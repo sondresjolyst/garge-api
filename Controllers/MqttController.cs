@@ -3,6 +3,7 @@ using garge_api.Dtos.Mqtt;
 using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Mqtt;
+using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -21,11 +22,13 @@ namespace garge_api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<MqttController> _logger;
+        private readonly IMqttAclService _mqttAcls;
 
-        public MqttController(ApplicationDbContext context, ILogger<MqttController> logger)
+        public MqttController(ApplicationDbContext context, ILogger<MqttController> logger, IMqttAclService mqttAcls)
         {
             _context = context;
             _logger = logger;
+            _mqttAcls = mqttAcls;
         }
 
         /// <summary>
@@ -167,6 +170,10 @@ namespace garge_api.Controllers
             try
             {
                 _context.DiscoveredDevices.Add(device);
+                // The gateway publishes this target's config and state, and subscribes to its
+                // command topic, and those live at the broker root rather than under the
+                // gateway's own prefix, so they need rows of their own.
+                await _mqttAcls.EnsureDiscoveredDeviceAclAsync(dto.DiscoveredBy, dto.Target);
                 await _context.SaveChangesAsync();
                 _logger.LogInformation("Discovered device created: {@LogData}", new
                 {
@@ -185,6 +192,14 @@ namespace garge_api.Controllers
                     dto.Target,
                     dto.Type
                 });
+
+                // A device that was discovered before this ACL grant existed reports the
+                // conflict on every rediscovery, so the rows are granted here too rather than
+                // only on the first one.
+                _context.Entry(device).State = EntityState.Detached;
+                await _mqttAcls.EnsureDiscoveredDeviceAclAsync(dto.DiscoveredBy, dto.Target);
+                await _context.SaveChangesAsync();
+
                 return Conflict(new { message = "Discovered device already exists for this combination." });
             }
             catch (Exception ex)

@@ -35,13 +35,15 @@ namespace garge_api.Controllers
         private readonly ILogger<PairingController> _logger;
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubContext<DeviceHub> _hub;
+        private readonly IMqttAclService _mqttAcls;
 
-        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub)
+        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, IMqttAclService mqttAcls)
         {
             _context = context;
             _logger = logger;
             _ownership = ownership;
             _hub = hub;
+            _mqttAcls = mqttAcls;
         }
 
         /// <summary>
@@ -365,25 +367,12 @@ namespace garge_api.Controllers
             brokerUser.Salt = salt;
 
             // Two rows (retain 1 and 0) mirror the provisioning script; upsert is idempotent.
-            var topic = $"garge/devices/{deviceName}/#";
-            foreach (short retain in new short[] { 1, 0 })
-            {
-                var exists = await _context.EMQXMqttAcls.AnyAsync(a =>
-                    a.Username == deviceName && a.Permission == "allow" && a.Action == "all" &&
-                    a.Topic == topic && a.Qos == 0 && a.Retain == retain);
-                if (!exists)
-                {
-                    _context.EMQXMqttAcls.Add(new EMQXMqttAcl
-                    {
-                        Username = deviceName,
-                        Permission = "allow",
-                        Action = "all",
-                        Topic = topic,
-                        Qos = 0,
-                        Retain = retain
-                    });
-                }
-            }
+            await _mqttAcls.EnsureTopicAclAsync(deviceName, MqttAclService.DeviceTopicFilter(deviceName));
+
+            // A device discovered before the per-target grant existed holds discovery rows with
+            // no matching ACL, and it only rediscovers on its own schedule, so pairing catches up
+            // on the targets it already reported.
+            var backfilled = await _mqttAcls.EnsureDiscoveredDeviceAclsAsync(deviceName);
 
             await _context.SaveChangesAsync();
 
@@ -391,7 +380,8 @@ namespace garge_api.Controllers
             {
                 token.UserId,
                 DeviceName = deviceName,
-                Rotated = rotated
+                Rotated = rotated,
+                DiscoveredTargetsGranted = backfilled
             });
             return Ok(new DeviceCredentialsDto { Username = deviceName, Password = password });
         }

@@ -1,4 +1,4 @@
-using garge_api.Models;
+﻿using garge_api.Models;
 using garge_api.Constants;
 using Mapster;
 using MapsterMapper;
@@ -190,6 +190,7 @@ namespace garge_api
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
             builder.Services.AddScoped<IPermissionService, PermissionService>();
+            builder.Services.AddScoped<IMqttAclService, MqttAclService>();
             builder.Services.AddScoped<ISecurityNotifier, SecurityNotifier>();
             builder.Services.AddScoped<ISecurityModeService, SecurityModeService>();
             builder.Services.AddScoped<IPipelineHealthService, PipelineHealthService>();
