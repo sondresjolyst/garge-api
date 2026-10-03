@@ -39,7 +39,12 @@ public class PairingControllerTests : ControllerTestBase
         var hub = new Mock<IHubContext<DeviceHub>>();
         hub.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        var controller = new PairingController(db, NullLogger<PairingController>.Instance, ownership.Object, hub.Object);
+        // The real ACL service, not a mock: it is a thin wrapper over the context and the ACL
+        // rows it writes are what these tests assert on.
+        var mqttAcls = new MqttAclService(db, NullLogger<MqttAclService>.Instance);
+        var leases = new DeviceLeaseService(db, NullLogger<DeviceLeaseService>.Instance);
+
+        var controller = new PairingController(db, NullLogger<PairingController>.Instance, ownership.Object, hub.Object, mqttAcls, leases);
         controller.ControllerContext = MakeControllerContext(userId);
         return controller;
     }
@@ -422,6 +427,61 @@ public class PairingControllerTests : ControllerTestBase
         Assert.Equal(MqttPasswordHasher.HashPasswordPBKDF2(creds.Password, user.Salt!), user.PasswordHash);
 
         Assert.Equal(2, db.EMQXMqttAcls.Count()); // upsert respects the unique composite index
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_WithLeasedTargets_AlsoGrantsTheirAcls()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        // Holds the lease but is missing the rows, because the grant was added after it was
+        // discovered and it only rediscovers on its own schedule. Pairing catches that up.
+        db.DeviceControllers.Add(new DeviceController
+        {
+            Target = "wiz_SOCKET_6c2990a96cde",
+            ControllerDeviceName = DeviceName,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(2),
+            LastSeenFromTarget = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "device").ProvisionDevice(Provision());
+
+        Assert.IsType<OkObjectResult>(result);
+        var topics = db.EMQXMqttAcls.Select(a => a.Topic).Distinct().OrderBy(t => t).ToList();
+        Assert.Equal(
+            new[] { $"garge/devices/{DeviceName}/#", "garge/devices/wiz_SOCKET_6c2990a96cde/#" },
+            topics);
+        Assert.Equal(4, db.EMQXMqttAcls.Count()); // retained and non-retained row per topic
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_TargetLeasedByAnotherGateway_GrantsOnlyItsOwnPrefix()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        // This device discovered the socket, but another gateway holds the lease, so pairing must
+        // not hand it access: one gateway answers a shared device, not both.
+        db.DiscoveredDevices.Add(new DiscoveredDevice
+        {
+            DiscoveredBy = DeviceName, Target = "wiz_SOCKET_6c2990a96cde", Type = "switch", Timestamp = DateTime.UtcNow
+        });
+        db.DeviceControllers.Add(new DeviceController
+        {
+            Target = "wiz_SOCKET_6c2990a96cde",
+            ControllerDeviceName = "garge_ffffffffffff",
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(2),
+            LastSeenFromTarget = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, "device").ProvisionDevice(Provision());
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.All(db.EMQXMqttAcls, a => Assert.Equal($"garge/devices/{DeviceName}/#", a.Topic));
+        Assert.Equal(2, db.EMQXMqttAcls.Count());
     }
 
     [Fact]

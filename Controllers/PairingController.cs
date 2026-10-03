@@ -1,4 +1,4 @@
-using garge_api.Constants;
+﻿using garge_api.Constants;
 using garge_api.Dtos.Pairing;
 using garge_api.Helpers;
 using garge_api.Hubs;
@@ -35,13 +35,17 @@ namespace garge_api.Controllers
         private readonly ILogger<PairingController> _logger;
         private readonly IDeviceOwnershipService _ownership;
         private readonly IHubContext<DeviceHub> _hub;
+        private readonly IMqttAclService _mqttAcls;
+        private readonly IDeviceLeaseService _leases;
 
-        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub)
+        public PairingController(ApplicationDbContext context, ILogger<PairingController> logger, IDeviceOwnershipService ownership, IHubContext<DeviceHub> hub, IMqttAclService mqttAcls, IDeviceLeaseService leases)
         {
             _context = context;
             _logger = logger;
             _ownership = ownership;
             _hub = hub;
+            _mqttAcls = mqttAcls;
+            _leases = leases;
         }
 
         /// <summary>
@@ -365,23 +369,18 @@ namespace garge_api.Controllers
             brokerUser.Salt = salt;
 
             // Two rows (retain 1 and 0) mirror the provisioning script; upsert is idempotent.
-            var topic = $"garge/devices/{deviceName}/#";
-            foreach (short retain in new short[] { 1, 0 })
+            await _mqttAcls.EnsureTopicAclAsync(deviceName, MqttAclService.DeviceTopicFilter(deviceName));
+
+            // A device that already holds leases may be missing their rows, because the grant was
+            // added later or the rows were rotated away, and it only rediscovers on its own
+            // schedule. Pairing catches those up. Targets it does not hold are left alone: the
+            // lease, not the pairing, decides who may act on a shared device.
+            var backfilled = 0;
+            foreach (var controlledTarget in await _leases.ControlledTargetsAsync(deviceName))
             {
-                var exists = await _context.EMQXMqttAcls.AnyAsync(a =>
-                    a.Username == deviceName && a.Permission == "allow" && a.Action == "all" &&
-                    a.Topic == topic && a.Qos == 0 && a.Retain == retain);
-                if (!exists)
+                if (await _mqttAcls.EnsureDiscoveredDeviceAclAsync(deviceName, controlledTarget))
                 {
-                    _context.EMQXMqttAcls.Add(new EMQXMqttAcl
-                    {
-                        Username = deviceName,
-                        Permission = "allow",
-                        Action = "all",
-                        Topic = topic,
-                        Qos = 0,
-                        Retain = retain
-                    });
+                    backfilled++;
                 }
             }
 
@@ -391,7 +390,8 @@ namespace garge_api.Controllers
             {
                 token.UserId,
                 DeviceName = deviceName,
-                Rotated = rotated
+                Rotated = rotated,
+                DiscoveredTargetsGranted = backfilled
             });
             return Ok(new DeviceCredentialsDto { Username = deviceName, Password = password });
         }

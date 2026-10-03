@@ -41,6 +41,8 @@ namespace garge_api.Models
         public DbSet<EMQXMqttUser> EMQXMqttUsers { get; set; }
         public DbSet<EMQXMqttAcl> EMQXMqttAcls { get; set; }
         public DbSet<DiscoveredDevice> DiscoveredDevices { get; set; }
+        public DbSet<DeviceController> DeviceControllers { get; set; }
+        public DbSet<DeviceDesiredState> DeviceDesiredStates { get; set; }
         public DbSet<AutomationRule> AutomationRules { get; set; }
         public DbSet<Group.Group> Groups { get; set; }
         public DbSet<GroupSensor> GroupSensors { get; set; }
