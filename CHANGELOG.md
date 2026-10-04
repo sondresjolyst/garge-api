@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.16.1](https://github.com/sondresjolyst/garge-api/compare/v2.16.0...v2.16.1) (2026-10-04)
+
+
+### Dependencies
+
+* **nuget:** bump `Moq` from 4.20.72 to 4.21.0 ([#449](https://github.com/sondresjolyst/garge-api/issues/449)) ([d77e88f](https://github.com/sondresjolyst/garge-api/commit/d77e88f8d5e9015c88543d9472f40d7fa72cff9f))
+* **nuget:** bump `PuppeteerSharp` from 25.11.0 to 25.12.0 ([#450](https://github.com/sondresjolyst/garge-api/issues/450)) ([113ae26](https://github.com/sondresjolyst/garge-api/commit/113ae26ec3020829b23e50c8816f74757b000484))
+* **nuget:** Bump Mapster and Mapster.DependencyInjection ([#448](https://github.com/sondresjolyst/garge-api/issues/448)) ([d623777](https://github.com/sondresjolyst/garge-api/commit/d62377754ed5ea0f56a07303ff8a15d45c36cdf1))
+
 ## [2.16.0](https://github.com/sondresjolyst/garge-api/compare/v2.15.0...v2.16.0) (2026-10-03)
 
 
