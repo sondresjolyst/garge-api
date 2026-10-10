@@ -18,7 +18,7 @@ namespace garge_api.Dtos.Subscription
     public class CreateProductDto
     {
         [Required]
-        [MaxLength(100)]
+        [MaxLength(45)]
         public required string Name { get; set; }
 
         [MaxLength(2000)]
@@ -38,7 +38,7 @@ namespace garge_api.Dtos.Subscription
     public class UpdateProductDto
     {
         [Required]
-        [MaxLength(100)]
+        [MaxLength(45)]
         public required string Name { get; set; }
 
         [MaxLength(2000)]

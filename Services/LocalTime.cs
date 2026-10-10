@@ -15,6 +15,10 @@ namespace garge_api.Services
             return Zone == TimeZoneInfo.Utc ? $"{text} UTC" : text;
         }
 
+        /// <summary>The Norwegian calendar date of a UTC time, as midnight with UTC kind.</summary>
+        public static DateTime Date(DateTime utc) =>
+            DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Zone).Date, DateTimeKind.Utc);
+
         private static TimeZoneInfo Resolve()
         {
             foreach (var id in new[] { "Europe/Oslo", "W. Europe Standard Time" })

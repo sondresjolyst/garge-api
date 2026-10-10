@@ -38,8 +38,21 @@ namespace garge_api.Services
                 buildBody: (sub, s) => BuildSubscriptionEmailBody(
                     sub, s,
                     headline: "We couldn't charge your subscription",
-                    intro: $"Hi {H(sub.User?.FirstName)}, the latest charge failed. We'll retry automatically — update your payment method in the Vipps app to avoid the agreement being stopped.",
+                    intro: sub.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
+                        ? $"Hi {H(sub.User?.FirstName)}, the latest charge is above the maximum amount you approved for this agreement in Vipps. Open the Vipps app and approve the new amount. We'll try the charge again."
+                        : $"Hi {H(sub.User?.FirstName)}, the latest charge failed. We'll retry automatically — update your payment method in the Vipps app to avoid the agreement being stopped.",
                     footerNote: "If you've already fixed it, you can ignore this email."));
+
+        public Task SendStoppedForNonPaymentAsync(int subscriptionId) =>
+            SendAsync(subscriptionId, kind: "stopped-non-payment",
+                subjectFormat: "Subscription stopped, payment failed: {0}",
+                buildBody: (sub, s) => BuildSubscriptionEmailBody(
+                    sub, s,
+                    headline: "Your subscription has been stopped",
+                    intro: sub.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
+                        ? $"Hi {H(sub.User?.FirstName)}, the charge for your subscription stayed above the maximum amount approved in your Vipps agreement, even after retrying over several days, so the agreement has been stopped."
+                        : $"Hi {H(sub.User?.FirstName)}, we could not charge your subscription, even after retrying over several days, so the Vipps agreement has been stopped.",
+                    footerNote: "You can subscribe again under Billing at any time."));
 
         private static string BuildActivatedFooter(Subscription sub)
         {

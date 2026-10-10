@@ -214,6 +214,8 @@ namespace garge_api.Controllers
 
             var settings = await _settingsCache.GetAsync();
             var unitPriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
+            if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
+                return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
 
             var subscription = new Subscription
             {
@@ -274,18 +276,8 @@ namespace garge_api.Controllers
 
             if (subscription == null) return NotFound("Active subscription not found.");
 
-            try
-            {
-                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}", subscription.IsTest);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Vipps agreement cancel failed for subscription {SubscriptionId}", subscription.Id);
-                return StatusCode(502, "Payment provider unavailable.");
-            }
-            subscription.Status = SubscriptionStatus.Stopped;
-            subscription.UpdatedAt = DateTime.UtcNow;
-
+            // Add-ons go first. An agreement is marked Stopped only after Vipps confirms the cancel, and
+            // the primary plan is cancelled only when all its add-ons are.
             var product = await _context.Products.FindAsync(subscription.ProductId);
             if (product?.Type == ProductType.Primary)
             {
@@ -304,12 +296,27 @@ namespace garge_api.Controllers
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to cancel add-on {SubId} after primary cancel", addOn.Id);
+                        _logger.LogError(ex, "Vipps agreement cancel failed for add-on {SubscriptionId}, primary {PrimaryId} left active", addOn.Id, subscription.Id);
+                        await _context.SaveChangesAsync();
+                        return StatusCode(502, "Payment provider unavailable.");
                     }
                     addOn.Status = SubscriptionStatus.Stopped;
                     addOn.UpdatedAt = DateTime.UtcNow;
                 }
             }
+
+            try
+            {
+                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}", subscription.IsTest);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Vipps agreement cancel failed for subscription {SubscriptionId}", subscription.Id);
+                await _context.SaveChangesAsync();
+                return StatusCode(502, "Payment provider unavailable.");
+            }
+            subscription.Status = SubscriptionStatus.Stopped;
+            subscription.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -345,6 +352,8 @@ namespace garge_api.Controllers
             {
                 var settings = await _settingsCache.GetAsync();
                 var unitPriceInOre = Pricing.EffectiveInOre(subscription.Product.PriceInOre, settings.VatEnabled);
+                if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
+                    return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
                 var newCeiling = unitPriceInOre * dto.Quantity;
 
                 try
@@ -442,6 +451,7 @@ namespace garge_api.Controllers
             }
 
             var wasActive = subscription.Status == SubscriptionStatus.Active;
+            var chargeFailureCounted = false;
 
             switch (payload.EventType)
             {
@@ -461,14 +471,61 @@ namespace garge_api.Controllers
                     break;
                 case VippsEvents.ChargeCaptured when payload.Occurred.HasValue:
                     var product = await _context.Products.FindAsync(subscription.ProductId);
-                    if (product != null)
-                        subscription.NextChargeDate = product.Interval == BillingInterval.Monthly
-                            ? payload.Occurred.Value.AddMonths(1)
-                            : payload.Occurred.Value.AddYears(1);
+                    if (product == null) break;
+                    // Billing days follow the Norwegian calendar date the subscription started on.
+                    var anchor = LocalTime.Date(subscription.StartDate ?? payload.Occurred.Value);
+                    if (SubscriptionCharges.TryParse(payload.ChargeId, out var capturedSubId, out var capturedDue, out _)
+                        && capturedSubId == subscription.Id)
+                    {
+                        // A scheduled charge moves billing on from the date it was due, never backwards.
+                        var next = SubscriptionCharges.NextDue(anchor, capturedDue, product.Interval);
+                        if (subscription.NextChargeDate == null || next > subscription.NextChargeDate)
+                        {
+                            subscription.NextChargeDate = next;
+                            subscription.FailedChargeAttempts = 0;
+                            subscription.LastChargeFailureReason = null;
+                        }
+                    }
+                    else if (subscription.NextChargeDate == null)
+                    {
+                        // The initial charge, captured when the agreement is accepted, starts billing.
+                        subscription.NextChargeDate = SubscriptionCharges.NextDue(anchor, LocalTime.Date(payload.Occurred.Value), product.Interval);
+                    }
                     break;
                 case VippsEvents.ChargeFailed:
+                    if (SubscriptionCharges.TryParse(payload.ChargeId, out var failedSubId, out var failedDue, out var failedAttempt)
+                        && failedSubId == subscription.Id
+                        && failedDue == subscription.NextChargeDate
+                        && failedAttempt == subscription.FailedChargeAttempts)
+                    {
+                        subscription.FailedChargeAttempts++;
+                        subscription.LastChargeFailureReason = payload.FailureReason is { Length: > 0 and <= 50 } reason ? reason : null;
+                        chargeFailureCounted = true;
+                        _logger.LogWarning("Charge attempt {Attempt} of {Max} failed for subscription {SubId} agreement {AgreementId}",
+                            subscription.FailedChargeAttempts, SubscriptionCharges.MaxAttempts, subscription.Id, payload.AgreementId);
+                        if (subscription.FailedChargeAttempts >= SubscriptionCharges.MaxAttempts)
+                        {
+                            // The failure is saved either way. A subscription left active here is stopped by
+                            // the charge scheduler, which retries the cancel.
+                            try
+                            {
+                                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}", subscription.IsTest);
+                                subscription.Status = SubscriptionStatus.Stopped;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Vipps agreement cancel failed for subscription {SubscriptionId} after its last failed charge", subscription.Id);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Charge {ChargeId} failed for subscription {SubId} agreement {AgreementId}, not the current attempt",
+                            payload.ChargeId, subscription.Id, payload.AgreementId);
+                    }
+                    break;
                 case VippsEvents.ChargeCreationFailed:
-                    _logger.LogWarning("Charge failed for subscription {SubId} agreement {AgreementId}",
+                    _logger.LogWarning("Charge creation failed for subscription {SubId} agreement {AgreementId}",
                         subscription.Id, payload.AgreementId);
                     break;
             }
@@ -517,13 +574,25 @@ namespace garge_api.Controllers
                 }
             }
 
-            if (payload.EventType is VippsEvents.ChargeFailed or VippsEvents.ChargeCreationFailed)
+            if (chargeFailureCounted && subscription.Status == SubscriptionStatus.Stopped)
+            {
+                try { await _subEmail.SendStoppedForNonPaymentAsync(subscription.Id); }
+                catch (Exception ex) { _logger.LogError(ex, "Stopped-for-non-payment email failed for subscription {SubscriptionId}", subscription.Id); }
+
+                _ = SafePushAsync(subscription.UserId, "Subscription stopped",
+                    subscription.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
+                        ? "The charge was above the maximum amount approved in Vipps, so your Garge subscription has been stopped. You can subscribe again under Billing."
+                        : "We couldn't charge your Garge subscription, so it has been stopped. You can subscribe again under Billing.");
+            }
+            else if (chargeFailureCounted)
             {
                 try { await _subEmail.SendChargeFailedAsync(subscription.Id); }
                 catch (Exception ex) { _logger.LogError(ex, "Charge-failed email failed for subscription {SubscriptionId}", subscription.Id); }
 
                 _ = SafePushAsync(subscription.UserId, "Payment failed",
-                    "We couldn't charge your Garge subscription. Please update your payment method in Vipps.");
+                    subscription.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
+                        ? "The charge for your Garge subscription is above the maximum amount you approved. Approve the new amount in the Vipps app."
+                        : "We couldn't charge your Garge subscription. Please update your payment method in Vipps.");
             }
 
             return Ok();

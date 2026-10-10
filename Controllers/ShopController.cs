@@ -280,7 +280,13 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}", order.IsTest);
+            var captured = await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}", order.IsTest);
+            if (captured.CapturedAmountInOre < order.TotalInOre)
+            {
+                _logger.LogError("Order {OrderId} capture reported {Captured} of {Total} øre captured, order stays Reserved",
+                    id, captured.CapturedAmountInOre, order.TotalInOre);
+                return StatusCode(502, "Vipps did not confirm the full capture.");
+            }
 
             order.Status = OrderStatus.Paid;
             order.ShippedAt = DateTime.UtcNow;
@@ -325,7 +331,13 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}", order.IsTest);
+            var refunded = await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}", order.IsTest);
+            if (refunded.RefundedAmountInOre < order.TotalInOre)
+            {
+                _logger.LogError("Order {OrderId} refund reported {Refunded} of {Total} øre refunded, order stays Paid",
+                    id, refunded.RefundedAmountInOre, order.TotalInOre);
+                return StatusCode(502, "Vipps did not confirm the full refund.");
+            }
 
             order.Status = OrderStatus.Refunded;
             order.UpdatedAt = DateTime.UtcNow;

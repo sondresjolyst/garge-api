@@ -4,5 +4,6 @@ namespace garge_api.Services
     {
         Task SendActivatedAsync(int subscriptionId);
         Task SendChargeFailedAsync(int subscriptionId);
+        Task SendStoppedForNonPaymentAsync(int subscriptionId);
     }
 }
