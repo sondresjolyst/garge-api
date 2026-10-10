@@ -456,51 +456,6 @@ public class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task VatSupplements_WithVatOff_AreRefused()
-    {
-        var html = new List<string>();
-        var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).Callback<string>(html.Add).ReturnsAsync(new byte[] { 7 });
-        var (svc, db, _, _) = Create(pdf, vat: RealVat);
-        await OwedInvoiceAsync(db);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.GenerateVatSupplementsAsync());
-        Assert.Empty(html);
-    }
-
-    [Fact]
-    public async Task VatSupplements_ShowTheVatInsideThePricePaid_OncePerSale()
-    {
-        var html = new List<string>();
-        var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).Callback<string>(html.Add).ReturnsAsync(new byte[] { 7 });
-        var (svc, db, _, _) = Create(pdf, vat: RealVat);
-        var invoice = await OwedInvoiceAsync(db);
-        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
-        settings.VatEnabled = true;
-        settings.CompanyOrgNumber = "999 888 777";
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        Assert.Equal(1, await svc.GenerateVatSupplementsAsync());
-        Assert.Equal(0, await svc.GenerateVatSupplementsAsync());
-
-        var page = Assert.Single(html);
-        Assert.Contains("MVA-0001", page);
-        Assert.Contains($"Sale on invoice #{invoice.Id:D4}", page);
-        Assert.Contains("1 x Garge Sensor", page);
-        Assert.Contains("999 888 777 MVA", page);
-        Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(4_080_000), page);
-        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_020_000), page);
-        Assert.Contains("nothing more to pay", page);
-        var saved = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == invoice.Id, TestContext.Current.CancellationToken);
-        Assert.NotNull(saved.VatSupplementIssuedAt);
-        Assert.Equal(1, saved.VatSupplementNumber);
-        Assert.Equal(1, (await db.AppSettings.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).LastVatSupplementNumber);
-        Assert.Equal(new byte[] { 7 }, saved.VatSupplementPdf);
-        Assert.Equal(new byte[] { 1 }, saved.PdfData);
-    }
-
-    [Fact]
     public async Task RegeneratingAnOrderInvoice_KeepsItsDate()
     {
         var (svc, db, _, _) = Create();
@@ -544,47 +499,180 @@ public class InvoiceServiceTests
         Assert.True(id > 0);
     }
 
-    [Fact]
-    public async Task VatSupplements_AreNumberedInOneSeriesInSaleOrder()
+    private static (InvoiceService svc, ApplicationDbContext db, Mock<IEmailService> email, Dictionary<string, string> pages) CreateForCorrections(Mock<IPdfRenderer>? pdf = null)
     {
-        var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ReturnsAsync(new byte[] { 7 });
-        var (svc, db, _, _) = Create(pdf, vat: RealVat);
+        var pages = new Dictionary<string, string>();
+        if (pdf == null)
+        {
+            pdf = new Mock<IPdfRenderer>();
+            pdf.Setup(p => p.RenderAsync(It.IsAny<string>()))
+                .Callback<string>(h => pages[h.Contains("CREDIT NOTE") ? "credit" : h.Contains("Replaces invoice") ? "invoice" : "other"] = h)
+                .ReturnsAsync((string h) => h.Contains("CREDIT NOTE") ? new byte[] { 2 } : new byte[] { 3 });
+        }
+        var (svc, db, email, _) = Create(pdf, vat: RealVat);
+        return (svc, db, email, pages);
+    }
+
+    private static async Task TurnVatOnAsync(ApplicationDbContext db)
+    {
+        var settings = await db.AppSettings.SingleAsync();
+        settings.VatEnabled = true;
+        settings.CompanyOrgNumber = "999 888 777";
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task VatCorrections_WithVatOff_AreRefused()
+    {
+        var (svc, db, email, pages) = CreateForCorrections();
+        await OwedInvoiceAsync(db);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.GenerateVatCorrectionsAsync());
+        Assert.Empty(pages);
+        Assert.Equal(1, await db.Invoices.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task VatCorrections_MakeACreditNoteAndANewInvoiceWithVat_AndEmailBothOnce()
+    {
+        var (svc, db, email, pages) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(1, await svc.GenerateVatCorrectionsAsync());
+        Assert.Equal(0, await svc.GenerateVatCorrectionsAsync());
+
+        var credit = await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        var replacement = await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        Assert.Equal((InvoiceKind.CreditNote, -5_100_000, 0), (credit.Kind, credit.AmountInOre, credit.VatPercentage));
+        Assert.Equal((InvoiceKind.Invoice, 5_100_000, 25), (replacement.Kind, replacement.AmountInOre, replacement.VatPercentage));
+        Assert.Equal(new byte[] { 2 }, credit.PdfData);
+        Assert.Equal(new byte[] { 3 }, replacement.PdfData);
+        Assert.Null(credit.OrderId);
+        Assert.Null(replacement.OrderId);
+
+        Assert.Contains($"Credit for invoice #{original.Id:D4}", pages["credit"]);
+        Assert.Contains($"Invoice #{replacement.Id:D4} replaces it", pages["credit"]);
+        var page = pages["invoice"];
+        Assert.Contains($"#{replacement.Id:D4}", page);
+        Assert.Contains($"Replaces invoice #{original.Id:D4}", page);
+        Assert.Contains($"credited by credit note #{credit.Id:D4}", page);
+        Assert.Contains("Garge Sensor", page);
+        Assert.Contains("999 888 777 MVA", page);
+        Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(4_080_000), page);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_020_000), page);
+        Assert.Contains("nothing more to pay", page);
+
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(t => t.Contains($"#{replacement.Id:D4}") && t.Contains($"#{original.Id:D4}")),
+            It.IsAny<string>(), It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 2)), Times.Once);
+        var saved = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(saved.VatCorrectedAt);
+        Assert.NotNull(saved.VatCorrectionEmailedAt);
+        Assert.Equal(new byte[] { 1 }, saved.PdfData);
+    }
+
+    [Fact]
+    public async Task VatCorrections_DoNotCountAsTurnover()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+        var before = await RealVat(db).GetStatusAsync(DateTime.UtcNow);
+
+        await svc.GenerateVatCorrectionsAsync();
+
+        var after = await RealVat(db).GetStatusAsync(DateTime.UtcNow);
+        Assert.Equal(before.TurnoverInOre, after.TurnoverInOre);
+        var owed = Assert.Single(after.Owed);
+        Assert.Equal(original.Id, owed.InvoiceId);
+        Assert.NotNull(owed.CreditNoteId);
+        Assert.NotNull(owed.ReplacementInvoiceId);
+        Assert.NotNull(owed.CorrectedAt);
+    }
+
+    [Fact]
+    public async Task VatCorrection_ForAPartlyRefundedSale_InvoicesWhatWasKept()
+    {
+        var (svc, db, _, pages) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        var order = await db.Orders.SingleAsync(o => o.Id == original.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 50_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await TurnVatOnAsync(db);
+
+        await svc.GenerateVatCorrectionsAsync();
+
+        // 51 000 kr less 500 kr refunded is 50 500 kr, of which 10 100 kr is VAT. The credit note cancels the whole original.
+        Assert.Equal(5_050_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
+        Assert.Equal(-5_100_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_010_000), pages["invoice"]);
+    }
+
+    [Fact]
+    public async Task VatCorrections_AreMadeInSaleOrder()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
         var first = await OwedInvoiceAsync(db);
         var order2 = new Order { UserId = "user-1", TotalInOre = 10000, Status = OrderStatus.Paid };
         db.Orders.Add(order2);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var second = new Invoice { OrderId = order2.Id, AmountInOre = 10000, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [1] };
         db.Invoices.Add(second);
-        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
-        settings.VatEnabled = true;
-        settings.LastVatSupplementNumber = 6;
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await TurnVatOnAsync(db);
 
-        Assert.Equal(2, await svc.GenerateVatSupplementsAsync());
+        Assert.Equal(2, await svc.GenerateVatCorrectionsAsync());
 
-        var numbers = await db.Invoices.AsNoTracking().OrderBy(i => i.IssuedAt).Select(i => i.VatSupplementNumber).ToListAsync(TestContext.Current.CancellationToken);
-        Assert.Equal([7, 8], numbers);
-        Assert.Equal(first.Id, (await db.Invoices.AsNoTracking().SingleAsync(i => i.VatSupplementNumber == 7, TestContext.Current.CancellationToken)).Id);
+        var firstCredit = (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == first.Id, TestContext.Current.CancellationToken)).Id;
+        var secondCredit = (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == second.Id, TestContext.Current.CancellationToken)).Id;
+        Assert.True(firstCredit < secondCredit);
     }
 
     [Fact]
-    public async Task VatSupplement_ForAPartlyRefundedSale_ShowsTheVatOnWhatWasKept()
+    public async Task AVatCorrectionWhosePdfFailed_IsFinishedByTheRetryJob_AndEmailedOnce()
     {
-        var html = new List<string>();
         var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).Callback<string>(html.Add).ReturnsAsync(new byte[] { 7 });
-        var (svc, db, _, _) = Create(pdf, vat: RealVat);
-        var invoice = await OwedInvoiceAsync(db);
-        var order = await db.Orders.SingleAsync(o => o.Id == invoice.OrderId, TestContext.Current.CancellationToken);
-        order.RefundedInOre = 50_000;
-        (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatEnabled = true;
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+            .ThrowsAsync(new Exception("chromium gone"))
+            .ReturnsAsync(new byte[] { 2 })
+            .ReturnsAsync(new byte[] { 3 });
+        var (svc, db, email, _) = CreateForCorrections(pdf);
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(1, await svc.GenerateVatCorrectionsAsync());
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
+
+        var saved = await db.Invoices.SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        saved.VatCorrectedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, await svc.RetryMissingPdfsAsync());
+        Assert.Equal(0, await svc.RetryMissingPdfsAsync());
 
-        await svc.GenerateVatSupplementsAsync();
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.IsAny<string>(), It.IsAny<string>(), It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 2)), Times.Once);
+        Assert.Equal(new byte[] { 2 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+    }
 
-        // 51 000 kr less 500 kr refunded is 50 500 kr, of which 10 100 kr is VAT.
-        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_010_000), html.Single());
-        Assert.Contains("NOK " + MoneyFormat.Nok(5_050_000), html.Single());
+    [Fact]
+    public async Task AVatCorrectionWhoseNewInvoicePdfFailed_KeepsTheCreditNotePdf()
+    {
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+            .ReturnsAsync(new byte[] { 2 })
+            .ThrowsAsync(new Exception("chromium gone"))
+            .ReturnsAsync(new byte[] { 3 });
+        var (svc, db, email, _) = CreateForCorrections(pdf);
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        await svc.GenerateVatCorrectionsAsync();
+        var saved = await db.Invoices.SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        saved.VatCorrectedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.RetryMissingPdfsAsync();
+
+        Assert.Equal(new byte[] { 2 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+        Assert.Equal(new byte[] { 3 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }
 }

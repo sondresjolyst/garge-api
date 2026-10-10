@@ -20,8 +20,9 @@ namespace garge_api.Dtos.Admin
         public DateTime IssuedAt { get; set; }
         public int AmountInOre { get; set; }
         public int VatInOre { get; set; }
-        public string? SupplementNumber { get; set; }
-        public DateTime? SupplementIssuedAt { get; set; }
+        public DateTime? CorrectedAt { get; set; }
+        public int? CreditNoteId { get; set; }
+        public int? ReplacementInvoiceId { get; set; }
     }
 
     public class UpdateOtherTurnoverDto

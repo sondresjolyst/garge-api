@@ -18,36 +18,42 @@ namespace garge_api.Migrations
                 nullable: false,
                 defaultValue: 0);
 
+            migrationBuilder.AddColumn<int>(
+                name: "CreditsInvoiceId",
+                table: "Invoices",
+                type: "integer",
+                nullable: true);
+
+            migrationBuilder.AddColumn<int>(
+                name: "Kind",
+                table: "Invoices",
+                type: "integer",
+                nullable: false,
+                defaultValue: 0);
+
             migrationBuilder.AddColumn<DateTime>(
                 name: "PdfAttemptedAt",
                 table: "Invoices",
                 type: "timestamp with time zone",
                 nullable: true);
 
+            migrationBuilder.AddColumn<int>(
+                name: "ReplacesInvoiceId",
+                table: "Invoices",
+                type: "integer",
+                nullable: true);
+
             migrationBuilder.AddColumn<DateTime>(
-                name: "VatSupplementIssuedAt",
+                name: "VatCorrectedAt",
                 table: "Invoices",
                 type: "timestamp with time zone",
                 nullable: true);
 
-            migrationBuilder.AddColumn<int>(
-                name: "VatSupplementNumber",
+            migrationBuilder.AddColumn<DateTime>(
+                name: "VatCorrectionEmailedAt",
                 table: "Invoices",
-                type: "integer",
+                type: "timestamp with time zone",
                 nullable: true);
-
-            migrationBuilder.AddColumn<byte[]>(
-                name: "VatSupplementPdf",
-                table: "Invoices",
-                type: "bytea",
-                nullable: true);
-
-            migrationBuilder.AddColumn<int>(
-                name: "LastVatSupplementNumber",
-                table: "AppSettings",
-                type: "integer",
-                nullable: false,
-                defaultValue: 0);
 
             migrationBuilder.AddColumn<long>(
                 name: "OtherTurnoverInOre",
@@ -79,15 +85,22 @@ namespace garge_api.Migrations
                 table: "AppSettings",
                 keyColumn: "Id",
                 keyValue: 1,
-                columns: new[] { "LastVatSupplementNumber", "OtherTurnoverInOre", "VatCrossedAt", "VatCrossingInvoiceId", "VatThresholdWarnedPercent" },
-                values: new object[] { 0, 0L, null, null, 0 });
+                columns: new[] { "OtherTurnoverInOre", "VatCrossedAt", "VatCrossingInvoiceId", "VatThresholdWarnedPercent" },
+                values: new object[] { 0L, null, null, 0 });
 
             migrationBuilder.CreateIndex(
-                name: "IX_Invoices_VatSupplementNumber",
+                name: "IX_Invoices_CreditsInvoiceId",
                 table: "Invoices",
-                column: "VatSupplementNumber",
+                column: "CreditsInvoiceId",
                 unique: true,
-                filter: "\"VatSupplementNumber\" IS NOT NULL");
+                filter: "\"CreditsInvoiceId\" IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Invoices_ReplacesInvoiceId",
+                table: "Invoices",
+                column: "ReplacesInvoiceId",
+                unique: true,
+                filter: "\"ReplacesInvoiceId\" IS NOT NULL");
 
             // Orders refunded in full before the refunded amount was stored count as fully refunded.
             migrationBuilder.Sql("""UPDATE "Orders" SET "RefundedInOre" = "TotalInOre" WHERE "Status" = 3;""");
@@ -97,7 +110,11 @@ namespace garge_api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropIndex(
-                name: "IX_Invoices_VatSupplementNumber",
+                name: "IX_Invoices_CreditsInvoiceId",
+                table: "Invoices");
+
+            migrationBuilder.DropIndex(
+                name: "IX_Invoices_ReplacesInvoiceId",
                 table: "Invoices");
 
             migrationBuilder.DropColumn(
@@ -105,24 +122,28 @@ namespace garge_api.Migrations
                 table: "Orders");
 
             migrationBuilder.DropColumn(
+                name: "CreditsInvoiceId",
+                table: "Invoices");
+
+            migrationBuilder.DropColumn(
+                name: "Kind",
+                table: "Invoices");
+
+            migrationBuilder.DropColumn(
                 name: "PdfAttemptedAt",
                 table: "Invoices");
 
             migrationBuilder.DropColumn(
-                name: "VatSupplementIssuedAt",
+                name: "ReplacesInvoiceId",
                 table: "Invoices");
 
             migrationBuilder.DropColumn(
-                name: "VatSupplementNumber",
+                name: "VatCorrectedAt",
                 table: "Invoices");
 
             migrationBuilder.DropColumn(
-                name: "VatSupplementPdf",
+                name: "VatCorrectionEmailedAt",
                 table: "Invoices");
-
-            migrationBuilder.DropColumn(
-                name: "LastVatSupplementNumber",
-                table: "AppSettings");
 
             migrationBuilder.DropColumn(
                 name: "OtherTurnoverInOre",

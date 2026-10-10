@@ -43,8 +43,5 @@ namespace garge_api.Models.Admin
         /// <summary>The sale that passed the VAT threshold, once found. VAT is owed from it on until VAT is on.</summary>
         public int? VatCrossingInvoiceId { get; set; }
         public DateTime? VatCrossedAt { get; set; }
-
-        /// <summary>The last number used in the VAT supplement series.</summary>
-        public int LastVatSupplementNumber { get; set; }
     }
 }

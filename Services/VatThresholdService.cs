@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace garge_api.Services
 {
     /// <summary>A sale made after turnover passed the VAT threshold, before VAT registration.</summary>
-    public sealed record VatOwedSale(int InvoiceId, DateTime IssuedAt, int AmountInOre, int VatInOre, int? SupplementNumber, DateTime? SupplementIssuedAt);
+    public sealed record VatOwedSale(int InvoiceId, DateTime IssuedAt, int AmountInOre, int VatInOre, DateTime? CorrectedAt, int? CreditNoteId, int? ReplacementInvoiceId);
 
     public sealed record VatThresholdStatus(
         long TurnoverInOre,
@@ -52,18 +52,20 @@ namespace garge_api.Services
         // One check at a time in this process, so a warning is sent once and the crossing is recorded once.
         private static readonly SemaphoreSlim Gate = new(1, 1);
 
-        private sealed record Sale(int Id, DateTime IssuedAt, int AmountInOre, int VatPercentage, int? SupplementNumber, DateTime? SupplementIssuedAt);
+        private sealed record Sale(int Id, DateTime IssuedAt, int AmountInOre, int VatPercentage, DateTime? CorrectedAt);
 
         private async Task<List<Sale>> SalesAsync(DateTime since, CancellationToken ct) =>
             await db.Invoices.AsNoTracking()
+                // Credit notes and the invoices that replace corrected ones are not new sales.
                 .Where(i => i.IssuedAt > since
+                            && i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null
                             && (i.Order == null || (!i.Order.IsTest && i.Order.Status != OrderStatus.Refunded))
                             && (i.Subscription == null || !i.Subscription.IsTest))
                 .OrderBy(i => i.IssuedAt).ThenBy(i => i.Id)
                 .Select(i => new Sale(
                     i.Id, i.IssuedAt,
                     i.Order == null ? i.AmountInOre : Math.Max(0, i.AmountInOre - i.Order.RefundedInOre),
-                    i.VatPercentage, i.VatSupplementNumber, i.VatSupplementIssuedAt))
+                    i.VatPercentage, i.VatCorrectedAt))
                 .ToListAsync(ct);
 
         private static bool AtOrAfter(Sale s, DateTime issuedAt, int id) =>
@@ -104,9 +106,18 @@ namespace garge_api.Services
             if (crossingId != null)
             {
                 var since = crossedAt!.Value.AddTicks(-1);
-                owed = (await SalesAsync(since, ct))
+                var sales = (await SalesAsync(since, ct))
                     .Where(s => s.VatPercentage == 0 && AtOrAfter(s, crossedAt.Value, crossingId.Value))
-                    .Select(s => new VatOwedSale(s.Id, s.IssuedAt, s.AmountInOre, Pricing.Split(s.AmountInOre, Pricing.VatPercent).Vat, s.SupplementNumber, s.SupplementIssuedAt))
+                    .ToList();
+                var ids = sales.Select(s => s.Id).ToList();
+                var documents = await db.Invoices.AsNoTracking()
+                    .Where(i => (i.CreditsInvoiceId != null && ids.Contains(i.CreditsInvoiceId.Value)) || (i.ReplacesInvoiceId != null && ids.Contains(i.ReplacesInvoiceId.Value)))
+                    .Select(i => new { i.Id, i.CreditsInvoiceId, i.ReplacesInvoiceId })
+                    .ToListAsync(ct);
+                owed = sales.Select(s => new VatOwedSale(
+                        s.Id, s.IssuedAt, s.AmountInOre, Pricing.Split(s.AmountInOre, Pricing.VatPercent).Vat, s.CorrectedAt,
+                        documents.FirstOrDefault(d => d.CreditsInvoiceId == s.Id)?.Id,
+                        documents.FirstOrDefault(d => d.ReplacesInvoiceId == s.Id)?.Id))
                     .ToList();
             }
 

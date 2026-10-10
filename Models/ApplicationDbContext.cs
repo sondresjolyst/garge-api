@@ -455,11 +455,15 @@ namespace garge_api.Models
                 .IsUnique()
                 .HasFilter("\"VippsChargeId\" IS NOT NULL");
 
-            // VAT supplements are numbered in one series, so a number is never used twice.
+            // A sale is corrected once: one credit note and one new invoice per original.
             modelBuilder.Entity<Invoice>()
-                .HasIndex(i => i.VatSupplementNumber)
+                .HasIndex(i => i.CreditsInvoiceId)
                 .IsUnique()
-                .HasFilter("\"VatSupplementNumber\" IS NOT NULL");
+                .HasFilter("\"CreditsInvoiceId\" IS NOT NULL");
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.ReplacesInvoiceId)
+                .IsUnique()
+                .HasFilter("\"ReplacesInvoiceId\" IS NOT NULL");
 
             modelBuilder.Entity<ProcessedWebhookEvent>()
                 .HasIndex(p => new { p.Source, p.Id });

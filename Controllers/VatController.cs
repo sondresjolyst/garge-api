@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using garge_api.Dtos.Admin;
 using garge_api.Models;
+using garge_api.Models.Shop;
 using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -35,8 +36,8 @@ namespace garge_api.Controllers
                 Owed = status.Owed.Select(o => new VatOwedSaleDto
                 {
                     InvoiceId = o.InvoiceId, IssuedAt = o.IssuedAt, AmountInOre = o.AmountInOre,
-                    VatInOre = o.VatInOre, SupplementIssuedAt = o.SupplementIssuedAt,
-                    SupplementNumber = o.SupplementNumber is { } number ? InvoiceService.SupplementNumber(number) : null
+                    VatInOre = o.VatInOre, CorrectedAt = o.CorrectedAt,
+                    CreditNoteId = o.CreditNoteId, ReplacementInvoiceId = o.ReplacementInvoiceId
                 }).ToList()
             };
         }
@@ -54,25 +55,29 @@ namespace garge_api.Controllers
             return NoContent();
         }
 
-        /// <summary>Makes the VAT supplement for each sale that owes VAT from before registration. Requires VAT on.</summary>
-        [HttpPost("supplements")]
-        public async Task<IActionResult> MakeSupplements(CancellationToken ct)
+        /// <summary>
+        /// For each sale that owes VAT from before registration, makes a credit note and a new invoice
+        /// with VAT and emails both to the customer. Requires VAT on.
+        /// </summary>
+        [HttpPost("corrections")]
+        public async Task<IActionResult> MakeCorrections(CancellationToken ct)
         {
             if (!(await settingsCache.GetAsync()).VatEnabled)
-                return BadRequest("Turn VAT on after registration before making VAT supplements.");
-            return Ok(new { made = await invoices.GenerateVatSupplementsAsync(ct) });
+                return BadRequest("Turn VAT on after registration before making VAT corrections.");
+            return Ok(new { made = await invoices.GenerateVatCorrectionsAsync(ct) });
         }
 
-        /// <summary>Downloads the VAT supplement for an invoice.</summary>
-        [HttpGet("supplements/{invoiceId:int}")]
-        public async Task<IActionResult> GetSupplement(int invoiceId, CancellationToken ct)
+        /// <summary>Downloads a credit note or replacement invoice made by a VAT correction.</summary>
+        [HttpGet("documents/{invoiceId:int}")]
+        public async Task<IActionResult> GetDocument(int invoiceId, CancellationToken ct)
         {
-            var supplement = await db.Invoices.AsNoTracking()
-                .Where(i => i.Id == invoiceId)
-                .Select(i => new { i.VatSupplementPdf, i.VatSupplementNumber })
+            var document = await db.Invoices.AsNoTracking()
+                .Where(i => i.Id == invoiceId && (i.CreditsInvoiceId != null || i.ReplacesInvoiceId != null))
+                .Select(i => new { i.PdfData, i.Kind })
                 .FirstOrDefaultAsync(ct);
-            if (supplement?.VatSupplementPdf is not { Length: > 0 } pdf || supplement.VatSupplementNumber is not { } number) return NotFound();
-            return File(pdf, "application/pdf", $"{InvoiceService.SupplementNumber(number)}.pdf");
+            if (document is not { PdfData.Length: > 0 }) return NotFound();
+            var name = document.Kind == InvoiceKind.CreditNote ? "credit-note" : "invoice";
+            return File(document.PdfData, "application/pdf", $"{name}-{invoiceId:D4}.pdf");
         }
 
         /// <summary>The sales that owe VAT from before registration, as CSV for the VAT return.</summary>
@@ -80,12 +85,12 @@ namespace garge_api.Controllers
         public async Task<IActionResult> GetOwedCsv(CancellationToken ct)
         {
             var status = await vat.GetStatusAsync(DateTime.UtcNow, ct);
-            var csv = new StringBuilder("invoice;date;amount_nok;excl_vat_nok;vat_nok;supplement\n");
+            var csv = new StringBuilder("invoice;date;amount_nok;excl_vat_nok;vat_nok;credit_note;new_invoice\n");
             foreach (var o in status.Owed)
             {
                 var exclVat = o.AmountInOre - o.VatInOre;
                 csv.Append(CultureInfo.InvariantCulture,
-                    $"{o.InvoiceId};{LocalTime.Date(o.IssuedAt):yyyy-MM-dd};{o.AmountInOre / 100m:0.00};{exclVat / 100m:0.00};{o.VatInOre / 100m:0.00};{(o.SupplementNumber is { } number ? InvoiceService.SupplementNumber(number) : "")}\n");
+                    $"{o.InvoiceId};{LocalTime.Date(o.IssuedAt):yyyy-MM-dd};{o.AmountInOre / 100m:0.00};{exclVat / 100m:0.00};{o.VatInOre / 100m:0.00};{o.CreditNoteId};{o.ReplacementInvoiceId}\n");
             }
             return File(Encoding.UTF8.GetBytes(csv.ToString()), "text/csv", "vat-owed.csv");
         }

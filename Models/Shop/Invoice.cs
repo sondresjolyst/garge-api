@@ -3,6 +3,12 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace garge_api.Models.Shop
 {
+    public enum InvoiceKind
+    {
+        Invoice = 0,
+        CreditNote = 1
+    }
+
     public class Invoice
     {
         [Key]
@@ -34,16 +40,22 @@ namespace garge_api.Models.Shop
         /// <summary>The VAT rate in percent that applied when the sale was made. Zero before VAT registration.</summary>
         public int VatPercentage { get; set; }
 
+        public InvoiceKind Kind { get; set; } = InvoiceKind.Invoice;
+
+        /// <summary>On a credit note, the invoice it cancels.</summary>
+        public int? CreditsInvoiceId { get; set; }
+
+        /// <summary>On an invoice that replaces another, the invoice it replaces.</summary>
+        public int? ReplacesInvoiceId { get; set; }
+
         /// <summary>
-        /// The VAT supplement for a sale made after the VAT threshold was passed, before registration.
-        /// It shows the VAT taken out of the price paid and is made once VAT is on.
+        /// For a sale made after the VAT threshold was passed, before registration: when the credit
+        /// note and the new invoice with VAT were made, once VAT was on.
         /// </summary>
-        public DateTime? VatSupplementIssuedAt { get; set; }
+        public DateTime? VatCorrectedAt { get; set; }
 
-        /// <summary>The supplement's number in its own continuous series, shown as MVA-0001.</summary>
-        public int? VatSupplementNumber { get; set; }
-
-        public byte[]? VatSupplementPdf { get; set; }
+        /// <summary>When the credit note and the new invoice were emailed to the customer.</summary>
+        public DateTime? VatCorrectionEmailedAt { get; set; }
 
         /// <summary>
         /// When the PDF was last tried. A row with no PDF is a sale whose PDF failed or is being made,

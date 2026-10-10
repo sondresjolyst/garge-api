@@ -342,9 +342,6 @@ namespace garge_api.Migrations
                     b.Property<bool>("CookieBannerEnabled")
                         .HasColumnType("boolean");
 
-                    b.Property<int>("LastVatSupplementNumber")
-                        .HasColumnType("integer");
-
                     b.Property<long>("OtherTurnoverInOre")
                         .HasColumnType("bigint");
 
@@ -407,7 +404,6 @@ namespace garge_api.Migrations
                             CompanyName = "Garge",
                             CompanyOrgNumber = "938 517 789",
                             CookieBannerEnabled = true,
-                            LastVatSupplementNumber = 0,
                             OtherTurnoverInOre = 0L,
                             SecurityAlertThresholdMinutes = 25,
                             VatEnabled = false,
@@ -1499,8 +1495,14 @@ namespace garge_api.Migrations
                     b.Property<int>("AmountInOre")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("CreditsInvoiceId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("IssuedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
 
                     b.Property<int?>("OrderId")
                         .HasColumnType("integer");
@@ -1512,20 +1514,20 @@ namespace garge_api.Migrations
                         .IsRequired()
                         .HasColumnType("bytea");
 
+                    b.Property<int?>("ReplacesInvoiceId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("SubscriptionId")
                         .HasColumnType("integer");
 
-                    b.Property<int>("VatPercentage")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("VatSupplementIssuedAt")
+                    b.Property<DateTime?>("VatCorrectedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<int?>("VatSupplementNumber")
-                        .HasColumnType("integer");
+                    b.Property<DateTime?>("VatCorrectionEmailedAt")
+                        .HasColumnType("timestamp with time zone");
 
-                    b.Property<byte[]>("VatSupplementPdf")
-                        .HasColumnType("bytea");
+                    b.Property<int>("VatPercentage")
+                        .HasColumnType("integer");
 
                     b.Property<string>("VippsChargeId")
                         .HasMaxLength(200)
@@ -1533,15 +1535,19 @@ namespace garge_api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreditsInvoiceId")
+                        .IsUnique()
+                        .HasFilter("\"CreditsInvoiceId\" IS NOT NULL");
+
                     b.HasIndex("OrderId")
                         .IsUnique()
                         .HasFilter("\"OrderId\" IS NOT NULL");
 
-                    b.HasIndex("SubscriptionId");
-
-                    b.HasIndex("VatSupplementNumber")
+                    b.HasIndex("ReplacesInvoiceId")
                         .IsUnique()
-                        .HasFilter("\"VatSupplementNumber\" IS NOT NULL");
+                        .HasFilter("\"ReplacesInvoiceId\" IS NOT NULL");
+
+                    b.HasIndex("SubscriptionId");
 
                     b.HasIndex("VippsChargeId")
                         .IsUnique()
