@@ -319,4 +319,18 @@ public class SubscriptionChargeSchedulerServiceTests
         vipps.Verify(v => v.CreateChargeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
+
+    [Fact]
+    public async Task Scheduler_ChargesThePriceTimesTheQuantity()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddDueSubAsync(db);
+        var sub = await db.Subscriptions.SingleAsync(TestContext.Current.CancellationToken);
+        sub.Quantity = 2;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        vipps.Verify(v => v.CreateChargeAsync("agr_sched", 59800, It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
+    }
 }

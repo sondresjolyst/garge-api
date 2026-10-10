@@ -581,7 +581,7 @@ public class ShopControllerTests : ControllerTestBase
     public async Task Checkout_ValidOrder_StoresShippingAddressAndVatSnapshot()
     {
         using var db = CreateDbContext();
-        var item = new ShopItem { Name = "Sensor", PriceInOre = 8000, IsActive = true, StockCount = -1 };
+        var item = new ShopItem { Name = "Sensor", PriceInOre = 10000, IsActive = true, StockCount = -1 };
         await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -1111,5 +1111,34 @@ public class ShopControllerTests : ControllerTestBase
 
         Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData(false, 20000, 0)]
+    [InlineData(true, 16000, 25)]
+    public async Task Checkout_CustomersPayTheSamePriceWithVatOnOrOff(bool vatEnabled, int exclVat, int vatPercent)
+    {
+        using var db = CreateDbContext();
+        var item = new ShopItem { Name = "Sensor", PriceInOre = 20000, IsActive = true, StockCount = -1 };
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        List<VippsOrderLine>? sentLines = null;
+        vipps.Setup(v => v.CreatePaymentAsync(It.IsAny<Order>(), It.IsAny<List<VippsOrderLine>>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback((Order _, List<VippsOrderLine> lines, string _, string _, string _) => sentLines = lines)
+            .ReturnsAsync(new VippsCreatePaymentResponse { Reference = "ref", RedirectUrl = "https://vipps.no/pay" });
+
+        var ctrl = CreateController(db, vipps: vipps, settings: new AppSettings { Id = 1, VatEnabled = vatEnabled });
+        await ctrl.Checkout(new CreateOrderDto { Items = [new OrderItemRequestDto { ShopItemId = item.Id, Quantity = 2 }], PhoneNumber = "4791234567" });
+
+        Assert.Equal(40000, (await db.Orders.SingleAsync(TestContext.Current.CancellationToken)).TotalInOre);
+        var saved = await db.OrderItems.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(20000, saved.PriceAtPurchaseInOre);
+        Assert.Equal(exclVat, saved.UnitPriceExclVatInOre);
+        Assert.Equal(vatPercent, saved.VatPercentage);
+        var line = Assert.Single(sentLines!);
+        Assert.Equal(20000, line.UnitPriceInOre);
+        Assert.Equal(exclVat, line.UnitPriceExclVatInOre);
+        Assert.Equal(vatEnabled ? Pricing.VatBasisPoints : 0, line.TaxPercentageBasisPoints);
     }
 }

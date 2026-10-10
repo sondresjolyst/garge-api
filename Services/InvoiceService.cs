@@ -52,7 +52,11 @@ namespace garge_api.Services
             var wasNewRow = invoice == null;
             if (invoice == null)
             {
-                invoice = new Invoice { OrderId = orderId, AmountInOre = order.TotalInOre, IssuedAt = DateTime.UtcNow, PdfData = [] };
+                invoice = new Invoice
+                {
+                    OrderId = orderId, AmountInOre = order.TotalInOre, IssuedAt = DateTime.UtcNow, PdfData = [],
+                    VatPercentage = order.OrderItems.Select(i => i.VatPercentage).DefaultIfEmpty(0).Max()
+                };
                 db.Invoices.Add(invoice);
                 await db.SaveChangesAsync();
             }
@@ -164,12 +168,13 @@ namespace garge_api.Services
                 VippsChargeId = vippsChargeId,
                 AmountInOre = amountInOre,
                 IssuedAt = occurredAt,
-                PdfData = []
+                PdfData = [],
+                VatPercentage = Pricing.VatPercentFor(settings.VatEnabled)
             };
             db.Invoices.Add(invoice);
             await db.SaveChangesAsync();
 
-            var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, occurredAt, amountInOre);
+            var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, occurredAt, amountInOre, invoice.VatPercentage);
             try
             {
                 invoice.PdfData = await _pdfRenderer.RenderAsync(html);
@@ -212,7 +217,7 @@ namespace garge_api.Services
         }
 
         private static string BuildSubscriptionInvoiceHtml(
-            Subscription subscription, AppSettings s, int invoiceId, DateTime issuedAt, int amountInOre)
+            Subscription subscription, AppSettings s, int invoiceId, DateTime issuedAt, int amountInOre, int vatPercent)
         {
             static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
@@ -224,13 +229,8 @@ namespace garge_api.Services
                 ? $"{subscription.User.FirstName} {subscription.User.LastName}"
                 : "—";
 
-            int net = amountInOre, vatAmount = 0;
-            if (s.VatEnabled)
-            {
-                net = (int)Math.Round(amountInOre / 1.25);
-                vatAmount = amountInOre - net;
-            }
-            var subRows = BuildVatSubRows(s.VatEnabled, net, vatAmount);
+            var (net, vatAmount) = Pricing.Split(amountInOre, vatPercent);
+            var subRows = BuildVatSubRows(vatPercent, net, vatAmount);
 
             var partiesHtml = EmailLayout.RenderParties(
                 from: new EmailLayout.Party
@@ -288,7 +288,7 @@ namespace garge_api.Services
                 Subtitle = $"INVOICE  ·  {issuedAt:yyyy-MM-dd}",
                 Badge = "Paid",
                 FootNote = $"Vipps agreement {subscription.VippsAgreementId}"
-            }, body);
+            }, body, vatRegistered: vatPercent > 0);
         }
 
         private static string BuildInvoiceHtml(Order order, AppSettings s, int invoiceId, DateTime issuedAt)
@@ -296,7 +296,10 @@ namespace garge_api.Services
             static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
-            var vatHeaders = s.VatEnabled
+            // VAT columns follow the rate each line was sold at, not today's setting.
+            var vatPercent = order.OrderItems.Select(i => i.VatPercentage).DefaultIfEmpty(0).Max();
+            var showVat = vatPercent > 0;
+            var vatHeaders = showVat
                 ? """<th class="r">VAT %</th><th class="r">VAT</th>"""
                 : string.Empty;
 
@@ -306,12 +309,11 @@ namespace garge_api.Services
             foreach (var item in order.OrderItems)
             {
                 int lineIncl = item.PriceAtPurchaseInOre * item.Quantity;
-                int lineExcl = item.UnitPriceExclVatInOre * item.Quantity;
-                int lineVat  = lineIncl - lineExcl;
+                var (lineExcl, lineVat) = Pricing.Split(lineIncl, item.VatPercentage);
                 totalExcl   += lineExcl;
                 totalVat    += lineVat;
 
-                var vatCols = s.VatEnabled
+                var vatCols = showVat
                     ? $"""<td class="r">{item.VatPercentage}%</td><td class="r">NOK {Nok(lineVat)}</td>"""
                     : string.Empty;
 
@@ -326,7 +328,7 @@ namespace garge_api.Services
                     """);
             }
 
-            var subRows = BuildVatSubRows(s.VatEnabled, totalExcl, totalVat);
+            var subRows = BuildVatSubRows(vatPercent, totalExcl, totalVat);
 
             var deliveryNote = order.ShippedAt.HasValue
                 ? $"Shipped on {order.ShippedAt.Value:yyyy-MM-dd}."
@@ -390,15 +392,15 @@ namespace garge_api.Services
                 Subtitle = $"INVOICE  ·  {issuedAt:yyyy-MM-dd}",
                 Badge = "Paid",
                 FootNote = $"Vipps order #{order.Id}"
-            }, body);
+            }, body, vatRegistered: vatPercent > 0);
         }
 
-        private static string BuildVatSubRows(bool vatEnabled, int netInOre, int vatInOre)
+        private static string BuildVatSubRows(int vatPercent, int netInOre, int vatInOre)
         {
-            if (!vatEnabled) return string.Empty;
+            if (vatPercent == 0) return string.Empty;
             return $"""
                     <tr class="sub"><td class="r">Subtotal excl. VAT</td><td class="r">NOK {MoneyFormat.Nok(netInOre)}</td></tr>
-                    <tr class="sub"><td class="r">VAT 25%</td><td class="r">NOK {MoneyFormat.Nok(vatInOre)}</td></tr>
+                    <tr class="sub"><td class="r">VAT {vatPercent}%</td><td class="r">NOK {MoneyFormat.Nok(vatInOre)}</td></tr>
                 """;
         }
     }

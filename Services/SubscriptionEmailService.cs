@@ -70,7 +70,7 @@ namespace garge_api.Services
         {
             var productName = sub.Product?.Name ?? "Garge subscription";
             var period = sub.Product?.Interval == BillingInterval.Yearly ? "year" : "month";
-            var price = sub.Product != null ? MoneyFormat.Nok(sub.Product.PriceInOre) : null;
+            var price = sub.Product != null ? MoneyFormat.Nok(sub.Product.PriceInOre * sub.Quantity) : null;
             var buyerName = ((sub.User?.FirstName ?? string.Empty) + " " + (sub.User?.LastName ?? string.Empty)).Trim();
             var amountCell = price != null ? $"NOK {price} / {period}" : "—";
 

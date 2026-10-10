@@ -31,6 +31,9 @@ namespace garge_api.Models.Shop
         // price changes don't rewrite history.
         public int AmountInOre { get; set; }
 
+        /// <summary>The VAT rate in percent that applied when the sale was made. Zero before VAT registration.</summary>
+        public int VatPercentage { get; set; }
+
         public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
 
         [Required]

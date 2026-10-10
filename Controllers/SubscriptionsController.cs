@@ -213,7 +213,7 @@ namespace garge_api.Controllers
             }
 
             var settings = await _settingsCache.GetAsync();
-            var unitPriceInOre = Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled);
+            var unitPriceInOre = product.PriceInOre;
             if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
                 return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
 
@@ -350,8 +350,7 @@ namespace garge_api.Controllers
 
             if (isIncrease)
             {
-                var settings = await _settingsCache.GetAsync();
-                var unitPriceInOre = Pricing.EffectiveInOre(subscription.Product.PriceInOre, settings.VatEnabled);
+                var unitPriceInOre = subscription.Product.PriceInOre;
                 if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
                     return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
                 var newCeiling = unitPriceInOre * dto.Quantity;
@@ -554,10 +553,10 @@ namespace garge_api.Controllers
                 var product = await _context.Products.FindAsync(subscription.ProductId);
                 if (product != null)
                 {
-                    // The invoice shows what Vipps captured, including VAT. Without an amount in the
-                    // event it falls back to what the scheduler charges for this subscription.
+                    // The invoice shows what Vipps captured. Without an amount in the event it falls
+                    // back to what the scheduler charges for this subscription.
                     var amountInOre = payload.AmountCaptured ?? payload.Amount
-                        ?? Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled) * subscription.Quantity;
+                        ?? product.PriceInOre * subscription.Quantity;
                     try
                     {
                         await _invoice.GenerateForSubscriptionChargeAsync(

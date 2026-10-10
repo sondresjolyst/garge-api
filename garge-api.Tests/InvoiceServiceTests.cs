@@ -1,3 +1,4 @@
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
@@ -303,5 +304,109 @@ public class InvoiceServiceTests
             svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-fail", 29900, DateTime.UtcNow));
 
         Assert.Empty(db.Invoices);
+    }
+
+    private static (InvoiceService svc, ApplicationDbContext db, List<string> html) CreateCapturingHtml()
+    {
+        var html = new List<string>();
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).Callback<string>(html.Add).ReturnsAsync(new byte[] { 1 });
+        var (svc, db, _, _) = Create(pdf);
+        return (svc, db, html);
+    }
+
+    [Fact]
+    public async Task OrderInvoice_SoldBeforeVat_ShowsNoVatEvenAfterVatIsSwitchedOn()
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var order = await SeedPaidOrderAsync(db);
+        (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatEnabled = true;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.DoesNotContain("excl. VAT", html.Single());
+        Assert.Equal(0, (await db.Invoices.SingleAsync(TestContext.Current.CancellationToken)).VatPercentage);
+    }
+
+    [Fact]
+    public async Task OrderInvoice_SoldWithVat_ShowsTheVatInsideThePrice()
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var order = await SeedPaidOrderAsync(db);
+        var item = await db.OrderItems.SingleAsync(TestContext.Current.CancellationToken);
+        item.UnitPriceExclVatInOre = 40000;
+        item.VatPercentage = 25;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        var page = html.Single();
+        Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(40000), page);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(10000), page);
+        Assert.Equal(25, (await db.Invoices.SingleAsync(TestContext.Current.CancellationToken)).VatPercentage);
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 25)]
+    public async Task SubscriptionInvoice_TakesTheVatOutOfTheCharge(bool vatEnabled, int vatPercent)
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var subscription = await SeedSubscriptionAsync(db);
+        (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatEnabled = vatEnabled;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-vat", 20000, DateTime.UtcNow);
+
+        var invoice = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(20000, invoice.AmountInOre);
+        Assert.Equal(vatPercent, invoice.VatPercentage);
+        if (vatEnabled)
+            Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(4000), html.Single());
+        else
+            Assert.DoesNotContain("excl. VAT", html.Single());
+    }
+
+    [Theory]
+    [InlineData(0, true, false)]
+    [InlineData(25, false, true)]
+    [InlineData(25, true, true)]
+    [InlineData(0, false, false)]
+    public async Task OrderInvoice_ShowsMvaOnlyWhenSoldWithVat(int lineVat, bool vatOnNow, bool expectMva)
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var order = await SeedPaidOrderAsync(db);
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        settings.CompanyOrgNumber = "999 888 777";
+        settings.VatEnabled = vatOnNow;
+        var item = await db.OrderItems.SingleAsync(TestContext.Current.CancellationToken);
+        item.VatPercentage = lineVat;
+        item.UnitPriceExclVatInOre = lineVat > 0 ? 40000 : 50000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.Equal(expectMva, html.Single().Contains("999 888 777 MVA"));
+        Assert.Contains("999 888 777", html.Single());
+    }
+
+    [Fact]
+    public async Task OrderInvoice_SplitsTheVatFromEachLineTotal()
+    {
+        // 3 x 49.02 kr = 147.06 kr. Split from the line total that is 117.65 kr plus 29.41 kr VAT.
+        var (svc, db, html) = CreateCapturingHtml();
+        var order = await SeedPaidOrderAsync(db);
+        var item = await db.OrderItems.SingleAsync(TestContext.Current.CancellationToken);
+        item.Quantity = 3;
+        item.PriceAtPurchaseInOre = 4902;
+        item.UnitPriceExclVatInOre = 3922;
+        item.VatPercentage = 25;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(11765), html.Single());
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(2941), html.Single());
     }
 }

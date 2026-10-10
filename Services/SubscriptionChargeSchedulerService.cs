@@ -39,9 +39,7 @@ namespace garge_api.Services
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var vipps = scope.ServiceProvider.GetRequiredService<IVippsService>();
-                var settingsCache = scope.ServiceProvider.GetRequiredService<IAppSettingsCache>();
 
-                var settings = await settingsCache.GetAsync();
                 var cutoff = DateTime.UtcNow + Lookahead;
 
                 await StopUnpaidAsync(db, vipps, scope.ServiceProvider.GetRequiredService<ISubscriptionEmailService>(), stoppingToken);
@@ -71,8 +69,7 @@ namespace garge_api.Services
                     // A failed attempt needs a new charge with its own key. Reusing a key returns the failed charge.
                     var key = SubscriptionCharges.Key(sub.Id, dueDate, sub.FailedChargeAttempts);
                     if (sub.LastChargeKey == key) continue;
-                    var unitPriceInOre = Pricing.EffectiveInOre(sub.Product.PriceInOre, settings.VatEnabled);
-                    var amountInOre = unitPriceInOre * sub.Quantity;
+                    var amountInOre = sub.Product.PriceInOre * sub.Quantity;
                     try
                     {
                         await vipps.CreateChargeAsync(
