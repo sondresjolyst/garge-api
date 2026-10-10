@@ -54,11 +54,15 @@ namespace garge_api.Services
                 """;
         }
 
-        public static string Render(AppSettings s, Meta? meta, string bodyHtml)
+        /// <param name="vatRegistered">
+        /// Whether the document is from a sale made while VAT registered, which puts "MVA" after the
+        /// organisation number. Invoices pass the VAT they were sold with. Other emails use the setting.
+        /// </param>
+        public static string Render(AppSettings s, Meta? meta, string bodyHtml, bool? vatRegistered = null)
         {
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
-            var orgLine = s.VatEnabled ? $"{s.CompanyOrgNumber} MVA" : s.CompanyOrgNumber;
+            var orgLine = vatRegistered ?? s.VatEnabled ? $"{s.CompanyOrgNumber} MVA" : s.CompanyOrgNumber;
 
             var metaBlock = string.Empty;
             if (meta != null)

@@ -160,12 +160,11 @@ namespace garge_api.Controllers
             }
 
             var settings = await _settingsCache.GetAsync();
-            var vatEnabled = settings.VatEnabled;
-            var taxBp = vatEnabled ? Pricing.VatBasisPoints : 0;
+            var vatPercent = Pricing.VatPercentFor(settings.VatEnabled);
+            var taxBp = settings.VatEnabled ? Pricing.VatBasisPoints : 0;
 
-            var itemPrices = dto.Items.ToDictionary(
-                line => line.ShopItemId,
-                line => Pricing.EffectiveInOre(shopItems[line.ShopItemId].PriceInOre, vatEnabled));
+            var itemPrices = dto.Items.ToDictionary(line => line.ShopItemId, line => shopItems[line.ShopItemId].PriceInOre);
+            var itemPricesExclVat = itemPrices.ToDictionary(kv => kv.Key, kv => Pricing.Split(kv.Value, vatPercent).ExclVat);
 
             var total = dto.Items.Sum(line => itemPrices[line.ShopItemId] * line.Quantity);
 
@@ -193,8 +192,8 @@ namespace garge_api.Controllers
                 ShopItemId = line.ShopItemId,
                 Quantity = line.Quantity,
                 PriceAtPurchaseInOre = itemPrices[line.ShopItemId],
-                UnitPriceExclVatInOre = shopItems[line.ShopItemId].PriceInOre,
-                VatPercentage = vatEnabled ? Pricing.VatPercent : 0
+                UnitPriceExclVatInOre = itemPricesExclVat[line.ShopItemId],
+                VatPercentage = vatPercent
             }).ToList();
             _context.OrderItems.AddRange(orderItems);
             await _context.SaveChangesAsync();
@@ -204,7 +203,7 @@ namespace garge_api.Controllers
                 Name = shopItems[line.ShopItemId].Name,
                 Id = line.ShopItemId.ToString(),
                 UnitPriceInOre = itemPrices[line.ShopItemId],
-                UnitPriceExclVatInOre = shopItems[line.ShopItemId].PriceInOre,
+                UnitPriceExclVatInOre = itemPricesExclVat[line.ShopItemId],
                 Quantity = line.Quantity,
                 TaxPercentageBasisPoints = taxBp
             }).ToList();

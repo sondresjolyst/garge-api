@@ -288,9 +288,8 @@ namespace garge_api.Services
                     orderLines = receiptLines.Select(l =>
                     {
                         var lineTotal = l.UnitPriceInOre * l.Quantity;
-                        var excludingTax = l.TaxPercentageBasisPoints > 0
-                            ? l.UnitPriceExclVatInOre * l.Quantity
-                            : lineTotal;
+                        // The VAT is split from the line total, the same way the invoice does it.
+                        var excludingTax = Pricing.Split(lineTotal, l.TaxPercentageBasisPoints / 100).ExclVat;
                         return new
                         {
                             name = l.Name,

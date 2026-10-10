@@ -955,7 +955,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Webhook_ChargeCapturedWithoutAmount_InvoicesPriceWithVatTimesQuantity()
+    public async Task Webhook_ChargeCapturedWithoutAmount_InvoicesPriceTimesQuantity()
     {
         using var db = CreateDbContext();
         await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
@@ -974,8 +974,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         await ctrl.Webhook();
 
-        // 299.00 NOK plus 25 % VAT is 373.75 NOK, three times is 1121.25 NOK.
-        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_fallback", 112125, It.IsAny<DateTime>()), Times.Once);
+        // 299.00 NOK three times is 897.00 NOK.
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_fallback", 89700, It.IsAny<DateTime>()), Times.Once);
     }
 
     [Theory]
