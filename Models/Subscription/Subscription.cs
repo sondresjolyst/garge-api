@@ -57,6 +57,17 @@ namespace garge_api.Models.Subscription
 
         public bool IsTest { get; set; }
 
+        /// <summary>Failed charge attempts for the period due at <see cref="NextChargeDate"/>.</summary>
+        public int FailedChargeAttempts { get; set; }
+
+        /// <summary>The key of the last charge posted to Vipps, so a charge is posted once.</summary>
+        [MaxLength(64)]
+        public string? LastChargeKey { get; set; }
+
+        /// <summary>The Vipps failureReason of the last counted failed charge, cleared when a charge is captured.</summary>
+        [MaxLength(50)]
+        public string? LastChargeFailureReason { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

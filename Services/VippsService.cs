@@ -56,10 +56,10 @@ namespace garge_api.Services
             _scopeFactory = scopeFactory;
 
             var assembly = Assembly.GetExecutingAssembly();
-            _systemName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "garge";
-            _systemVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            _systemName = SystemHeader(assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "garge");
+            _systemVersion = SystemHeader(assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
                              ?? assembly.GetName().Version?.ToString()
-                             ?? "1.0.0";
+                             ?? "1.0.0");
         }
 
         private async Task<bool> IsTestModeAsync()
@@ -147,13 +147,12 @@ namespace garge_api.Services
             // unit*quantity. Each scheduled charge may be at most that ceiling.
             // Raising quantity later PATCHes the ceiling (Vipps re-asks the user);
             // lowering quantity is a DB-only change since charges stay under the cap.
-            var suggestedMaxAmount = unitPriceInOre * quantity;
+            var suggestedMaxAmount = CheckedAgreementAmount((long)unitPriceInOre * quantity);
             var initialAmount = suggestedMaxAmount;
 
             // Vipps caps productDescription at 100 chars (validation-error otherwise).
             // Our descriptions may contain markdown up to 2000 chars; truncate plainly.
-            var productDescription = product.Description ?? string.Empty;
-            if (productDescription.Length > 100) productDescription = productDescription[..100];
+            var productDescription = Truncate(product.Description ?? string.Empty, 100);
 
             var body = new
             {
@@ -176,7 +175,7 @@ namespace garge_api.Services
                 },
                 merchantRedirectUrl = redirectUrl,
                 merchantAgreementUrl = $"{_appOpts.FrontendBaseUrl}/terms",
-                productName = product.Name,
+                productName = Truncate(product.Name, 45),
                 productDescription,
                 phoneNumber,
                 scope = "name address email phoneNumber"
@@ -260,7 +259,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(new
             {
-                pricing = new { suggestedMaxAmount = newMaxAmountInOre }
+                pricing = new { suggestedMaxAmount = CheckedAgreementAmount(newMaxAmountInOre) }
             });
 
             var response = await _http.SendAsync(request);
@@ -336,7 +335,11 @@ namespace garge_api.Services
             AddCommonHeaders(request, e);
 
             var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-payment");
+            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "get-payment"));
+        }
+
+        private VippsPaymentResponse ToPaymentResponse(string json)
+        {
             var dto = JsonSerializer.Deserialize<PaymentApiDto>(json, _jsonOpts) ?? new PaymentApiDto();
             return new VippsPaymentResponse
             {
@@ -428,7 +431,7 @@ namespace garge_api.Services
             public string? Formatted { get; set; }
         }
 
-        public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
+        public async Task<VippsPaymentResponse> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
         {
             var e = await GetEffectiveAsync(isTest);
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
@@ -437,7 +440,7 @@ namespace garge_api.Services
             AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
             var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "capture-payment");
+            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "capture-payment"));
         }
 
         public async Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null)
@@ -451,7 +454,7 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-payment");
         }
 
-        public async Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
+        public async Task<VippsPaymentResponse> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
         {
             var e = await GetEffectiveAsync(isTest);
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
@@ -460,8 +463,23 @@ namespace garge_api.Services
             AddCommonHeaders(request, e, idempotencyKey);
             request.Content = BuildJsonContent(body);
             var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "refund-payment");
+            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "refund-payment"));
         }
+
+        // Vipps takes a productName of at most 45 characters and a productDescription of at most 100.
+        // A cut never splits a character made of two UTF-16 units.
+        internal static string Truncate(string value, int max)
+        {
+            if (value.Length <= max) return value;
+            var cut = char.IsHighSurrogate(value[max - 1]) ? max - 1 : max;
+            return value[..cut];
+        }
+
+        private static int CheckedAgreementAmount(long amountInOre) =>
+            amountInOre is > 0 and <= SubscriptionCharges.MaxAgreementAmountInOre
+                ? (int)amountInOre
+                : throw new ArgumentOutOfRangeException(nameof(amountInOre), amountInOre,
+                    $"A Vipps agreement amount must be between 1 and {SubscriptionCharges.MaxAgreementAmountInOre} øre.");
 
         public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest)
         {
@@ -561,6 +579,15 @@ namespace garge_api.Services
             return valid
                 ? WebhookVerifyResult.Valid
                 : WebhookVerifyResult.BadSignature;
+        }
+
+        // Vipps-System-Name and Vipps-System-Version take at most 30 characters. The build metadata
+        // after a '+', such as a commit hash, is left out.
+        internal static string SystemHeader(string value)
+        {
+            var plus = value.IndexOf('+');
+            if (plus >= 0) value = value[..plus];
+            return value.Length <= 30 ? value : value[..30];
         }
 
         private void AddCommonHeaders(HttpRequestMessage request, VippsEffective e, string? idempotencyKey = null)

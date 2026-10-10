@@ -110,4 +110,73 @@ public class VippsServiceRequestTests
         Assert.Equal(0, line.GetProperty("taxRate").GetInt32());
         Assert.Equal(0, line.GetProperty("totalTaxAmount").GetInt32());
     }
+
+    private static garge_api.Models.Subscription.Product Plan(string name) => new()
+    {
+        Id = 1, Name = name, PriceInOre = 29900, Interval = garge_api.Models.Subscription.BillingInterval.Monthly,
+        Type = garge_api.Models.Subscription.ProductType.Primary, IsActive = true
+    };
+
+    [Fact]
+    public async Task CreateAgreement_SendsAtMost45CharactersOfTheProductName()
+    {
+        var (service, handler) = CreateService();
+        await service.CreateAgreementAsync(Plan(new string('x', 60)), "user-1", "https://www.garge.no/r", "4791234567", 29900, 1, "sub-1");
+
+        var body = JsonDocument.Parse(handler.Sent.Single(x => x.Request.RequestUri!.AbsolutePath == "/recurring/v3/agreements").Body).RootElement;
+        Assert.Equal(new string('x', 45), body.GetProperty("productName").GetString());
+    }
+
+    [Theory]
+    [InlineData(40_001, 50)]
+    [InlineData(0, 1)]
+    [InlineData(int.MaxValue, 2)]
+    public async Task CreateAgreement_AmountOutsideTheVippsLimit_SendsNothing(int unitPrice, int quantity)
+    {
+        var (service, handler) = CreateService();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.CreateAgreementAsync(Plan("Garge"), "user-1", "https://www.garge.no/r", "4791234567", unitPrice, quantity, "sub-1"));
+        Assert.DoesNotContain(handler.Sent, x => x.Request.RequestUri!.AbsolutePath.StartsWith("/recurring/"));
+    }
+
+    [Fact]
+    public async Task UpdateAgreementMaxAmount_AboveTheVippsLimit_SendsNothing()
+    {
+        var (service, handler) = CreateService();
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.UpdateAgreementMaxAmountAsync("agr_1", SubscriptionCharges.MaxAgreementAmountInOre + 1, "key"));
+        Assert.DoesNotContain(handler.Sent, x => x.Request.RequestUri!.AbsolutePath.StartsWith("/recurring/"));
+    }
+
+    [Theory]
+    [InlineData("1.4.2+0123456789abcdef0123456789abcdef01234567", "1.4.2")]
+    [InlineData("1.0.0", "1.0.0")]
+    [InlineData("garge-api-with-a-name-longer-than-thirty", "garge-api-with-a-name-longer-t")]
+    public void SystemHeader_DropsBuildMetadataAndKeepsAtMost30Characters(string value, string expected)
+    {
+        Assert.Equal(expected, VippsService.SystemHeader(value));
+    }
+
+    [Fact]
+    public async Task EveryRequest_SendsSystemHeadersOfAtMost30Characters()
+    {
+        var (service, handler) = CreateService();
+        await service.CreateAgreementAsync(Plan("Garge"), "user-1", "https://www.garge.no/r", "4791234567", 29900, 1, "sub-1");
+
+        foreach (var (request, _) in handler.Sent.Where(x => !x.Request.RequestUri!.AbsolutePath.EndsWith("/accesstoken/get")))
+        {
+            Assert.InRange(request.Headers.GetValues("Vipps-System-Name").Single().Length, 1, 30);
+            Assert.InRange(request.Headers.GetValues("Vipps-System-Version").Single().Length, 1, 30);
+        }
+    }
+
+    [Theory]
+    [InlineData("abc", 45, "abc")]
+    [InlineData("abcdef", 3, "abc")]
+    [InlineData("ab\U0001F600cd", 3, "ab")]
+    [InlineData("ab\U0001F600cd", 4, "ab\U0001F600")]
+    public void Truncate_NeverSplitsASurrogatePair(string value, int max, string expected)
+    {
+        Assert.Equal(expected, VippsService.Truncate(value, max));
+    }
 }

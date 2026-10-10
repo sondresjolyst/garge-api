@@ -58,9 +58,10 @@ public abstract class ControllerTestBase
             .Build();
     }
 
-    protected ApplicationDbContext CreateDbContext() =>
+    // Contexts created with the same name share one database.
+    protected ApplicationDbContext CreateDbContext(string? name = null) =>
         new(new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .UseInMemoryDatabase(name ?? Guid.NewGuid().ToString())
             .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 

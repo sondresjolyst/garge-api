@@ -113,9 +113,11 @@ namespace garge_api.Services
         /// <summary>Reads a payment. Pass the environment the payment was created in, or null for the current one.</summary>
         Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null);
         Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null);
-        Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        /// <summary>Captures the amount and returns the payment's totals after the capture.</summary>
+        Task<VippsPaymentResponse> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
         Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null);
-        Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        /// <summary>Refunds the amount and returns the payment's totals after the refund.</summary>
+        Task<VippsPaymentResponse> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
 
         Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest);
         Task<IReadOnlyList<VippsWebhookInfo>> ListWebhooksAsync(bool isTest);

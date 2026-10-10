@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Controllers;
 using garge_api.Dtos.Subscription;
 using Microsoft.AspNetCore.Http;
@@ -1179,5 +1180,369 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await ctrl.InitiateSubscription(new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
 
         Assert.Equal(createdInTest, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).IsTest);
+    }
+
+    private static DateTime Utc(int y, int m, int d) => new(y, m, d, 0, 0, 0, DateTimeKind.Utc);
+
+    private static string ChargeEvent(string agreementId, string eventType, string chargeId, DateTime occurred, string eventId) =>
+        JsonSerializer.Serialize(new { agreementId, msn = "msn-prod", eventId, eventType, chargeId, chargeType = "RECURRING", amount = 29900, amountCaptured = 29900, occurred });
+
+    private async Task<IActionResult> SendChargeEventAsync(ApplicationDbContext db, string body,
+        Mock<IVippsService>? vipps = null, ISubscriptionEmailService? subEmail = null)
+    {
+        var ctrl = CreateController(db, vipps: vipps, settings: WebhookSettings(), subEmail: subEmail);
+        SetupValidWebhookRequest(ctrl, body);
+        return await ctrl.Webhook();
+    }
+
+    private static async Task<Subscription> ChargingSubAsync(ApplicationDbContext db, DateTime start, DateTime next, int failedAttempts = 0)
+    {
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_charge");
+        sub.StartDate = start;
+        sub.NextChargeDate = next;
+        sub.FailedChargeAttempts = failedAttempts;
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return sub;
+    }
+
+    [Fact]
+    public async Task Webhook_ScheduledChargeCapturedLate_NextChargeKeepsTheBillingDay()
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due, failedAttempts: 1);
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeCaptured, SubscriptionCharges.Key(sub.Id, due, 1), Utc(2026, 3, 10), "evt-late");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        var saved = await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(Utc(2026, 4, 5), saved.NextChargeDate);
+        Assert.Equal(0, saved.FailedChargeAttempts);
+    }
+
+    [Fact]
+    public async Task Webhook_OlderChargeCapturedAgain_DoesNotMoveBillingBack()
+    {
+        using var db = CreateDbContext();
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: Utc(2026, 5, 5));
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeCaptured, SubscriptionCharges.Key(sub.Id, Utc(2026, 3, 5), 0), Utc(2026, 3, 5), "evt-old");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        Assert.Equal(Utc(2026, 5, 5), (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeOfAnotherSubscription_DoesNotMoveBilling()
+    {
+        using var db = CreateDbContext();
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: Utc(2026, 3, 5));
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeCaptured, SubscriptionCharges.Key(sub.Id + 1, Utc(2026, 3, 5), 0), Utc(2026, 3, 5), "evt-other");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        Assert.Equal(Utc(2026, 3, 5), (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_InitialChargeCaptured_StartsBillingOnce()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_initial");
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, ChargeEvent("agr_initial", VippsEvents.ChargeCaptured, "vipps-initial-id", Utc(2026, 1, 31), "evt-initial")));
+        Assert.Equal(Utc(2026, 2, 28), (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).NextChargeDate);
+
+        // A redelivery with a new event id, months later, leaves billing alone.
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, ChargeEvent("agr_initial", VippsEvents.ChargeCaptured, "vipps-initial-id", Utc(2026, 6, 1), "evt-initial-2")));
+        Assert.Equal(Utc(2026, 2, 28), (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).NextChargeDate);
+    }
+
+    [Fact]
+    public async Task Webhook_CurrentAttemptFails_IsCountedAndTheCustomerTold()
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due);
+        var email = new Mock<ISubscriptionEmailService>();
+        var vipps = MockVipps();
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeFailed, SubscriptionCharges.Key(sub.Id, due, 0), Utc(2026, 3, 10), "evt-fail-1");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body, vipps, email.Object));
+
+        var saved = await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, saved.FailedChargeAttempts);
+        Assert.Equal(SubscriptionStatus.Active, saved.Status);
+        Assert.Equal(due, saved.NextChargeDate);
+        email.Verify(e => e.SendChargeFailedAsync(sub.Id), Times.Once);
+        email.Verify(e => e.SendStoppedForNonPaymentAsync(It.IsAny<int>()), Times.Never);
+        vipps.Verify(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task Webhook_FailureOfAnotherAttempt_IsNotCounted(int attemptInKey)
+    {
+        // One attempt has failed, so attempt 1 is current. Attempt 0 failing again, or an attempt 2
+        // that was never posted, is not counted.
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due, failedAttempts: 1);
+        var email = new Mock<ISubscriptionEmailService>();
+
+        var key = SubscriptionCharges.Key(sub.Id, due, attemptInKey);
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, ChargeEvent("agr_charge", VippsEvents.ChargeFailed, key, Utc(2026, 3, 10), "evt-stale"), subEmail: email.Object));
+
+        Assert.Equal(1, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).FailedChargeAttempts);
+        email.Verify(e => e.SendChargeFailedAsync(It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Webhook_FailureOfAnotherSubscriptionsCharge_IsNotCounted()
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due);
+
+        var key = SubscriptionCharges.Key(sub.Id + 1, due, 0);
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, ChargeEvent("agr_charge", VippsEvents.ChargeFailed, key, Utc(2026, 3, 10), "evt-other-sub")));
+
+        Assert.Equal(0, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).FailedChargeAttempts);
+    }
+
+    [Theory]
+    [InlineData("charge_amount_too_high", "charge_amount_too_high")]
+    [InlineData("user_action_required", "user_action_required")]
+    [InlineData(null, null)]
+    [InlineData("a_reason_longer_than_fifty_characters_is_not_stored_at_all", null)]
+    public async Task Webhook_CountedFailure_StoresTheVippsFailureReason(string? sent, string? stored)
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due);
+
+        var body = JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_charge", msn = "msn-prod", eventId = "evt-reason", eventType = VippsEvents.ChargeFailed,
+            chargeId = SubscriptionCharges.Key(sub.Id, due, 0), occurred = Utc(2026, 3, 10), failureReason = sent
+        });
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        Assert.Equal(stored, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).LastChargeFailureReason);
+    }
+
+    [Fact]
+    public async Task Webhook_Capture_ClearsTheLastFailureReason()
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due, failedAttempts: 1);
+        sub.LastChargeFailureReason = SubscriptionCharges.AmountTooHigh;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeCaptured, SubscriptionCharges.Key(sub.Id, due, 1), Utc(2026, 3, 12), "evt-clear");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        Assert.Null((await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).LastChargeFailureReason);
+    }
+
+    [Fact]
+    public async Task Webhook_FailureOfAnOldPeriod_IsNotCounted()
+    {
+        using var db = CreateDbContext();
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: Utc(2026, 4, 5));
+
+        var key = SubscriptionCharges.Key(sub.Id, Utc(2026, 3, 5), 0);
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, ChargeEvent("agr_charge", VippsEvents.ChargeFailed, key, Utc(2026, 3, 10), "evt-old-period")));
+
+        Assert.Equal(0, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).FailedChargeAttempts);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Webhook_LastAttemptFails_StopsTheAgreementInItsEnvironment(bool isTest)
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due, failedAttempts: SubscriptionCharges.MaxAttempts - 1);
+        sub.IsTest = isTest;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var email = new Mock<ISubscriptionEmailService>();
+        var vipps = MockVipps();
+
+        var body = JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_charge", msn = isTest ? "msn-test" : "msn-prod", eventId = "evt-final", eventType = VippsEvents.ChargeFailed,
+            chargeId = SubscriptionCharges.Key(sub.Id, due, SubscriptionCharges.MaxAttempts - 1), occurred = Utc(2026, 3, 20)
+        });
+        var ctrl = CreateController(db, vipps: vipps, subEmail: email.Object, settings: new AppSettings
+        {
+            Id = 1, VippsSubscriptionWebhookSecret = "live-secret", VippsTestSubscriptionWebhookSecret = "test-secret"
+        });
+        SetupValidWebhookRequest(ctrl, body);
+        ctrl.ControllerContext.HttpContext.Request.Headers["X-Test-Secret"] = isTest ? "test-secret" : "live-secret";
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+
+        vipps.Verify(v => v.CancelAgreementAsync("agr_charge", $"cancel-{sub.Id}", isTest), Times.Once);
+        var saved = await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Stopped, saved.Status);
+        Assert.Equal(SubscriptionCharges.MaxAttempts, saved.FailedChargeAttempts);
+        email.Verify(e => e.SendStoppedForNonPaymentAsync(sub.Id), Times.Once);
+        email.Verify(e => e.SendChargeFailedAsync(It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Webhook_LastAttemptFails_AndTheCancelFails_TheFailureIsSavedForTheScheduler()
+    {
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 5);
+        var sub = await ChargingSubAsync(db, start: Utc(2026, 1, 5), next: due, failedAttempts: SubscriptionCharges.MaxAttempts - 1);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("down"));
+        var email = new Mock<ISubscriptionEmailService>();
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeFailed, SubscriptionCharges.Key(sub.Id, due, SubscriptionCharges.MaxAttempts - 1), Utc(2026, 3, 20), "evt-final");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body, vipps, email.Object));
+
+        var saved = await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, saved.Status);
+        Assert.Equal(SubscriptionCharges.MaxAttempts, saved.FailedChargeAttempts);
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+        email.Verify(e => e.SendStoppedForNonPaymentAsync(It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Webhook_StartedJustAfterMidnightInNorway_IsBilledOnTheNorwegianDay()
+    {
+        // 23:30 UTC on 31 January is 00:30 on 1 February in Norway.
+        using var db = CreateDbContext();
+        var due = Utc(2026, 3, 1);
+        var sub = await ChargingSubAsync(db, start: new DateTime(2026, 1, 31, 23, 30, 0, DateTimeKind.Utc), next: due);
+
+        var body = ChargeEvent("agr_charge", VippsEvents.ChargeCaptured, SubscriptionCharges.Key(sub.Id, due, 0), Utc(2026, 3, 1), "evt-oslo");
+        Assert.IsType<OkResult>(await SendChargeEventAsync(db, body));
+
+        Assert.Equal(Utc(2026, 4, 1), (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).NextChargeDate);
+    }
+
+    [Fact]
+    public async Task CancelById_AddOnCancelFails_NothingMoreIsStopped()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var primary = new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_primary", Status = SubscriptionStatus.Active };
+        var addOn = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "agr_addon", Status = SubscriptionStatus.Active };
+        await db.Subscriptions.AddRangeAsync([primary, addOn], TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CancelAgreementAsync("agr_addon", It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("down"));
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.CancelSubscription(primary.Id);
+
+        Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
+        vipps.Verify(v => v.CancelAgreementAsync("agr_primary", It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+        var subs = await db.Subscriptions.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        Assert.All(subs, x => Assert.Equal(SubscriptionStatus.Active, x.Status));
+    }
+
+    [Fact]
+    public async Task CancelById_PrimaryCancelFails_CancelledAddOnsStayStopped()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var primary = new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_primary", Status = SubscriptionStatus.Active };
+        var addOn = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "agr_addon", Status = SubscriptionStatus.Active };
+        await db.Subscriptions.AddRangeAsync([primary, addOn], TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CancelAgreementAsync("agr_primary", It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("down"));
+        var ctrl = CreateController(db, vipps: vipps);
+
+        Assert.Equal(502, Assert.IsType<ObjectResult>(await ctrl.CancelSubscription(primary.Id)).StatusCode);
+
+        var saved = await db.Subscriptions.AsNoTracking().ToDictionaryAsync(x => x.VippsAgreementId, x => x.Status, TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, saved["agr_primary"]);
+        Assert.Equal(SubscriptionStatus.Stopped, saved["agr_addon"]);
+    }
+
+    [Fact]
+    public async Task Initiate_TotalAboveTheVippsAgreementLimit_IsRefusedBeforeVipps()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), new Product
+        {
+            Id = 2, Name = "Big add-on", PriceInOre = 40_001, Interval = BillingInterval.Monthly, Type = ProductType.AddOn, IsActive = true
+        });
+        await db.Subscriptions.AddAsync(new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_p", Status = SubscriptionStatus.Active }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.InitiateSubscription(new InitiateSubscriptionDto
+        {
+            ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 50
+        });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        vipps.Verify(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        Assert.Equal(1, await db.Subscriptions.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Initiate_TotalExactlyAtTheVippsAgreementLimit_IsAllowed()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), new Product
+        {
+            Id = 2, Name = "Big add-on", PriceInOre = 40_000, Interval = BillingInterval.Monthly, Type = ProductType.AddOn, IsActive = true
+        });
+        await db.Subscriptions.AddAsync(new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_p", Status = SubscriptionStatus.Active }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "agr_big", VippsConfirmationUrl = "https://landing.vipps.no/x" });
+        var ctrl = CreateController(db, vipps: vipps);
+
+        var result = await ctrl.InitiateSubscription(new InitiateSubscriptionDto
+        {
+            ProductId = 2, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true, Quantity = 50
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_TotalAboveTheVippsAgreementLimit_IsRefusedBeforeVipps()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), new Product
+        {
+            Id = 2, Name = "Big add-on", PriceInOre = 40_001, Interval = BillingInterval.Monthly, Type = ProductType.AddOn, IsActive = true
+        });
+        var sub = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "agr_big", Status = SubscriptionStatus.Active, Quantity = 1 };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+
+        Assert.IsType<BadRequestObjectResult>(await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 50 }));
+
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+        Assert.Equal(1, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Quantity);
     }
 }

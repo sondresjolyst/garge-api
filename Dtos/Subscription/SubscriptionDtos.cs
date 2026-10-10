@@ -87,5 +87,8 @@ namespace garge_api.Dtos.Subscription
         // The charge amount and the part of it that was captured, in øre, set on recurring.charge-* events.
         public int? Amount { get; set; }
         public int? AmountCaptured { get; set; }
+
+        // Why a charge failed, set on recurring.charge-failed.v1, for example "charge_amount_too_high".
+        public string? FailureReason { get; set; }
     }
 }
