@@ -12,6 +12,26 @@ namespace garge_api.Controllers
     {
         protected static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+        /// <summary>A webhook registration: its id, its protected secret and its environment.</summary>
+        protected readonly record struct Registration(string? ProtectedSecret, bool IsTest);
+
+        /// <summary>
+        /// Verifies the signature against the secret of each registration. Returns the environment of
+        /// the registration whose secret signed it.
+        /// </summary>
+        protected static (WebhookVerifyResult Result, bool IsTest) VerifySignature(
+            IVippsService vipps, IWebhookSecretProtector protector, HttpRequest request, string rawBody,
+            params Registration[] registrations)
+        {
+            var result = WebhookVerifyResult.MissingSecret;
+            foreach (var registration in registrations.Where(r => !string.IsNullOrEmpty(r.ProtectedSecret)))
+            {
+                result = vipps.VerifyWebhookSignature(request, rawBody, protector.Unprotect(registration.ProtectedSecret!));
+                if (result == WebhookVerifyResult.Valid) return (result, registration.IsTest);
+            }
+            return (result, false);
+        }
+
         protected static async Task<string> ReadRawBodyAsync(HttpRequest request)
         {
             if (!request.Body.CanSeek)
@@ -23,6 +43,12 @@ namespace garge_api.Controllers
             request.Body.Seek(0, SeekOrigin.Begin);
             return body;
         }
+
+        /// <summary>
+        /// The key an event is marked handled under. Test and production keep separate keys, so an
+        /// event from one environment cannot mark an event of the other as handled.
+        /// </summary>
+        protected static string EventKey(string eventId, bool sentFromTest) => sentFromTest ? $"test:{eventId}" : eventId;
 
         /// <summary>Whether an earlier delivery of this event was already handled.</summary>
         protected static async Task<bool> AlreadyProcessedAsync(ApplicationDbContext db, string eventId)

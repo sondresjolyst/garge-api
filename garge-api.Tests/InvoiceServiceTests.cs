@@ -13,7 +13,7 @@ namespace garge_api.Tests;
 public class InvoiceServiceTests
 {
     private static (InvoiceService svc, ApplicationDbContext db, Mock<IEmailService> email, Mock<IPdfRenderer> pdf) Create(
-        Mock<IPdfRenderer>? pdfRenderer = null)
+        Mock<IPdfRenderer>? pdfRenderer = null, Mock<IVippsService>? vipps = null)
     {
         var db = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -21,6 +21,8 @@ public class InvoiceServiceTests
 
         var serviceProvider = new Mock<IServiceProvider>();
         serviceProvider.Setup(sp => sp.GetService(typeof(ApplicationDbContext))).Returns(db);
+        if (vipps != null)
+            serviceProvider.Setup(sp => sp.GetService(typeof(IVippsService))).Returns(vipps.Object);
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(serviceProvider.Object);
@@ -247,6 +249,27 @@ public class InvoiceServiceTests
             It.Is<string>(s => s.Contains($"#{id:D4}")),
             It.IsAny<string>(),
             It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 1)), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GenerateForSubscriptionChargeAsync_MissingAddress_IsFetchedFromTheSubscriptionsEnvironment(bool isTest)
+    {
+        var vipps = new Mock<IVippsService>();
+        vipps.Setup(v => v.GetAgreementAsync("agr-test", isTest))
+            .ReturnsAsync(new VippsAgreementResponse { Id = "agr-test", Sub = "sub-env" });
+        vipps.Setup(v => v.GetUserInfoAsync("sub-env", isTest))
+            .ReturnsAsync(new VippsUserInfo { Address = new VippsAddress { Formatted = "Storgata 1, 0155 Oslo" } });
+        var (svc, db, _, _) = Create(vipps: vipps);
+        var subscription = await SeedSubscriptionAsync(db);
+        subscription.IsTest = isTest;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-env", 29900, DateTime.UtcNow);
+
+        var saved = await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("Storgata 1, 0155 Oslo", saved.BillingAddress);
     }
 
     [Fact]

@@ -73,6 +73,12 @@ namespace garge_api.Services
         public string? Formatted { get; set; }
     }
 
+    public class VippsWebhookInfo
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
+    }
+
     public class VippsOrderLine
     {
         public string Name { get; set; } = string.Empty;
@@ -91,25 +97,29 @@ namespace garge_api.Services
         Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
             int unitPriceInOre, int quantity, string idempotencyKey);
-        Task<VippsAgreementResponse> GetAgreementAsync(string agreementId);
-        Task CancelAgreementAsync(string agreementId, string idempotencyKey);
-        Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey);
+        // Calls on an existing payment or agreement take the environment it was created in. Null means
+        // the current test mode, for calls that create something new.
+        Task<VippsAgreementResponse> GetAgreementAsync(string agreementId, bool? isTest = null);
+        Task CancelAgreementAsync(string agreementId, string idempotencyKey, bool? isTest = null);
+        Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey, bool? isTest = null);
 
         Task<VippsCreateChargeResponse> CreateChargeAsync(
             string agreementId, int amountInOre, DateTime dueDate,
-            string description, string idempotencyKey);
+            string description, string idempotencyKey, bool? isTest = null);
 
         Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey);
         /// <summary>Reads a payment. Pass the environment the payment was created in, or null for the current one.</summary>
         Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null);
-        Task<VippsUserInfo?> GetUserInfoAsync(string sub);
-        Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey);
-        Task CancelPaymentAsync(string reference, string idempotencyKey);
-        Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey);
+        Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null);
+        Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null);
+        Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
 
-        Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events);
+        Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest);
+        Task<IReadOnlyList<VippsWebhookInfo>> ListWebhooksAsync(bool isTest);
+        Task DeleteWebhookAsync(string webhookId, bool isTest);
         WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
     }
 }

@@ -137,10 +137,10 @@ namespace garge_api.Services
                 {
                     try
                     {
-                        var details = await vipps.GetAgreementAsync(subscription.VippsAgreementId);
+                        var details = await vipps.GetAgreementAsync(subscription.VippsAgreementId, subscription.IsTest);
                         if (!string.IsNullOrEmpty(details?.Sub))
                         {
-                            var info = await vipps.GetUserInfoAsync(details.Sub);
+                            var info = await vipps.GetUserInfoAsync(details.Sub, subscription.IsTest);
                             var formatted = VippsAddressFormatter.Format(info?.Address);
                             if (!string.IsNullOrEmpty(formatted))
                             {

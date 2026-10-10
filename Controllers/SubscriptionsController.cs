@@ -276,7 +276,7 @@ namespace garge_api.Controllers
 
             try
             {
-                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}");
+                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}", subscription.IsTest);
             }
             catch (Exception ex)
             {
@@ -300,7 +300,7 @@ namespace garge_api.Controllers
                 {
                     try
                     {
-                        await _vipps.CancelAgreementAsync(addOn.VippsAgreementId, $"cancel-{addOn.Id}");
+                        await _vipps.CancelAgreementAsync(addOn.VippsAgreementId, $"cancel-{addOn.Id}", addOn.IsTest);
                     }
                     catch (Exception ex)
                     {
@@ -352,7 +352,8 @@ namespace garge_api.Controllers
                     await _vipps.UpdateAgreementMaxAmountAsync(
                         subscription.VippsAgreementId,
                         newCeiling,
-                        $"qtyceiling-{subscription.Id}-{dto.Quantity}");
+                        $"qtyceiling-{subscription.Id}-{dto.Quantity}",
+                        isTest: subscription.IsTest);
                 }
                 catch (Exception ex)
                 {
@@ -382,9 +383,9 @@ namespace garge_api.Controllers
         {
             var rawBody = await ReadRawBodyAsync(Request);
             var settings = await _settingsCache.GetAsync();
-            var secret = _protector.Unprotect(settings.VippsSubscriptionWebhookSecret ?? string.Empty);
-
-            var verify = _vipps.VerifyWebhookSignature(Request, rawBody, secret);
+            var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
+                new Registration(settings.VippsSubscriptionWebhookSecret, false),
+                new Registration(settings.VippsTestSubscriptionWebhookSecret, true));
             if (verify != WebhookVerifyResult.Valid)
             {
                 _logger.LogWarning("Subscription webhook verify failed: {Reason}", verify);
@@ -404,9 +405,9 @@ namespace garge_api.Controllers
             if (payload == null) return BadRequest();
 
             // Recurring events carry no event id. A charge event is told apart by its charge id.
-            var eventId = !string.IsNullOrEmpty(payload.EventId)
+            var eventId = EventKey(!string.IsNullOrEmpty(payload.EventId)
                 ? payload.EventId
-                : $"{payload.AgreementId}:{payload.EventType}:{payload.ChargeId}:{payload.Occurred?.Ticks}";
+                : $"{payload.AgreementId}:{payload.EventType}:{payload.ChargeId}:{payload.Occurred?.Ticks}", sentFromTest);
 
             if (await AlreadyProcessedAsync(_context, eventId))
             {
@@ -422,6 +423,13 @@ namespace garge_api.Controllers
                 _logger.LogWarning("Webhook: unknown agreementId {AgreementId}", payload.AgreementId);
                 await SaveProcessedAsync(_context, "subscription", eventId);
                 return Ok();
+            }
+
+            if (sentFromTest != subscription.IsTest)
+            {
+                _logger.LogError("Subscription webhook {EventId} rejected: sent from the {Sent} environment for a {Subscription} subscription {SubscriptionId}",
+                    eventId, sentFromTest ? "test" : "production", subscription.IsTest ? "test" : "production", subscription.Id);
+                return await RejectAsync(_context, "subscription", eventId);
             }
 
             // Recurring events may leave the merchant number out, so only a number that differs is refused.
@@ -531,10 +539,10 @@ namespace garge_api.Controllers
         {
             try
             {
-                var details = await _vipps.GetAgreementAsync(agreementId);
+                var details = await _vipps.GetAgreementAsync(agreementId, subscription.IsTest);
                 if (string.IsNullOrEmpty(details?.Sub)) return;
 
-                var info = await _vipps.GetUserInfoAsync(details.Sub);
+                var info = await _vipps.GetUserInfoAsync(details.Sub, subscription.IsTest);
                 var formatted = VippsAddressFormatter.Format(info?.Address);
                 if (!string.IsNullOrEmpty(formatted))
                     subscription.BillingAddress = formatted;
