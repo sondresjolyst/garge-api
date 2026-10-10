@@ -679,6 +679,7 @@ public class ShopControllerTests : ControllerTestBase
         vipps.Verify(v => v.RefundPaymentAsync("garge-order-000007", 12500, $"refund-{order.Id}", false), Times.Once);
         var updated = await db.Orders.FindAsync(new object?[] { order.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(OrderStatus.Refunded, updated!.Status);
+        Assert.Equal(12500, updated.RefundedInOre);
     }
 
     [Fact]
@@ -948,10 +949,12 @@ public class ShopControllerTests : ControllerTestBase
         var order = await SeedOrderAsync(db, "garge-order-refund", OrderStatus.Paid);
 
         await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 2500, name: "REFUNDED", psp: "psp-ref-1"), VippsReporting(captured: 10000, refunded: 2500));
-        Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        var afterPart = await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Paid, 2500), (afterPart.Status, afterPart.RefundedInOre));
 
         await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 7500, name: "REFUNDED", psp: "psp-ref-2"), VippsReporting(captured: 10000, refunded: 10000));
-        Assert.Equal(OrderStatus.Refunded, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        var afterAll = await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Refunded, 10000), (afterAll.Status, afterAll.RefundedInOre));
     }
 
     [Fact]

@@ -34,6 +34,23 @@ namespace garge_api.Models.Shop
         /// <summary>The VAT rate in percent that applied when the sale was made. Zero before VAT registration.</summary>
         public int VatPercentage { get; set; }
 
+        /// <summary>
+        /// The VAT supplement for a sale made after the VAT threshold was passed, before registration.
+        /// It shows the VAT taken out of the price paid and is made once VAT is on.
+        /// </summary>
+        public DateTime? VatSupplementIssuedAt { get; set; }
+
+        /// <summary>The supplement's number in its own continuous series, shown as MVA-0001.</summary>
+        public int? VatSupplementNumber { get; set; }
+
+        public byte[]? VatSupplementPdf { get; set; }
+
+        /// <summary>
+        /// When the PDF was last tried. A row with no PDF is a sale whose PDF failed or is being made,
+        /// and the retry job makes it again after a while.
+        /// </summary>
+        public DateTime? PdfAttemptedAt { get; set; }
+
         public DateTime IssuedAt { get; set; } = DateTime.UtcNow;
 
         [Required]

@@ -32,5 +32,19 @@ namespace garge_api.Models.Admin
         public string CompanyEmail { get; set; } = "sondresjoelyst@gmail.com";
 
         public bool VippsTestMode { get; set; }
+
+        /// <summary>Sales outside garge-api in the last 12 months, in øre, counted toward the VAT threshold.</summary>
+        [Range(0, long.MaxValue)]
+        public long OtherTurnoverInOre { get; set; }
+
+        /// <summary>The highest VAT threshold warning sent to the admins: 0, 80, 90, or 100 once passed.</summary>
+        public int VatThresholdWarnedPercent { get; set; }
+
+        /// <summary>The sale that passed the VAT threshold, once found. VAT is owed from it on until VAT is on.</summary>
+        public int? VatCrossingInvoiceId { get; set; }
+        public DateTime? VatCrossedAt { get; set; }
+
+        /// <summary>The last number used in the VAT supplement series.</summary>
+        public int LastVatSupplementNumber { get; set; }
     }
 }

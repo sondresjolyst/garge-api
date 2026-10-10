@@ -204,6 +204,8 @@ namespace garge_api
             builder.Services.AddHostedService<StatsSnapshotService>();
             builder.Services.AddHostedService<DeletedUserPurgeService>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
+            builder.Services.AddScoped<IVatThresholdService, VatThresholdService>();
+            builder.Services.AddHostedService<InvoicePdfRetryService>();
             builder.Services.AddScoped<IAnonymizationService, AnonymizationService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
