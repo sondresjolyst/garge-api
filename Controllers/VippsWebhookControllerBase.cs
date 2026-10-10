@@ -24,34 +24,64 @@ namespace garge_api.Controllers
             return body;
         }
 
-        protected static async Task<bool> TryRecordEventAsync(
-            ApplicationDbContext db, string source, string eventId)
+        /// <summary>Whether an earlier delivery of this event was already handled.</summary>
+        protected static async Task<bool> AlreadyProcessedAsync(ApplicationDbContext db, string eventId)
         {
-            if (string.IsNullOrEmpty(eventId)) return true;
+            if (string.IsNullOrEmpty(eventId)) return false;
+            return await db.ProcessedWebhookEvents.AsNoTracking().AnyAsync(e => e.Id == eventId);
+        }
 
-            var entity = new ProcessedWebhookEvent
+        /// <summary>
+        /// Saves the event's changes together with its processed marker, in one SaveChanges, so either
+        /// both are stored or neither is. A delivery that fails before this point is not marked, and
+        /// Vipps' redelivery is handled again. Returns false when a concurrent delivery of the same
+        /// event saved first, in which case nothing from this delivery is stored.
+        /// </summary>
+        protected static async Task<bool> SaveProcessedAsync(ApplicationDbContext db, string source, string eventId)
+        {
+            ProcessedWebhookEvent? marker = null;
+            if (!string.IsNullOrEmpty(eventId))
             {
-                Id = eventId,
-                Source = source
-            };
+                marker = new ProcessedWebhookEvent { Id = eventId, Source = source };
+                db.ProcessedWebhookEvents.Add(marker);
+            }
 
             try
             {
-                db.ProcessedWebhookEvents.Add(entity);
                 await db.SaveChangesAsync();
                 return true;
             }
-            catch (Exception ex) when (ex is DbUpdateException || ex is InvalidOperationException)
+            // PostgreSQL reports the duplicate marker as a DbUpdateException, the in-memory provider as an
+            // ArgumentException. Either way it only counts as a lost race once the other marker is found.
+            catch (Exception ex) when (marker != null && ex is DbUpdateException or InvalidOperationException or ArgumentException)
             {
-                var entry = db.Entry(entity);
-                if (entry.State != EntityState.Detached) entry.State = EntityState.Detached;
-
                 var raceLost = await db.ProcessedWebhookEvents
                     .AsNoTracking()
                     .AnyAsync(e => e.Id == eventId);
-                if (raceLost) return false;
-                throw;
+                if (!raceLost) throw;
+
+                foreach (var entry in db.ChangeTracker.Entries().ToList())
+                    entry.State = EntityState.Detached;
+                return false;
             }
+        }
+
+        /// <summary>
+        /// Whether the payload's merchant serial number is the one this record was created with. A
+        /// missing number does not match, so an event for another merchant cannot pass by leaving it out.
+        /// </summary>
+        protected static bool MerchantMatches(string? payloadMsn, string? expectedMsn)
+            => !string.IsNullOrEmpty(payloadMsn) && !string.IsNullOrEmpty(expectedMsn) && payloadMsn == expectedMsn;
+
+        /// <summary>
+        /// Acknowledges a signed event that failed a check, without applying it. It is marked handled and
+        /// answered with 200, because Vipps retries any 4xx or 5xx for seven days and holds back the
+        /// payment's later events until one succeeds. The error log is where it gets noticed.
+        /// </summary>
+        protected static async Task<IActionResult> RejectAsync(ApplicationDbContext db, string source, string eventId)
+        {
+            await SaveProcessedAsync(db, source, eventId);
+            return new OkResult();
         }
     }
 }

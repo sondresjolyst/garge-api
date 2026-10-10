@@ -46,6 +46,13 @@ public class SubscriptionsControllerTests : ControllerTestBase
         return m;
     }
 
+    private static IOptions<VippsOptions> VippsOpts() => Options.Create(new VippsOptions
+    {
+        ClientId = "id", ClientSecret = "s", SubscriptionKey = "k", BaseUrl = "https://api.vipps.no",
+        MerchantSerialNumber = "msn-prod",
+        TestMerchantSerialNumber = "msn-test"
+    });
+
     private static IOptions<AppOptions> AppOpts() => Options.Create(new AppOptions
     {
         FrontendBaseUrl = "https://www.garge.no",
@@ -69,6 +76,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
             MockProtector().Object,
             push.Object,
             AppOpts(),
+            VippsOpts(),
             MockMapper.Object,
             NullLogger<SubscriptionsController>.Instance);
         ctrl.ControllerContext = MakeControllerContext(userId);
@@ -99,6 +107,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new VippsAgreementWebhookDto
         {
             AgreementId = "agr_test",
+            Msn = "msn-prod",
             EventId = $"evt-{eventType}",
             EventType = eventType,
             Occurred = DateTime.UtcNow
@@ -145,6 +154,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new VippsAgreementWebhookDto
         {
             AgreementId = "agr_race",
+            Msn = "msn-prod",
             EventId = "evt-race",
             EventType = "recurring.agreement-activated.v1",
             Occurred = DateTime.UtcNow
@@ -179,6 +189,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new VippsAgreementWebhookDto
         {
             AgreementId = "agr_dup",
+            Msn = "msn-prod",
             EventId = "evt-1",
             EventType = "recurring.agreement-activated.v1",
             Occurred = DateTime.UtcNow
@@ -214,6 +225,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_start",
+            msn = "msn-prod",
             eventId = "evt-start",
             eventType = "recurring.agreement-activated.v1",
             occurred
@@ -252,6 +264,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_addr1",
+            msn = "msn-prod",
             eventId = "evt-addr1",
             eventType = "recurring.agreement-activated.v1",
             occurred = DateTime.UtcNow
@@ -286,6 +299,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_addr2",
+            msn = "msn-prod",
             eventId = "evt-addr2",
             eventType = "recurring.agreement-activated.v1",
             occurred = DateTime.UtcNow
@@ -323,6 +337,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_addr3",
+            msn = "msn-prod",
             eventId = "evt-addr3",
             eventType = "recurring.agreement-activated.v1",
             occurred = DateTime.UtcNow
@@ -357,6 +372,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_addr4",
+            msn = "msn-prod",
             eventId = "evt-addr4",
             eventType = "recurring.agreement-activated.v1",
             occurred = DateTime.UtcNow
@@ -389,6 +405,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_charge",
+            msn = "msn-prod",
             eventId = "evt-charge",
             eventType = "recurring.charge-captured.v1",
             occurred
@@ -422,6 +439,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_no_post",
+            msn = "msn-prod",
             eventId = "evt-no-post",
             eventType = "recurring.charge-captured.v1",
             chargeId = "chg_p",
@@ -456,6 +474,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_noocc",
+            msn = "msn-prod",
             eventId = "evt-noocc",
             eventType = "recurring.charge-captured.v1",
             chargeId = "chg_n"
@@ -490,6 +509,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var payload = new
         {
             agreementId = "agr_yr",
+            msn = "msn-prod",
             eventId = "evt-yr",
             eventType = "recurring.charge-captured.v1",
             chargeId = "chg_yr",
@@ -862,5 +882,212 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });
 
         Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    private static Subscription MoneySub(string agreementId, int quantity = 1, bool isTest = false, SubscriptionStatus status = SubscriptionStatus.Active) => new()
+    {
+        UserId = "user-1", ProductId = 1, VippsAgreementId = agreementId,
+        Status = status, Quantity = quantity, IsTest = isTest
+    };
+
+    private static AppSettings WebhookSettings(bool vat = false) =>
+        new() { Id = 1, VippsSubscriptionWebhookSecret = "secret", VatEnabled = vat };
+
+    [Fact]
+    public async Task Webhook_ChargeCaptured_InvoicesTheAmountVippsCharged()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_amount", quantity: 3);
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var payload = new
+        {
+            agreementId = "agr_amount", msn = "msn-prod", eventId = "evt-amount",
+            eventType = "recurring.charge-captured.v1", chargeId = "chg_amount",
+            amount = 112125, occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db, settings: WebhookSettings(vat: true), invoice: invoice.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_amount", 112125, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeCapturedWithoutAmount_InvoicesPriceWithVatTimesQuantity()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_fallback", quantity: 3);
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var payload = new
+        {
+            agreementId = "agr_fallback", msn = "msn-prod", eventId = "evt-fallback",
+            eventType = "recurring.charge-captured.v1", chargeId = "chg_fallback", occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db, settings: WebhookSettings(vat: true), invoice: invoice.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        await ctrl.Webhook();
+
+        // 299.00 NOK plus 25 % VAT is 373.75 NOK, three times is 1121.25 NOK.
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_fallback", 112125, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task Webhook_WithoutMerchantNumber_IsApplied_AsRecurringEventsMayLeaveItOut(string? msn)
+    {
+        using var db = CreateDbContext();
+        await db.Subscriptions.AddAsync(MoneySub("agr_nomsn", status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var payload = new { agreementId = "agr_nomsn", msn, eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow };
+        var ctrl = CreateController(db, settings: WebhookSettings());
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(SubscriptionStatus.Active, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData("msn-other")]
+    [InlineData("msn-test")]
+    public async Task Webhook_OtherMerchantNumber_IsAcknowledgedButNotApplied(string msn)
+    {
+        using var db = CreateDbContext();
+        await db.Subscriptions.AddAsync(MoneySub("agr_msn", status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var payload = new { agreementId = "agr_msn", msn, eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow };
+        var ctrl = CreateController(db, settings: WebhookSettings());
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(SubscriptionStatus.Pending, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_ChargeCaptured_InvoicesTheCapturedAmountOverTheChargeAmount()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_captured");
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var payload = new
+        {
+            agreementId = "agr_captured", eventType = "recurring.charge-captured.v1", chargeId = "chg_captured",
+            amount = 50000, amountCaptured = 37375, occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db, settings: WebhookSettings(vat: true), invoice: invoice.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        await ctrl.Webhook();
+
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_captured", 37375, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Webhook_TwoChargesAtTheSameMoment_AreBothHandled()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_two");
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var occurred = DateTime.UtcNow;
+        foreach (var chargeId in new[] { "chg_a", "chg_b" })
+        {
+            var payload = new { agreementId = "agr_two", eventType = "recurring.charge-captured.v1", chargeId, amountCaptured = 37375, occurred };
+            var ctrl = CreateController(db, settings: WebhookSettings(vat: true), invoice: invoice.Object);
+            SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+            await ctrl.Webhook();
+        }
+
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_a", 37375, It.IsAny<DateTime>()), Times.Once);
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_b", 37375, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Webhook_TestSubscription_NeedsTheTestMerchantNumber()
+    {
+        using var db = CreateDbContext();
+        await db.Subscriptions.AddAsync(MoneySub("agr_test", isTest: true, status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var payload = new
+        {
+            agreementId = "agr_test", msn = "msn-test", eventId = "evt-test",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db, settings: WebhookSettings());
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(SubscriptionStatus.Active, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_FailedSave_IsNotMarkedProcessed_AndTheRedeliveryIsApplied()
+    {
+        var (failing, healthy) = FailingSaveInterceptor.Contexts();
+        using (failing)
+        using (healthy)
+        {
+            await healthy.Subscriptions.AddAsync(MoneySub("agr_retry", status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+            await healthy.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+            var body = JsonSerializer.Serialize(new
+            {
+                agreementId = "agr_retry", msn = "msn-prod", eventId = "evt-retry",
+                eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+            });
+
+            var first = CreateController(failing, settings: WebhookSettings());
+            SetupValidWebhookRequest(first, body);
+            await Assert.ThrowsAsync<DbUpdateException>(() => first.Webhook());
+            Assert.Equal(0, await healthy.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+
+            var redelivery = CreateController(healthy, settings: WebhookSettings());
+            SetupValidWebhookRequest(redelivery, body);
+            Assert.IsType<OkResult>(await redelivery.Webhook());
+
+            Assert.Equal(1, await healthy.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(SubscriptionStatus.Active, (await healthy.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Initiate_TakesTheEnvironmentFromTheAgreement(bool createdInTest)
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "agr_env", VippsConfirmationUrl = "https://vipps.no/confirm", IsTest = createdInTest });
+
+        // The settings say the opposite, as right after an admin switches test mode.
+        var ctrl = CreateController(db, vipps: vipps, settings: new AppSettings { Id = 1, VippsTestMode = !createdInTest });
+        await ctrl.InitiateSubscription(new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
+
+        Assert.Equal(createdInTest, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).IsTest);
     }
 }

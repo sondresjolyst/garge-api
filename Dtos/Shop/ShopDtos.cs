@@ -137,6 +137,9 @@ namespace garge_api.Dtos.Shop
         public string Name { get; set; } = string.Empty;
         public VippsWebhookAmountDto? Amount { get; set; }
         public string? Msn { get; set; }
+
+        // Whether the payment operation behind the event succeeded. A failed operation changes nothing.
+        public bool Success { get; set; }
     }
 
     public class VippsWebhookAmountDto

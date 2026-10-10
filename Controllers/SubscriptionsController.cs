@@ -27,6 +27,7 @@ namespace garge_api.Controllers
         private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
         private readonly AppOptions _appOpts;
+        private readonly VippsOptions _vippsOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<SubscriptionsController> _logger;
 
@@ -39,6 +40,7 @@ namespace garge_api.Controllers
             IWebhookSecretProtector protector,
             IWebPushService push,
             IOptions<AppOptions> appOpts,
+            IOptions<VippsOptions> vippsOpts,
             IMapper mapper,
             ILogger<SubscriptionsController> logger)
         {
@@ -50,6 +52,7 @@ namespace garge_api.Controllers
             _protector = protector;
             _push = push;
             _appOpts = appOpts.Value;
+            _vippsOpts = vippsOpts.Value;
             _mapper = mapper;
             _logger = logger;
         }
@@ -237,6 +240,8 @@ namespace garge_api.Controllers
 
                 subscription.VippsAgreementId = vippsResponse.AgreementId;
                 subscription.VippsConfirmationUrl = vippsResponse.VippsConfirmationUrl;
+                // The environment the agreement was created in decides which merchant its events come from.
+                subscription.IsTest = vippsResponse.IsTest;
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation("Subscription {SubscriptionId} initiated for user {UserId}",
@@ -398,11 +403,12 @@ namespace garge_api.Controllers
 
             if (payload == null) return BadRequest();
 
+            // Recurring events carry no event id. A charge event is told apart by its charge id.
             var eventId = !string.IsNullOrEmpty(payload.EventId)
                 ? payload.EventId
-                : $"{payload.AgreementId}:{payload.EventType}:{payload.Occurred?.Ticks}";
+                : $"{payload.AgreementId}:{payload.EventType}:{payload.ChargeId}:{payload.Occurred?.Ticks}";
 
-            if (!await TryRecordEventAsync(_context, "subscription", eventId))
+            if (await AlreadyProcessedAsync(_context, eventId))
             {
                 _logger.LogInformation("Subscription webhook duplicate {EventId} skipped", eventId);
                 return Ok();
@@ -414,8 +420,17 @@ namespace garge_api.Controllers
             if (subscription == null)
             {
                 _logger.LogWarning("Webhook: unknown agreementId {AgreementId}", payload.AgreementId);
-                await _context.SaveChangesAsync();
+                await SaveProcessedAsync(_context, "subscription", eventId);
                 return Ok();
+            }
+
+            // Recurring events may leave the merchant number out, so only a number that differs is refused.
+            var expectedMsn = subscription.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
+            if (!string.IsNullOrEmpty(payload.Msn) && !MerchantMatches(payload.Msn, expectedMsn))
+            {
+                _logger.LogError("Subscription webhook {EventId} rejected: MSN mismatch (got {Got}, expected {Expected}) for subscription {SubscriptionId}",
+                    eventId, payload.Msn, expectedMsn, subscription.Id);
+                return await RejectAsync(_context, "subscription", eventId);
             }
 
             var wasActive = subscription.Status == SubscriptionStatus.Active;
@@ -451,7 +466,11 @@ namespace garge_api.Controllers
             }
 
             subscription.UpdatedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            if (!await SaveProcessedAsync(_context, "subscription", eventId))
+            {
+                _logger.LogInformation("Subscription webhook duplicate {EventId} skipped", eventId);
+                return Ok();
+            }
 
             _logger.LogInformation("Webhook: agreement {AgreementId} -> {EventType}",
                 payload.AgreementId, payload.EventType);
@@ -470,12 +489,16 @@ namespace garge_api.Controllers
                 var product = await _context.Products.FindAsync(subscription.ProductId);
                 if (product != null)
                 {
+                    // The invoice shows what Vipps captured, including VAT. Without an amount in the
+                    // event it falls back to what the scheduler charges for this subscription.
+                    var amountInOre = payload.AmountCaptured ?? payload.Amount
+                        ?? Pricing.EffectiveInOre(product.PriceInOre, settings.VatEnabled) * subscription.Quantity;
                     try
                     {
                         await _invoice.GenerateForSubscriptionChargeAsync(
                             subscription.Id,
                             payload.ChargeId,
-                            product.PriceInOre,
+                            amountInOre,
                             payload.Occurred ?? DateTime.UtcNow);
                     }
                     catch (Exception ex)

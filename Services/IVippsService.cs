@@ -18,6 +18,8 @@ namespace garge_api.Services
     {
         public string AgreementId { get; set; } = string.Empty;
         public string VippsConfirmationUrl { get; set; } = string.Empty;
+        /// <summary>Whether the agreement was created with the test credentials.</summary>
+        public bool IsTest { get; set; }
     }
 
     public class VippsCreateChargeResponse
@@ -39,6 +41,8 @@ namespace garge_api.Services
     {
         public string RedirectUrl { get; set; } = string.Empty;
         public string Reference { get; set; } = string.Empty;
+        /// <summary>Whether the payment was created with the test credentials.</summary>
+        public bool IsTest { get; set; }
     }
 
     public class VippsPaymentResponse
@@ -46,6 +50,10 @@ namespace garge_api.Services
         public string Reference { get; set; } = string.Empty;
         public string State { get; set; } = string.Empty;
         public string? ProfileSub { get; set; }
+        /// <summary>Totals over every capture, refund and cancel on the payment so far, in øre.</summary>
+        public int CapturedAmountInOre { get; set; }
+        public int RefundedAmountInOre { get; set; }
+        public int CancelledAmountInOre { get; set; }
     }
 
     public class VippsUserInfo
@@ -94,7 +102,8 @@ namespace garge_api.Services
         Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey);
-        Task<VippsPaymentResponse> GetPaymentAsync(string reference);
+        /// <summary>Reads a payment. Pass the environment the payment was created in, or null for the current one.</summary>
+        Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null);
         Task<VippsUserInfo?> GetUserInfoAsync(string sub);
         Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey);
         Task CancelPaymentAsync(string reference, string idempotencyKey);

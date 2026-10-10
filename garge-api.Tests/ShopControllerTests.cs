@@ -104,6 +104,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-1",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -140,6 +141,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-email-1",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -173,6 +175,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-email-2",
             name = "CAPTURED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -208,6 +211,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-cap-recover",
             name = "CAPTURED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -247,6 +251,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-cap-existing",
             name = "CAPTURED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -323,7 +328,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
+        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId, order.IsTest))
             .ReturnsAsync(new VippsPaymentResponse
             {
                 Reference = order.VippsOrderId, State = "AUTHORIZED", ProfileSub = "sub-abc"
@@ -342,6 +347,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-2",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -372,7 +378,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId))
+        vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId, order.IsTest))
             .ReturnsAsync(new VippsPaymentResponse { Reference = order.VippsOrderId, State = "AUTHORIZED" });
 
         var payload = new
@@ -380,6 +386,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-3",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 10000, currency = "NOK" },
             msn = "msn-prod"
         };
@@ -432,6 +439,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = $"psp-{eventName}",
             name = eventName,
+            success = true,
             amount = new { value = 100, currency = "NOK" },
             msn = "msn-prod"
         });
@@ -444,7 +452,7 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task Webhook_AmountMismatch_Returns401()
+    public async Task Webhook_AmountMismatch_IsAcknowledgedButNotApplied()
     {
         using var db = CreateDbContext();
         var order = new Order { UserId = "u", VippsOrderId = "garge-order-amount", TotalInOre = 10000, Status = OrderStatus.Pending };
@@ -456,6 +464,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-bad",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 9999, currency = "NOK" },
             msn = "msn-prod"
         });
@@ -463,7 +472,9 @@ public class ShopControllerTests : ControllerTestBase
         SetupValidWebhookRequest(ctrl, body);
 
         var result = await ctrl.Webhook();
-        Assert.IsType<UnauthorizedResult>(result);
+        Assert.IsType<OkResult>(result);
+        Assert.Equal(OrderStatus.Pending, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -479,6 +490,7 @@ public class ShopControllerTests : ControllerTestBase
             reference = order.VippsOrderId,
             pspReference = "psp-once",
             name = "AUTHORIZED",
+            success = true,
             amount = new { value = 100, currency = "NOK" },
             msn = "msn-prod"
         });
@@ -730,5 +742,285 @@ public class ShopControllerTests : ControllerTestBase
         ctrl.ControllerContext.HttpContext.Request.ContentLength = bytes.Length;
         if (valid)
             ctrl.ControllerContext.HttpContext.Request.Headers["X-Test-Valid"] = "1";
+    }
+
+    private static string ShopEvent(string reference, string? msn, int amount = 10000, string name = "AUTHORIZED", string psp = "psp-money", bool success = true) =>
+        JsonSerializer.Serialize(new { reference, pspReference = psp, name, amount = new { value = amount, currency = "NOK" }, msn, success });
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("msn-other")]
+    [InlineData("msn-test")]
+    public async Task Webhook_MerchantNumberNotMatching_IsAcknowledgedButNotApplied(string? msn)
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-msn", TotalInOre = 10000, Status = OrderStatus.Pending };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, ShopEvent(order.VippsOrderId!, msn));
+
+        // 200, so Vipps does not retry it for a week and hold back the order's later events.
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(OrderStatus.Pending, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData("AUTHORIZED")]
+    [InlineData("CAPTURED")]
+    [InlineData("REFUNDED")]
+    [InlineData("CANCELLED")]
+    public async Task Webhook_OperationThatDidNotSucceed_LeavesTheOrderUnchanged(string name)
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-fail", TotalInOre = 10000, Status = OrderStatus.Reserved };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var ctrl = CreateController(db, invoice: invoice.Object, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, ShopEvent(order.VippsOrderId!, "msn-prod", name: name, success: false));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        invoice.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Webhook_AuthorizedWithoutAmount_IsAcknowledgedButNotApplied()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-noamt", TotalInOre = 10000, Status = OrderStatus.Pending };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var body = JsonSerializer.Serialize(new { reference = order.VippsOrderId, pspReference = "psp-noamt", name = "AUTHORIZED", msn = "msn-prod", success = true });
+        var ctrl = CreateController(db, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(OrderStatus.Pending, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_FailedSave_IsNotMarkedProcessed_AndTheRedeliveryIsApplied()
+    {
+        var (failing, healthy) = FailingSaveInterceptor.Contexts();
+        using (failing)
+        using (healthy)
+        {
+            var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-retry", TotalInOre = 10000, Status = OrderStatus.Pending };
+            await healthy.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+            await healthy.SaveChangesAsync(TestContext.Current.CancellationToken);
+            var settings = new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" };
+            var body = ShopEvent(order.VippsOrderId!, "msn-prod");
+
+            var first = CreateController(failing, settings: settings);
+            SetupValidWebhookRequest(first, body);
+            await Assert.ThrowsAsync<DbUpdateException>(() => first.Webhook());
+            Assert.Equal(0, await healthy.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+
+            var redelivery = CreateController(healthy, settings: settings);
+            SetupValidWebhookRequest(redelivery, body);
+            Assert.IsType<OkResult>(await redelivery.Webhook());
+
+            Assert.Equal(1, await healthy.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+            Assert.Equal(OrderStatus.Reserved, (await healthy.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        }
+    }
+
+    private static Mock<IVippsService> VippsReporting(int captured = 0, int refunded = 0)
+    {
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetPaymentAsync(It.IsAny<string>(), It.IsAny<bool?>()))
+            .ReturnsAsync(new VippsPaymentResponse { CapturedAmountInOre = captured, RefundedAmountInOre = refunded });
+        return vipps;
+    }
+
+    private async Task<Order> SeedOrderAsync(ApplicationDbContext db, string reference, OrderStatus status, int total = 10000, int stockLeft = 3, int quantity = 2)
+    {
+        var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = true, StockCount = stockLeft };
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var order = new Order { UserId = "user-1", VippsOrderId = reference, TotalInOre = total, Status = status };
+        order.OrderItems.Add(new OrderItem { ShopItemId = item.Id, Quantity = quantity, PriceAtPurchaseInOre = 5000 });
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return order;
+    }
+
+    private async Task<IActionResult> DeliverAsync(ApplicationDbContext db, string body, Mock<IVippsService>? vipps = null, IInvoiceService? invoice = null)
+    {
+        var ctrl = CreateController(db, vipps: vipps, invoice: invoice, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, body);
+        return await ctrl.Webhook();
+    }
+
+    [Fact]
+    public async Task Webhook_PartialCapture_KeepsTheOrderReserved_ThenTheRestMakesItPaid()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-partial", OrderStatus.Reserved);
+        var invoice = new Mock<IInvoiceService>();
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 4000, name: "CAPTURED", psp: "psp-cap-1"), VippsReporting(captured: 4000), invoice.Object);
+        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        invoice.VerifyNoOtherCalls();
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 6000, name: "CAPTURED", psp: "psp-cap-2"), VippsReporting(captured: 10000), invoice.Object);
+        Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData(10001)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task Webhook_CaptureOutsideTheOrderTotal_IsAcknowledgedButNotApplied(int amount)
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-over", OrderStatus.Reserved);
+
+        Assert.IsType<OkResult>(await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: amount, name: "CAPTURED"), VippsReporting(captured: 10000)));
+        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_PartialRefund_KeepsTheOrderPaid_AndAFullRefundRefundsIt()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-refund", OrderStatus.Paid);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 2500, name: "REFUNDED", psp: "psp-ref-1"), VippsReporting(captured: 10000, refunded: 2500));
+        Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 7500, name: "REFUNDED", psp: "psp-ref-2"), VippsReporting(captured: 10000, refunded: 10000));
+        Assert.Equal(OrderStatus.Refunded, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_CancelAfterAPartialCapture_KeepsTheOrderAndItsStock()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-cancel-part", OrderStatus.Reserved, stockLeft: 3, quantity: 2);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 6000, name: "CANCELLED"), VippsReporting(captured: 4000));
+
+        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(3, (await db.ShopItems.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).StockCount);
+    }
+
+    [Fact]
+    public async Task Webhook_CancelWithNothingCaptured_CancelsAndGivesTheStockBack()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-cancel", OrderStatus.Reserved, stockLeft: 3, quantity: 2);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", name: "CANCELLED"), VippsReporting(captured: 0));
+
+        Assert.Equal(OrderStatus.Cancelled, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(5, (await db.ShopItems.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).StockCount);
+    }
+
+    [Theory]
+    [InlineData("ABORTED")]
+    [InlineData("EXPIRED")]
+    [InlineData("TERMINATED")]
+    public async Task Webhook_AbandonedPayment_GivesTheStockBack(string name)
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, $"garge-order-{name.ToLowerInvariant()}", OrderStatus.Pending, stockLeft: 3, quantity: 2);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", name: name));
+
+        Assert.Equal(OrderStatus.Failed, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(5, (await db.ShopItems.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).StockCount);
+    }
+
+    [Fact]
+    public async Task Webhook_OperationThatDidNotSucceed_DoesNotConfirmAPendingOrder()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-nosuccess", OrderStatus.Pending);
+        var orderEmail = new Mock<IOrderEmailService>();
+        var ctrl = CreateController(db, orderEmail: orderEmail.Object, settings: new AppSettings { Id = 1, VippsShopWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, ShopEvent(order.VippsOrderId!, "msn-prod", success: false));
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(OrderStatus.Pending, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(1, await db.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+        orderEmail.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Webhook_LosingAConcurrentDelivery_SavesNothing()
+    {
+        // Two deliveries of one event pass the duplicate check at the same time. The other one saves
+        // first, during this one's save, so this one must store neither its order change nor its stock.
+        var name = Guid.NewGuid().ToString();
+        DbContextOptions<ApplicationDbContext> Options(params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] i) =>
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase(name)
+                .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+                .AddInterceptors(i).Options;
+        using var other = new ApplicationDbContext(Options());
+        var order = await SeedOrderAsync(other, "garge-order-race", OrderStatus.Reserved, stockLeft: 3, quantity: 2);
+        using var loser = new ApplicationDbContext(Options(new OtherDeliveryWinsInterceptor(Options(), "psp-race")));
+
+        var result = await DeliverAsync(loser, ShopEvent(order.VippsOrderId!, "msn-prod", name: "CANCELLED", psp: "psp-race"), VippsReporting(captured: 0));
+
+        Assert.IsType<OkResult>(result);
+        using var check = new ApplicationDbContext(Options());
+        Assert.Equal(OrderStatus.Reserved, (await check.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(3, (await check.ShopItems.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).StockCount);
+        Assert.Equal(1, await check.ProcessedWebhookEvents.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    private sealed class OtherDeliveryWinsInterceptor(DbContextOptions<ApplicationDbContext> options, string eventId)
+        : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        private bool _done;
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!_done && eventData.Context!.ChangeTracker.Entries<garge_api.Models.Webhook.ProcessedWebhookEvent>().Any())
+            {
+                _done = true;
+                using var winner = new ApplicationDbContext(options);
+                winner.ProcessedWebhookEvents.Add(new garge_api.Models.Webhook.ProcessedWebhookEvent { Id = eventId, Source = "shop" });
+                await winner.SaveChangesAsync(cancellationToken);
+            }
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Checkout_TakesTheEnvironmentFromThePayment(bool createdInTest)
+    {
+        using var db = CreateDbContext();
+        var item = new ShopItem { Name = "Sensor", PriceInOre = 5000, IsActive = true, StockCount = -1 };
+        await db.ShopItems.AddAsync(item, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreatePaymentAsync(It.IsAny<Order>(), It.IsAny<List<VippsOrderLine>>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreatePaymentResponse { Reference = "ref-env", RedirectUrl = "x", IsTest = createdInTest });
+
+        // The settings say the opposite, as right after an admin switches test mode.
+        var ctrl = CreateController(db, vipps: vipps, settings: new AppSettings { Id = 1, VippsTestMode = !createdInTest });
+        await ctrl.Checkout(new CreateOrderDto
+        {
+            Items = [new OrderItemRequestDto { ShopItemId = item.Id, Quantity = 1 }],
+            PhoneNumber = "4791234567"
+        });
+
+        Assert.Equal(createdInTest, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).IsTest);
     }
 }
