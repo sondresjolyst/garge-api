@@ -61,7 +61,7 @@ public class SubscriptionChargeSchedulerServiceTests
 
         vipps.Verify(v => v.CreateChargeAsync(
             "agr_due", 29900, dueDate, "Garge Basic",
-            $"charge-{sub.Id}-{dueDate.Ticks}"), Times.Once);
+            $"charge-{sub.Id}-{dueDate.Ticks}", false), Times.Once);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class SubscriptionChargeSchedulerServiceTests
 
         vipps.Verify(v => v.CreateChargeAsync(
             It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
 
     [Theory]
@@ -106,20 +106,25 @@ public class SubscriptionChargeSchedulerServiceTests
 
         vipps.Verify(v => v.CreateChargeAsync(
             It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
 
-    [Fact]
-    public async Task Scheduler_TestSubInLiveMode_NotCharged()
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Scheduler_ChargesEachSubscriptionInItsOwnEnvironment_WhateverTheTestMode(bool testMode, bool subIsTest)
     {
-        var (svc, vipps, db) = BuildHarness(testMode: false);
+        // Switching test mode must not pause live billing, or charge a live agreement with test credentials.
+        var (svc, vipps, db) = BuildHarness(testMode: testMode);
         await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
             UserId = "user-1", ProductId = 1,
-            VippsAgreementId = "agr_test", Status = SubscriptionStatus.Active,
+            VippsAgreementId = "agr_env", Status = SubscriptionStatus.Active,
             NextChargeDate = DateTime.UtcNow.AddDays(1),
-            IsTest = true
+            IsTest = subIsTest
         };
         await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -127,30 +132,11 @@ public class SubscriptionChargeSchedulerServiceTests
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
         vipps.Verify(v => v.CreateChargeAsync(
-            It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Scheduler_LiveSubInTestMode_NotCharged()
-    {
-        var (svc, vipps, db) = BuildHarness(testMode: true);
-        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
-        var sub = new Subscription
-        {
-            UserId = "user-1", ProductId = 1,
-            VippsAgreementId = "agr_live", Status = SubscriptionStatus.Active,
-            NextChargeDate = DateTime.UtcNow.AddDays(1),
-            IsTest = false
-        };
-        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        await svc.ScheduleDueChargesAsync(CancellationToken.None);
-
+            "agr_env", It.IsAny<int>(), It.IsAny<DateTime>(),
+            It.IsAny<string>(), It.IsAny<string>(), subIsTest), Times.Once);
         vipps.Verify(v => v.CreateChargeAsync(
             It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<string>(), !subIsTest), Times.Never);
     }
 
     [Fact]
@@ -174,18 +160,18 @@ public class SubscriptionChargeSchedulerServiceTests
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         vipps.Setup(v => v.CreateChargeAsync("agr_a", It.IsAny<int>(), It.IsAny<DateTime>(),
-                It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
             .ThrowsAsync(new HttpRequestException("Vipps boom"));
         vipps.Setup(v => v.CreateChargeAsync("agr_b", It.IsAny<int>(), It.IsAny<DateTime>(),
-                It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
             .ReturnsAsync(new VippsCreateChargeResponse { ChargeId = "chg_b" });
 
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
         vipps.Verify(v => v.CreateChargeAsync("agr_a", It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
         vipps.Verify(v => v.CreateChargeAsync("agr_b", It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
     }
 
     [Fact]
@@ -206,6 +192,6 @@ public class SubscriptionChargeSchedulerServiceTests
 
         vipps.Verify(v => v.CreateChargeAsync(
             It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
-            It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
 }

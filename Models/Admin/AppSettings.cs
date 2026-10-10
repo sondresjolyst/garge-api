@@ -11,6 +11,11 @@ namespace garge_api.Models.Admin
         public string? VippsShopWebhookSecret { get; set; }
         public string? VippsSubscriptionWebhookId { get; set; }
         public string? VippsSubscriptionWebhookSecret { get; set; }
+        // Vipps' test environment is separate from production and needs its own registrations.
+        public string? VippsTestShopWebhookId { get; set; }
+        public string? VippsTestShopWebhookSecret { get; set; }
+        public string? VippsTestSubscriptionWebhookId { get; set; }
+        public string? VippsTestSubscriptionWebhookSecret { get; set; }
 
         [Range(Constants.SecurityMode.MinThresholdMinutes, Constants.SecurityMode.MaxThresholdMinutes)]
         public int SecurityAlertThresholdMinutes { get; set; } = Constants.SecurityMode.DefaultThresholdMinutes;

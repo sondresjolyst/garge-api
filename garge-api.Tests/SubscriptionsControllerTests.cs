@@ -26,6 +26,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
                 string.IsNullOrEmpty(secret)
                     ? WebhookVerifyResult.MissingSecret
                     : (req.Headers["X-Test-Valid"] == "1"
+                       && (string.IsNullOrEmpty(req.Headers["X-Test-Secret"]) || req.Headers["X-Test-Secret"] == secret)
                         ? WebhookVerifyResult.Valid
                         : WebhookVerifyResult.BadSignature));
         return mock;
@@ -253,9 +254,9 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.GetAgreementAsync("agr_addr1"))
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr1", false))
             .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr1", Sub = "sub-x" });
-        vipps.Setup(v => v.GetUserInfoAsync("sub-x"))
+        vipps.Setup(v => v.GetUserInfoAsync("sub-x", false))
             .ReturnsAsync(new VippsUserInfo
             {
                 Address = new VippsAddress { Formatted = "Mårvegen 21a, 4347 Lye, Norway" }
@@ -293,7 +294,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.GetAgreementAsync("agr_addr2"))
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr2", false))
             .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr2", Sub = null });
 
         var payload = new
@@ -313,7 +314,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Null(updated.BillingAddress);
         Assert.Equal(SubscriptionStatus.Active, updated.Status);
-        vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>()), Times.Never);
+        vipps.Verify(v => v.GetUserInfoAsync(It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
 
     [Fact]
@@ -329,9 +330,9 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.GetAgreementAsync("agr_addr3"))
+        vipps.Setup(v => v.GetAgreementAsync("agr_addr3", false))
             .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr3", Sub = "sub-y" });
-        vipps.Setup(v => v.GetUserInfoAsync("sub-y"))
+        vipps.Setup(v => v.GetUserInfoAsync("sub-y", false))
             .ThrowsAsync(new HttpRequestException("Vipps userinfo down"));
 
         var payload = new
@@ -385,7 +386,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal("Existing address", updated.BillingAddress);
-        vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>()), Times.Never);
+        vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
     }
 
     [Fact]
@@ -676,6 +677,42 @@ public class SubscriptionsControllerTests : ControllerTestBase
         Assert.Equal(SubscriptionStatus.Stopped, updated.Status);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CancelById_CancelsEachAgreementInItsOwnEnvironment(bool primaryIsTest, bool addOnIsTest)
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var primary = new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_primary", Status = SubscriptionStatus.Active, IsTest = primaryIsTest };
+        var addOn = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "agr_addon", Status = SubscriptionStatus.Active, IsTest = addOnIsTest };
+        await db.Subscriptions.AddRangeAsync([primary, addOn], TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+
+        Assert.IsType<OkResult>(await ctrl.CancelSubscription(primary.Id));
+        vipps.Verify(v => v.CancelAgreementAsync("agr_primary", $"cancel-{primary.Id}", primaryIsTest), Times.Once);
+        vipps.Verify(v => v.CancelAgreementAsync("agr_addon", $"cancel-{addOn.Id}", addOnIsTest), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_TestAgreement_PatchesTheCeilingInTheTestEnvironment()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var sub = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "addon_test", Status = SubscriptionStatus.Active, Quantity = 1, IsTest = true };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var vipps = MockVipps();
+        var ctrl = CreateController(db, vipps: vipps);
+
+        Assert.IsType<OkObjectResult>(await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 2 }));
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync("addon_test", It.IsAny<int>(), It.IsAny<string>(), true), Times.Once);
+    }
+
     [Fact]
     public async Task CancelById_OtherUsersSubscription_Returns404()
     {
@@ -788,8 +825,8 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         int? capturedCeiling = null;
-        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
-            .Callback<string, int, string>((_, amount, _) => capturedCeiling = amount)
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .Callback<string, int, string, bool?>((_, amount, _, _) => capturedCeiling = amount)
             .Returns(Task.CompletedTask);
 
         var ctrl = CreateController(db, vipps: vipps);
@@ -815,14 +852,14 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var vipps = MockVipps();
-        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()))
+        vipps.Setup(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
             .Returns(Task.CompletedTask);
 
         var ctrl = CreateController(db, vipps: vipps);
         var result = await ctrl.UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 3 });
 
         Assert.IsType<OkObjectResult>(result);
-        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>()), Times.Never);
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
         var updated = await db.Subscriptions.FindAsync(new object?[] { sub.Id }, TestContext.Current.CancellationToken);
         Assert.Equal(3, updated!.Quantity);
     }
@@ -1021,6 +1058,19 @@ public class SubscriptionsControllerTests : ControllerTestBase
         invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_b", 37375, It.IsAny<DateTime>()), Times.Once);
     }
 
+    private static AppSettings BothEnvironmentsSettings() => new()
+    {
+        Id = 1,
+        VippsSubscriptionWebhookId = "wh-live", VippsSubscriptionWebhookSecret = "live-secret",
+        VippsTestSubscriptionWebhookId = "wh-test", VippsTestSubscriptionWebhookSecret = "test-secret"
+    };
+
+    private static string ActivatedEvent(string agreementId, string msn, string eventId) => JsonSerializer.Serialize(new
+    {
+        agreementId, msn, eventId,
+        eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+    });
+
     [Fact]
     public async Task Webhook_TestSubscription_NeedsTheTestMerchantNumber()
     {
@@ -1028,16 +1078,56 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.Subscriptions.AddAsync(MoneySub("agr_test", isTest: true, status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        var payload = new
-        {
-            agreementId = "agr_test", msn = "msn-test", eventId = "evt-test",
-            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
-        };
-        var ctrl = CreateController(db, settings: WebhookSettings());
-        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+        var ctrl = CreateController(db, settings: BothEnvironmentsSettings());
+        SetupValidWebhookRequest(ctrl, ActivatedEvent("agr_test", "msn-test", "evt-test"));
+        ctrl.ControllerContext.HttpContext.Request.Headers["X-Test-Secret"] = "test-secret";
 
         Assert.IsType<OkResult>(await ctrl.Webhook());
         Assert.Equal(SubscriptionStatus.Active, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData(true, "live-secret", "msn-test")]
+    [InlineData(false, "test-secret", "msn-prod")]
+    public async Task Webhook_SignedByTheOtherEnvironment_IsAcknowledgedButNotApplied(bool subIsTest, string signedWith, string msn)
+    {
+        using var db = CreateDbContext();
+        await db.Subscriptions.AddAsync(MoneySub("agr_env", isTest: subIsTest, status: SubscriptionStatus.Pending), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var ctrl = CreateController(db, settings: BothEnvironmentsSettings());
+        SetupValidWebhookRequest(ctrl, ActivatedEvent("agr_env", msn, "evt-env"));
+        ctrl.ControllerContext.HttpContext.Request.Headers["X-Test-Secret"] = signedWith;
+
+        Assert.IsType<OkResult>(await ctrl.Webhook());
+        Assert.Equal(SubscriptionStatus.Pending, (await db.Subscriptions.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        Assert.Equal(signedWith == "test-secret" ? "test:evt-env" : "evt-env", await db.ProcessedWebhookEvents.Select(e => e.Id).SingleAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Webhook_SameEventIdInBothEnvironments_IsHandledInEach()
+    {
+        // A test event must not mark the production event with the same id as handled.
+        using var db = CreateDbContext();
+        await db.Subscriptions.AddRangeAsync([
+            MoneySub("agr_live", status: SubscriptionStatus.Pending),
+            MoneySub("agr_test", isTest: true, status: SubscriptionStatus.Pending)], TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var fromTest = CreateController(db, settings: BothEnvironmentsSettings());
+        SetupValidWebhookRequest(fromTest, ActivatedEvent("agr_test", "msn-test", "evt-shared"));
+        fromTest.ControllerContext.HttpContext.Request.Headers["X-Test-Secret"] = "test-secret";
+        Assert.IsType<OkResult>(await fromTest.Webhook());
+
+        var fromLive = CreateController(db, settings: BothEnvironmentsSettings());
+        SetupValidWebhookRequest(fromLive, ActivatedEvent("agr_live", "msn-prod", "evt-shared"));
+        fromLive.ControllerContext.HttpContext.Request.Headers["X-Test-Secret"] = "live-secret";
+        Assert.IsType<OkResult>(await fromLive.Webhook());
+
+        var subs = await db.Subscriptions.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken);
+        Assert.All(subs, x => Assert.Equal(SubscriptionStatus.Active, x.Status));
+        var keys = await db.ProcessedWebhookEvents.Select(e => e.Id).OrderBy(id => id).ToListAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(["evt-shared", "test:evt-shared"], keys);
     }
 
     [Fact]

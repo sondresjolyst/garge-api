@@ -195,9 +195,9 @@ namespace garge_api.Services
 
         public async Task<VippsCreateChargeResponse> CreateChargeAsync(
             string agreementId, int amountInOre, DateTime dueDate,
-            string description, string idempotencyKey)
+            string description, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
 
             var minDue = DateTime.UtcNow.Date.AddDays(2);
             if (dueDate.Date < minDue) dueDate = minDue;
@@ -225,9 +225,9 @@ namespace garge_api.Services
             return JsonSerializer.Deserialize<VippsCreateChargeResponse>(json, _jsonOpts)!;
         }
 
-        public async Task<VippsAgreementResponse> GetAgreementAsync(string agreementId)
+        public async Task<VippsAgreementResponse> GetAgreementAsync(string agreementId, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
 
             var request = new HttpRequestMessage(HttpMethod.Get,
                 $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
@@ -238,9 +238,9 @@ namespace garge_api.Services
             return JsonSerializer.Deserialize<VippsAgreementResponse>(json, _jsonOpts)!;
         }
 
-        public async Task CancelAgreementAsync(string agreementId, string idempotencyKey)
+        public async Task CancelAgreementAsync(string agreementId, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
 
             var request = new HttpRequestMessage(HttpMethod.Patch,
                 $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
@@ -251,9 +251,9 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
         }
 
-        public async Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey)
+        public async Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
 
             var request = new HttpRequestMessage(HttpMethod.Patch,
                 $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
@@ -349,11 +349,11 @@ namespace garge_api.Services
             };
         }
 
-        public async Task<VippsUserInfo?> GetUserInfoAsync(string sub)
+        public async Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null)
         {
             if (string.IsNullOrEmpty(sub)) return null;
 
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
             var request = new HttpRequestMessage(HttpMethod.Get,
                 $"{e.BaseUrl}/vipps-userinfo-api/userinfo/{sub}");
             AddCommonHeaders(request, e);
@@ -428,9 +428,9 @@ namespace garge_api.Services
             public string? Formatted { get; set; }
         }
 
-        public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey)
+        public async Task CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}/capture");
@@ -440,9 +440,9 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "capture-payment");
         }
 
-        public async Task CancelPaymentAsync(string reference, string idempotencyKey)
+        public async Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}/cancel");
             AddCommonHeaders(request, e, idempotencyKey);
@@ -451,9 +451,9 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "cancel-payment");
         }
 
-        public async Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey)
+        public async Task RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
             var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
             var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}/refund");
@@ -463,9 +463,9 @@ namespace garge_api.Services
             await ReadAsStringAndEnsureSuccessAsync(response, "refund-payment");
         }
 
-        public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events)
+        public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
             var body = new { url, events };
             var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/webhooks/v1/webhooks");
             AddCommonHeaders(request, e, Guid.NewGuid().ToString());
@@ -477,6 +477,38 @@ namespace garge_api.Services
             var id = doc.RootElement.GetProperty("id").GetString()!;
             var secret = doc.RootElement.GetProperty("secret").GetString()!;
             return (id, secret);
+        }
+
+        public async Task<IReadOnlyList<VippsWebhookInfo>> ListWebhooksAsync(bool isTest)
+        {
+            var e = await GetEffectiveAsync(isTest);
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{e.BaseUrl}/webhooks/v1/webhooks");
+            AddCommonHeaders(request, e);
+            var response = await _http.SendAsync(request);
+            var json = await ReadAsStringAndEnsureSuccessAsync(response, "list-webhooks");
+            using var doc = JsonDocument.Parse(json);
+            var list = new List<VippsWebhookInfo>();
+            if (doc.RootElement.TryGetProperty("webhooks", out var hooks) && hooks.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var hook in hooks.EnumerateArray())
+                {
+                    list.Add(new VippsWebhookInfo
+                    {
+                        Id = hook.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
+                        Url = hook.TryGetProperty("url", out var url) ? url.GetString() ?? string.Empty : string.Empty
+                    });
+                }
+            }
+            return list;
+        }
+
+        public async Task DeleteWebhookAsync(string webhookId, bool isTest)
+        {
+            var e = await GetEffectiveAsync(isTest);
+            var request = new HttpRequestMessage(HttpMethod.Delete, $"{e.BaseUrl}/webhooks/v1/webhooks/{webhookId}");
+            AddCommonHeaders(request, e);
+            var response = await _http.SendAsync(request);
+            await ReadAsStringAndEnsureSuccessAsync(response, "delete-webhook");
         }
 
         public WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)

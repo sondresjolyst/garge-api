@@ -38,13 +38,13 @@ namespace garge_api.Services
                 var settingsCache = scope.ServiceProvider.GetRequiredService<IAppSettingsCache>();
 
                 var settings = await settingsCache.GetAsync();
-                var testMode = settings.VippsTestMode;
                 var cutoff = DateTime.UtcNow + Lookahead;
 
                 var due = await db.Subscriptions
                     .Include(s => s.Product)
+                    // Every active subscription is charged in the environment it was created in,
+                    // whatever the current test mode.
                     .Where(s => s.Status == SubscriptionStatus.Active
-                                && s.IsTest == testMode
                                 && s.NextChargeDate != null
                                 && s.NextChargeDate <= cutoff
                                 && s.Product != null)
@@ -64,7 +64,8 @@ namespace garge_api.Services
                             amountInOre,
                             dueDate,
                             sub.Product.Name,
-                            idempotencyKey: $"charge-{sub.Id}-{dueDate.Ticks}");
+                            idempotencyKey: $"charge-{sub.Id}-{dueDate.Ticks}",
+                            isTest: sub.IsTest);
 
                         _logger.LogInformation("ChargeScheduler: posted charge for subscription {SubId} amount {Amount} due {DueDate}",
                             sub.Id, amountInOre, dueDate);

@@ -280,7 +280,7 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}");
+            await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}", order.IsTest);
 
             order.Status = OrderStatus.Paid;
             order.ShippedAt = DateTime.UtcNow;
@@ -325,7 +325,7 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}");
+            await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}", order.IsTest);
 
             order.Status = OrderStatus.Refunded;
             order.UpdatedAt = DateTime.UtcNow;
@@ -348,7 +348,7 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            await _vipps.CancelPaymentAsync(order.VippsOrderId, $"cancel-{order.Id}");
+            await _vipps.CancelPaymentAsync(order.VippsOrderId, $"cancel-{order.Id}", order.IsTest);
 
             await RestoreStockAsync(order);
             order.Status = OrderStatus.Cancelled;
@@ -388,9 +388,9 @@ namespace garge_api.Controllers
         {
             var rawBody = await ReadRawBodyAsync(Request);
             var settings = await _settingsCache.GetAsync();
-            var secret = _protector.Unprotect(settings.VippsShopWebhookSecret ?? string.Empty);
-
-            var verify = _vipps.VerifyWebhookSignature(Request, rawBody, secret);
+            var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
+                new Registration(settings.VippsShopWebhookSecret, false),
+                new Registration(settings.VippsTestShopWebhookSecret, true));
             if (verify != WebhookVerifyResult.Valid)
             {
                 _logger.LogWarning("Shop webhook verify failed: {Reason}", verify);
@@ -409,9 +409,9 @@ namespace garge_api.Controllers
 
             if (payload == null) return BadRequest();
 
-            var eventId = !string.IsNullOrEmpty(payload.PspReference)
+            var eventId = EventKey(!string.IsNullOrEmpty(payload.PspReference)
                 ? payload.PspReference
-                : $"{payload.Reference}:{payload.Name}";
+                : $"{payload.Reference}:{payload.Name}", sentFromTest);
 
             if (await AlreadyProcessedAsync(_context, eventId))
             {
@@ -427,6 +427,13 @@ namespace garge_api.Controllers
                 _logger.LogWarning("Shop webhook: unknown reference {Reference}", payload.Reference);
                 await SaveProcessedAsync(_context, "shop", eventId);
                 return Ok();
+            }
+
+            if (sentFromTest != order.IsTest)
+            {
+                _logger.LogError("Shop webhook {EventId} rejected: sent from the {Sent} environment for a {Order} order {OrderId}",
+                    eventId, sentFromTest ? "test" : "production", order.IsTest ? "test" : "production", order.Id);
+                return await RejectAsync(_context, "shop", eventId);
             }
 
             var expectedMsn = order.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
@@ -590,7 +597,7 @@ namespace garge_api.Controllers
                 var payment = await _vipps.GetPaymentAsync(order.VippsOrderId, order.IsTest);
                 if (string.IsNullOrEmpty(payment?.ProfileSub)) return;
 
-                var info = await _vipps.GetUserInfoAsync(payment.ProfileSub);
+                var info = await _vipps.GetUserInfoAsync(payment.ProfileSub, order.IsTest);
                 var formatted = VippsAddressFormatter.Format(info?.Address);
                 if (!string.IsNullOrEmpty(formatted))
                     order.ShippingAddress = formatted;
