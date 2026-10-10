@@ -217,6 +217,8 @@ namespace garge_api.Controllers
                     order, receiptLines, redirectUrl, msisdn, $"order-{order.Id}");
 
                 order.VippsOrderId = vippsResponse.Reference;
+                // The environment the payment was created in decides which merchant its events come from.
+                order.IsTest = vippsResponse.IsTest;
                 await _context.SaveChangesAsync();
                 await tx.CommitAsync();
 
@@ -379,6 +381,7 @@ namespace garge_api.Controllers
             }
         }
 
+        /// <summary>Webhook endpoint for Vipps ePayment events on shop orders.</summary>
         [HttpPost("webhook")]
         [AllowAnonymous]
         public async Task<IActionResult> Webhook()
@@ -410,7 +413,7 @@ namespace garge_api.Controllers
                 ? payload.PspReference
                 : $"{payload.Reference}:{payload.Name}";
 
-            if (!await TryRecordEventAsync(_context, "shop", eventId))
+            if (await AlreadyProcessedAsync(_context, eventId))
             {
                 _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
                 return Ok();
@@ -422,24 +425,38 @@ namespace garge_api.Controllers
             if (order == null)
             {
                 _logger.LogWarning("Shop webhook: unknown reference {Reference}", payload.Reference);
-                await _context.SaveChangesAsync();
+                await SaveProcessedAsync(_context, "shop", eventId);
                 return Ok();
             }
 
             var expectedMsn = order.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
-            if (!string.IsNullOrEmpty(payload.Msn) && !string.IsNullOrEmpty(expectedMsn) && payload.Msn != expectedMsn)
+            if (!MerchantMatches(payload.Msn, expectedMsn))
             {
-                _logger.LogWarning("Shop webhook: MSN mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    payload.Msn, expectedMsn, order.Id);
-                return Unauthorized();
+                _logger.LogError("Shop webhook {EventId} rejected: MSN mismatch (got {Got}, expected {Expected}) for order {OrderId}",
+                    eventId, payload.Msn, expectedMsn, order.Id);
+                return await RejectAsync(_context, "shop", eventId);
             }
 
-            if (payload.Amount != null && payload.Amount.Value != order.TotalInOre &&
-                payload.Name is "AUTHORIZED" or "CAPTURED")
+            // AUTHORIZED reserves the whole order. CAPTURED and REFUNDED can each be part of it.
+            var amount = payload.Amount?.Value;
+            var amountFits = payload.Name switch
             {
-                _logger.LogWarning("Shop webhook: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    payload.Amount.Value, order.TotalInOre, order.Id);
-                return Unauthorized();
+                "AUTHORIZED" => amount == order.TotalInOre,
+                "CAPTURED" or "REFUNDED" => amount > 0 && amount <= order.TotalInOre,
+                _ => true
+            };
+            if (!amountFits)
+            {
+                _logger.LogError("Shop webhook {EventId} rejected: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
+                    eventId, payload.Amount?.Value, order.TotalInOre, order.Id);
+                return await RejectAsync(_context, "shop", eventId);
+            }
+
+            if (!payload.Success)
+            {
+                _logger.LogWarning("Shop webhook {EventId}: {Name} did not succeed for order {OrderId}, order unchanged",
+                    eventId, payload.Name, order.Id);
+                return await RejectAsync(_context, "shop", eventId);
             }
 
             var prevStatus = order.Status;
@@ -451,11 +468,29 @@ namespace garge_api.Controllers
                     await TryPopulateShippingFromVippsAsync(order);
                     break;
                 case "CAPTURED":
-                    order.Status = OrderStatus.Paid;
-                    if (order.ShippedAt == null) order.ShippedAt = DateTime.UtcNow;
+                    // A partial capture leaves the order Reserved until the whole amount is captured.
+                    if (amount == order.TotalInOre || await PaymentTotalsAsync(order) is { CapturedAmountInOre: var captured } && captured >= order.TotalInOre)
+                    {
+                        order.Status = OrderStatus.Paid;
+                        if (order.ShippedAt == null) order.ShippedAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Shop webhook {EventId}: partial capture of {Amount} on order {OrderId}, order stays {Status}",
+                            eventId, amount, order.Id, order.Status);
+                    }
                     break;
                 case "REFUNDED":
-                    order.Status = OrderStatus.Refunded;
+                    // A partial refund leaves the order Paid. Only a refund of the whole amount refunds it.
+                    if (amount == order.TotalInOre || await PaymentTotalsAsync(order) is { RefundedAmountInOre: var refunded } && refunded >= order.TotalInOre)
+                    {
+                        order.Status = OrderStatus.Refunded;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Shop webhook {EventId}: partial refund of {Amount} on order {OrderId}, order stays {Status}",
+                            eventId, amount, order.Id, order.Status);
+                    }
                     break;
                 case "ABORTED":
                 case "EXPIRED":
@@ -463,7 +498,17 @@ namespace garge_api.Controllers
                     order.Status = OrderStatus.Failed;
                     break;
                 case "CANCELLED":
-                    order.Status = OrderStatus.Cancelled;
+                    // Cancelling after a partial capture only releases the rest, and the customer has paid.
+                    if (prevStatus == OrderStatus.Reserved && await PaymentTotalsAsync(order) is { CapturedAmountInOre: > 0 } partly)
+                    {
+                        // The customer paid part of the order and the rest was released. That needs a person.
+                        _logger.LogError("Shop webhook {EventId}: order {OrderId} was captured for {Captured} of {Total} øre and the rest cancelled, order stays {Status} and needs manual handling",
+                            eventId, order.Id, partly.CapturedAmountInOre, order.TotalInOre, order.Status);
+                    }
+                    else
+                    {
+                        order.Status = OrderStatus.Cancelled;
+                    }
                     break;
                 case "CREATED":
                     break;
@@ -475,13 +520,18 @@ namespace garge_api.Controllers
 
             order.UpdatedAt = DateTime.UtcNow;
 
-            if (prevStatus == OrderStatus.Reserved &&
+            // Checkout takes the items off stock, so an order that ends unpaid gives them back.
+            if (prevStatus is OrderStatus.Pending or OrderStatus.Reserved &&
                 order.Status is OrderStatus.Failed or OrderStatus.Cancelled)
             {
                 await RestoreStockAsync(order);
             }
 
-            await _context.SaveChangesAsync();
+            if (!await SaveProcessedAsync(_context, "shop", eventId))
+            {
+                _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
+                return Ok();
+            }
 
             if (prevStatus != OrderStatus.Paid && order.Status == OrderStatus.Paid)
             {
@@ -492,10 +542,10 @@ namespace garge_api.Controllers
             }
             else if (payload.Name == "CAPTURED" && order.Status == OrderStatus.Paid)
             {
-                // The order is already Paid, either because an admin captured it first or because
-                // this is a webhook redelivery. The service is idempotent: it short-circuits when a
-                // complete invoice already exists and otherwise renders one. Empty placeholder rows
-                // left by a prior failed render are cleaned up inside the service.
+                // The order is already Paid, by an admin capture or an earlier capture event. The service is
+                // idempotent: it short-circuits when a complete invoice already exists and otherwise
+                // renders one. Empty placeholder rows left by a prior failed render are cleaned up
+                // inside the service.
                 _logger.LogInformation("Webhook recovery check for order {OrderId}", order.Id);
                 await TryGenerateInvoiceAsync(order.Id, "webhook recovery");
             }
@@ -511,6 +561,10 @@ namespace garge_api.Controllers
             _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", order.Id, payload.Name);
             return Ok();
         }
+
+        /// <summary>The payment's capture, refund and cancel totals, read in the environment the order was created in.</summary>
+        private Task<VippsPaymentResponse> PaymentTotalsAsync(Order order)
+            => _vipps.GetPaymentAsync(order.VippsOrderId ?? string.Empty, order.IsTest);
 
         private async Task SafePushAsync(string userId, string title, string body)
         {
@@ -533,7 +587,7 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId)) return;
             try
             {
-                var payment = await _vipps.GetPaymentAsync(order.VippsOrderId);
+                var payment = await _vipps.GetPaymentAsync(order.VippsOrderId, order.IsTest);
                 if (string.IsNullOrEmpty(payment?.ProfileSub)) return;
 
                 var info = await _vipps.GetUserInfoAsync(payment.ProfileSub);

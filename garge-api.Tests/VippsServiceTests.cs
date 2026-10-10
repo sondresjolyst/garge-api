@@ -118,14 +118,39 @@ public class VippsServiceTests
         Assert.Equal(WebhookVerifyResult.MissingSecret, svc.VerifyWebhookSignature(req, body, string.Empty));
     }
 
-    [Fact]
-    public void Verify_StaleDate_ReturnsStale()
+    [Theory]
+    [InlineData(-30 * 24 * 60)]
+    [InlineData(-8 * 24 * 60 - 1)]
+    [InlineData(10)]
+    public void Verify_DateOutsideTheRetryPeriod_ReturnsStale(int minutesFromNow)
     {
         var svc = CreateService();
         var body = """{"reference":"42"}""";
-        var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(-30));
+        var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
 
         Assert.Equal(WebhookVerifyResult.Stale, svc.VerifyWebhookSignature(req, body, "secret"));
+    }
+
+    [Fact]
+    public void ProcessedEvents_AreKeptLongerThanASignatureStaysValid()
+    {
+        // A replayed webhook is stopped by its processed-event marker, so the marker must outlive the signature.
+        Assert.True(ProcessedWebhookEventCleanupService.Retention > VippsService.MaxSignatureAge);
+    }
+
+    [Theory]
+    [InlineData(-30)]
+    [InlineData(-6 * 60)]
+    [InlineData(-7 * 24 * 60)]
+    [InlineData(3)]
+    public void Verify_RetrySignedEarlierInTheRetryPeriod_IsValid(int minutesFromNow)
+    {
+        // Vipps retries for up to 7 days, and a retry may carry the date it was first signed with.
+        var svc = CreateService();
+        var body = """{"reference":"42"}""";
+        var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
+
+        Assert.Equal(WebhookVerifyResult.Valid, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]

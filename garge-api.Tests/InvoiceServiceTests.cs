@@ -97,6 +97,9 @@ public class InvoiceServiceTests
         var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(id, saved.Id);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
+        // The data export lists invoice amounts, so an order invoice stores the order total.
+        Assert.Equal(order.TotalInOre, saved.AmountInOre);
+        Assert.NotEqual(0, saved.AmountInOre);
         pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",

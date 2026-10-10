@@ -83,5 +83,9 @@ namespace garge_api.Dtos.Subscription
         // generating subscription invoices so a redelivered webhook can't
         // produce two invoices for the same charge.
         public string? ChargeId { get; set; }
+
+        // The charge amount and the part of it that was captured, in øre, set on recurring.charge-* events.
+        public int? Amount { get; set; }
+        public int? AmountCaptured { get; set; }
     }
 }

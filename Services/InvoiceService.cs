@@ -52,7 +52,7 @@ namespace garge_api.Services
             var wasNewRow = invoice == null;
             if (invoice == null)
             {
-                invoice = new Invoice { OrderId = orderId, IssuedAt = DateTime.UtcNow, PdfData = [] };
+                invoice = new Invoice { OrderId = orderId, AmountInOre = order.TotalInOre, IssuedAt = DateTime.UtcNow, PdfData = [] };
                 db.Invoices.Add(invoice);
                 await db.SaveChangesAsync();
             }

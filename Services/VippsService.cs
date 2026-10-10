@@ -28,10 +28,17 @@ namespace garge_api.Services
 
         private const string TestModeCacheKey = "vipps_test_mode";
         private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNameCaseInsensitive = true };
-        private static readonly TimeSpan ReplayWindow = TimeSpan.FromMinutes(5);
+        // Vipps retries a failed webhook for up to 7 days and does not document whether a retry is signed
+        // again, so a signed date may be that old. A replayed event is stopped by the processed-event
+        // check instead, which keeps events for 30 days, longer than this window.
+        internal static readonly TimeSpan MaxSignatureAge = TimeSpan.FromDays(8);
+        // How far a signed date may lie in the future, for clock differences.
+        private static readonly TimeSpan MaxClockAhead = TimeSpan.FromMinutes(5);
+        // Older signatures are accepted, and logged so the logs show how Vipps signs its retries.
+        private static readonly TimeSpan FreshSignatureAge = TimeSpan.FromMinutes(5);
         private static readonly Regex SigRegex = new(@"Signature=([^,&\s]+)", RegexOptions.Compiled);
 
-        private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn);
+        private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn, bool IsTest);
 
         public VippsService(
             HttpClient http,
@@ -68,9 +75,9 @@ namespace garge_api.Services
             return isTest;
         }
 
-        private async Task<VippsEffective> GetEffectiveAsync()
+        private async Task<VippsEffective> GetEffectiveAsync(bool? isTestOverride = null)
         {
-            var isTest = await IsTestModeAsync();
+            var isTest = isTestOverride ?? await IsTestModeAsync();
 
             string baseUrl, clientId, clientSecret, msn, subKey, cacheKey;
             if (isTest)
@@ -95,7 +102,7 @@ namespace garge_api.Services
             if (!_cache.TryGetValue(cacheKey, out string? token) || token == null)
                 token = await FetchTokenAsync(baseUrl, clientId, clientSecret, subKey, cacheKey);
 
-            return new VippsEffective(baseUrl, token, subKey, msn);
+            return new VippsEffective(baseUrl, token, subKey, msn, isTest);
         }
 
         private async Task<string> FetchTokenAsync(
@@ -181,7 +188,9 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-agreement");
-            return JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
+            var agreement = JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
+            agreement.IsTest = e.IsTest;
+            return agreement;
         }
 
         public async Task<VippsCreateChargeResponse> CreateChargeAsync(
@@ -290,7 +299,7 @@ namespace garge_api.Services
                             totalAmount = lineTotal,
                             totalAmountExcludingTax = excludingTax,
                             totalTaxAmount = lineTotal - excludingTax,
-                            taxPercentage = l.TaxPercentageBasisPoints,
+                            taxRate = l.TaxPercentageBasisPoints,
                             unitInfo = new
                             {
                                 unitPrice = l.UnitPriceInOre,
@@ -313,12 +322,14 @@ namespace garge_api.Services
 
             var response = await _http.SendAsync(request);
             var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-payment");
-            return JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json, _jsonOpts)!;
+            var created = JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json, _jsonOpts)!;
+            created.IsTest = e.IsTest;
+            return created;
         }
 
-        public async Task<VippsPaymentResponse> GetPaymentAsync(string reference)
+        public async Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null)
         {
-            var e = await GetEffectiveAsync();
+            var e = await GetEffectiveAsync(isTest);
 
             var request = new HttpRequestMessage(HttpMethod.Get,
                 $"{e.BaseUrl}/epayment/v1/payments/{reference}");
@@ -331,7 +342,10 @@ namespace garge_api.Services
             {
                 Reference = dto.Reference ?? string.Empty,
                 State = dto.State ?? string.Empty,
-                ProfileSub = dto.Profile?.Sub
+                ProfileSub = dto.Profile?.Sub,
+                CapturedAmountInOre = dto.Aggregate?.CapturedAmount?.Value ?? 0,
+                RefundedAmountInOre = dto.Aggregate?.RefundedAmount?.Value ?? 0,
+                CancelledAmountInOre = dto.Aggregate?.CancelledAmount?.Value ?? 0
             };
         }
 
@@ -370,6 +384,19 @@ namespace garge_api.Services
             public string? Reference { get; set; }
             public string? State { get; set; }
             public PaymentProfileApiDto? Profile { get; set; }
+            public PaymentAggregateApiDto? Aggregate { get; set; }
+        }
+
+        private sealed class PaymentAggregateApiDto
+        {
+            public PaymentAmountApiDto? CapturedAmount { get; set; }
+            public PaymentAmountApiDto? RefundedAmount { get; set; }
+            public PaymentAmountApiDto? CancelledAmount { get; set; }
+        }
+
+        private sealed class PaymentAmountApiDto
+        {
+            public int Value { get; set; }
         }
 
         private sealed class PaymentProfileApiDto
@@ -470,12 +497,11 @@ namespace garge_api.Services
             if (string.IsNullOrEmpty(dateHeader) || string.IsNullOrEmpty(contentHashHeader))
                 return WebhookVerifyResult.MissingHeader;
 
-            // Replay protection: x-ms-date must be within 5 min window
             if (!DateTimeOffset.TryParse(dateHeader, CultureInfo.InvariantCulture,
                     DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var sentAt))
                 return WebhookVerifyResult.BadDate;
-            var skew = DateTimeOffset.UtcNow - sentAt;
-            if (skew.Duration() > ReplayWindow)
+            var age = DateTimeOffset.UtcNow - sentAt;
+            if (age > MaxSignatureAge || -age > MaxClockAhead)
                 return WebhookVerifyResult.Stale;
 
             // Content hash check
@@ -494,9 +520,13 @@ namespace garge_api.Services
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
             var computed = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(canonical)));
 
-            return CryptographicOperations.FixedTimeEquals(
+            var valid = CryptographicOperations.FixedTimeEquals(
                 Encoding.ASCII.GetBytes(computed),
-                Encoding.ASCII.GetBytes(receivedSig))
+                Encoding.ASCII.GetBytes(receivedSig));
+            if (valid && age > FreshSignatureAge)
+                _logger.LogWarning("Vipps webhook signed {AgeMinutes:F0} minutes ago accepted, as a retry may keep its first signature",
+                    age.TotalMinutes);
+            return valid
                 ? WebhookVerifyResult.Valid
                 : WebhookVerifyResult.BadSignature;
         }

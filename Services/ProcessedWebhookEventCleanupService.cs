@@ -6,7 +6,7 @@ namespace garge_api.Services
     public class ProcessedWebhookEventCleanupService : BackgroundService
     {
         private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
-        private static readonly TimeSpan Retention = TimeSpan.FromDays(30);
+        internal static readonly TimeSpan Retention = TimeSpan.FromDays(30);
 
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<ProcessedWebhookEventCleanupService> _logger;
