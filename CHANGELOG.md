@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.17.0](https://github.com/sondresjolyst/garge-api/compare/v2.16.1...v2.17.0) (2026-10-10)
+
+
+### Features
+
+* **pricing:** store prices as what the customer pays and take VAT out of them ([#457](https://github.com/sondresjolyst/garge-api/issues/457)) ([9f48b77](https://github.com/sondresjolyst/garge-api/commit/9f48b7741cf07eb178b870d03d0757d784185d8c))
+* **vat:** track turnover against the VAT threshold and correct sales made before registration ([#458](https://github.com/sondresjolyst/garge-api/issues/458)) ([67d239c](https://github.com/sondresjolyst/garge-api/commit/67d239c8daea9e23481bac1f07ecd231b9bd22ab))
+
+
+### Bug Fixes
+
+* correct Vipps amounts, tax and webhook handling ([#452](https://github.com/sondresjolyst/garge-api/issues/452)) ([809ee99](https://github.com/sondresjolyst/garge-api/commit/809ee99af50d9102d0e4032477d6fe2540cd7c3f))
+* **vipps:** retry failed charges with new keys and verify capture and refund totals ([#455](https://github.com/sondresjolyst/garge-api/issues/455)) ([4f22f01](https://github.com/sondresjolyst/garge-api/commit/4f22f01d6e329e2a451a4f9282307a054758c038))
+* **vipps:** use each payment's own environment and register webhooks in both ([#454](https://github.com/sondresjolyst/garge-api/issues/454)) ([a6ac62b](https://github.com/sondresjolyst/garge-api/commit/a6ac62b500634969a97bafff11bb7a1598f87899))
+
 ## [2.16.1](https://github.com/sondresjolyst/garge-api/compare/v2.16.0...v2.16.1) (2026-10-04)
 
 
