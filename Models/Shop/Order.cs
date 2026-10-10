@@ -34,6 +34,9 @@ namespace garge_api.Models.Shop
         [Required]
         public int TotalInOre { get; set; }
 
+        /// <summary>How much of the order Vipps has refunded, in øre.</summary>
+        public int RefundedInOre { get; set; }
+
         [MaxLength(500)]
         public string? ShippingAddress { get; set; }
 

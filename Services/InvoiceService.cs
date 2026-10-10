@@ -43,9 +43,9 @@ namespace garge_api.Services
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
 
             var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.OrderId == orderId);
-            if (invoice != null && !force)
+            if (invoice != null && !force && !NeedsPdf(invoice))
             {
-                _logger.LogInformation("Invoice {InvoiceId} already exists or is in progress for order {OrderId} — skip", invoice.Id, orderId);
+                _logger.LogInformation("Invoice {InvoiceId} already exists or is in progress for order {OrderId}, skipped", invoice.Id, orderId);
                 return invoice.Id;
             }
 
@@ -60,29 +60,11 @@ namespace garge_api.Services
                 db.Invoices.Add(invoice);
                 await db.SaveChangesAsync();
             }
-            else
-            {
-                invoice.IssuedAt = DateTime.UtcNow;
-            }
+
+            if (wasNewRow) await CheckVatThresholdAsync(scope);
 
             var html = BuildInvoiceHtml(order, settings, invoice.Id, invoice.IssuedAt);
-            try
-            {
-                invoice.PdfData = await _pdfRenderer.RenderAsync(html);
-                await db.SaveChangesAsync();
-            }
-            catch
-            {
-                // Keep DB clean: drop the row we just added so retry isn't blocked by an
-                // empty-PDF placeholder. For force-regenerate over an existing complete
-                // invoice we leave the prior row + bytes alone.
-                if (wasNewRow || invoice.PdfData.Length == 0)
-                {
-                    db.Invoices.Remove(invoice);
-                    await db.SaveChangesAsync();
-                }
-                throw;
-            }
+            await RenderAsync(db, invoice, html);
 
             try
             {
@@ -118,9 +100,9 @@ namespace garge_api.Services
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
             var existing = await db.Invoices.FirstOrDefaultAsync(i => i.VippsChargeId == vippsChargeId);
-            if (existing != null)
+            if (existing != null && !NeedsPdf(existing))
             {
-                _logger.LogInformation("Invoice {InvoiceId} already exists for charge {ChargeId} — skip",
+                _logger.LogInformation("Invoice {InvoiceId} already exists for charge {ChargeId}, skipped",
                     existing.Id, vippsChargeId);
                 return existing.Id;
             }
@@ -134,7 +116,7 @@ namespace garge_api.Services
             // Fallback: if the agreement-activated webhook hasn't populated
             // BillingAddress yet (race with first charge), fetch from Vipps now.
             // Vipps service may be absent in test setups; skip silently then.
-            if (string.IsNullOrEmpty(subscription.BillingAddress))
+            if (existing == null && string.IsNullOrEmpty(subscription.BillingAddress))
             {
                 var vipps = scope.ServiceProvider.GetService<IVippsService>();
                 if (vipps != null)
@@ -162,30 +144,25 @@ namespace garge_api.Services
 
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
 
-            var invoice = new Invoice
+            var invoice = existing;
+            if (invoice == null)
             {
-                SubscriptionId = subscription.Id,
-                VippsChargeId = vippsChargeId,
-                AmountInOre = amountInOre,
-                IssuedAt = occurredAt,
-                PdfData = [],
-                VatPercentage = Pricing.VatPercentFor(settings.VatEnabled)
-            };
-            db.Invoices.Add(invoice);
-            await db.SaveChangesAsync();
+                invoice = new Invoice
+                {
+                    SubscriptionId = subscription.Id,
+                    VippsChargeId = vippsChargeId,
+                    AmountInOre = amountInOre,
+                    IssuedAt = occurredAt,
+                    PdfData = [],
+                    VatPercentage = Pricing.VatPercentFor(settings.VatEnabled)
+                };
+                db.Invoices.Add(invoice);
+                await db.SaveChangesAsync();
+                await CheckVatThresholdAsync(scope);
+            }
 
-            var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, occurredAt, amountInOre, invoice.VatPercentage);
-            try
-            {
-                invoice.PdfData = await _pdfRenderer.RenderAsync(html);
-                await db.SaveChangesAsync();
-            }
-            catch
-            {
-                db.Invoices.Remove(invoice);
-                await db.SaveChangesAsync();
-                throw;
-            }
+            var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, invoice.IssuedAt, invoice.AmountInOre, invoice.VatPercentage);
+            await RenderAsync(db, invoice, html);
 
             try
             {
@@ -214,6 +191,312 @@ namespace garge_api.Services
             _logger.LogInformation("Invoice {InvoiceId} generated for subscription {SubscriptionId} charge {ChargeId}",
                 invoice.Id, subscriptionId, vippsChargeId);
             return invoice.Id;
+        }
+
+        /// <summary>How long a PDF counts as being made before the retry job tries it again.</summary>
+        internal static readonly TimeSpan PdfRetryAfter = TimeSpan.FromMinutes(5);
+
+        private static bool NeedsPdf(Invoice invoice) =>
+            invoice.PdfData.Length == 0
+            && (invoice.PdfAttemptedAt == null || DateTime.UtcNow - invoice.PdfAttemptedAt >= PdfRetryAfter);
+
+        // The invoice row stays when the PDF fails, so the sale is never lost. The retry job makes it later.
+        private async Task RenderAsync(ApplicationDbContext db, Invoice invoice, string html)
+        {
+            invoice.PdfAttemptedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            try
+            {
+                invoice.PdfData = await _pdfRenderer.RenderAsync(html);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "PDF for invoice {InvoiceId} failed, it is retried later", invoice.Id);
+                throw;
+            }
+            await db.SaveChangesAsync();
+        }
+
+        public async Task<int> RetryMissingPdfsAsync(CancellationToken ct = default)
+        {
+            List<(int Id, int? OrderId, int? SubscriptionId, string? ChargeId, int Amount, DateTime IssuedAt)> pending;
+            List<int> corrections;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var cutoff = DateTime.UtcNow - PdfRetryAfter;
+                pending = (await db.Invoices.AsNoTracking()
+                        .Where(i => i.PdfData.Length == 0 && i.CreditsInvoiceId == null && i.ReplacesInvoiceId == null
+                                    && (i.PdfAttemptedAt == null || i.PdfAttemptedAt <= cutoff))
+                        .Select(i => new { i.Id, i.OrderId, i.SubscriptionId, i.VippsChargeId, i.AmountInOre, i.IssuedAt })
+                        .ToListAsync(ct))
+                    .Select(i => (i.Id, i.OrderId, i.SubscriptionId, i.VippsChargeId, i.AmountInOre, i.IssuedAt))
+                    .ToList();
+                // VAT corrections whose PDFs or email did not go through.
+                corrections = await db.Invoices.AsNoTracking()
+                    .Where(i => i.VatCorrectedAt != null && i.VatCorrectionEmailedAt == null && i.VatCorrectedAt <= cutoff)
+                    .Select(i => i.Id)
+                    .ToListAsync(ct);
+            }
+
+            var made = 0;
+            foreach (var p in pending)
+            {
+                try
+                {
+                    if (p.OrderId is { } orderId)
+                        await GenerateAndStoreAsync(orderId);
+                    else if (p.SubscriptionId is { } subscriptionId && p.ChargeId != null)
+                        await GenerateForSubscriptionChargeAsync(subscriptionId, p.ChargeId, p.Amount, p.IssuedAt);
+                    else
+                        continue;
+                    made++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Retrying the PDF for invoice {InvoiceId} failed", p.Id);
+                }
+            }
+            foreach (var originalId in corrections)
+            {
+                try
+                {
+                    await FinishVatCorrectionAsync(originalId, ct);
+                    made++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Retrying the VAT correction for invoice {InvoiceId} failed", originalId);
+                }
+            }
+            return made;
+        }
+
+        // A new sale may bring turnover up to a warning level. A failed check never fails the invoice.
+        private async Task CheckVatThresholdAsync(IServiceScope scope)
+        {
+            var vat = scope.ServiceProvider.GetService<IVatThresholdService>();
+            if (vat == null) return;
+            try { await vat.CheckAsync(DateTime.UtcNow); }
+            catch (Exception ex) { _logger.LogError(ex, "VAT threshold check failed"); }
+        }
+
+        public async Task<int> GenerateVatCorrectionsAsync(CancellationToken ct = default)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var vat = scope.ServiceProvider.GetRequiredService<IVatThresholdService>();
+
+            var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+            if (!settings.VatEnabled)
+                throw new InvalidOperationException("VAT corrections are made after VAT registration, with VAT on.");
+
+            await CorrectionGate.WaitAsync(ct);
+            try
+            {
+                var status = await vat.GetStatusAsync(DateTime.UtcNow, ct);
+                var made = 0;
+                foreach (var sale in status.Owed.Where(o => o.CorrectedAt == null).OrderBy(o => o.IssuedAt).ThenBy(o => o.InvoiceId))
+                {
+                    var original = await db.Invoices.FirstAsync(i => i.Id == sale.InvoiceId, ct);
+                    if (original.VatCorrectedAt != null) continue;
+
+                    // The credit note, the new invoice and the mark on the original are saved together.
+                    var now = DateTime.UtcNow;
+                    var creditNote = new Invoice
+                    {
+                        Kind = InvoiceKind.CreditNote, CreditsInvoiceId = original.Id,
+                        AmountInOre = -original.AmountInOre, VatPercentage = 0, IssuedAt = now, PdfData = []
+                    };
+                    var replacement = new Invoice
+                    {
+                        Kind = InvoiceKind.Invoice, ReplacesInvoiceId = original.Id,
+                        AmountInOre = sale.AmountInOre, VatPercentage = Pricing.VatPercent, IssuedAt = now, PdfData = []
+                    };
+                    db.Invoices.AddRange(creditNote, replacement);
+                    original.VatCorrectedAt = now;
+                    await db.SaveChangesAsync(ct);
+                    made++;
+
+                    try { await FinishVatCorrectionAsync(original.Id, ct); }
+                    catch (Exception ex) { _logger.LogError(ex, "VAT correction for invoice {InvoiceId} is retried later", original.Id); }
+                }
+                _logger.LogInformation("Made {Count} VAT corrections", made);
+                return made;
+            }
+            finally
+            {
+                CorrectionGate.Release();
+            }
+        }
+
+        // Corrections are made one run at a time, so no sale is corrected twice.
+        private static readonly SemaphoreSlim CorrectionGate = new(1, 1);
+
+        /// <summary>
+        /// Makes the missing PDFs of a sale's credit note and new invoice, then emails both to the customer
+        /// once. A salgsdokument has to be sent to the buyer (bokføringsforskriften § 5-2-1).
+        /// </summary>
+        private async Task FinishVatCorrectionAsync(int originalId, CancellationToken ct)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+
+            var original = await db.Invoices
+                .Include(i => i.Order).ThenInclude(o => o!.User)
+                .Include(i => i.Order).ThenInclude(o => o!.OrderItems).ThenInclude(oi => oi.ShopItem)
+                .Include(i => i.Subscription).ThenInclude(s => s!.User)
+                .Include(i => i.Subscription).ThenInclude(s => s!.Product)
+                .FirstAsync(i => i.Id == originalId, ct);
+            if (original.VatCorrectionEmailedAt != null) return;
+            var creditNote = await db.Invoices.FirstAsync(i => i.CreditsInvoiceId == originalId, ct);
+            var replacement = await db.Invoices.FirstAsync(i => i.ReplacesInvoiceId == originalId, ct);
+
+            var creditHtml = BuildCreditNoteHtml(original, creditNote, replacement, settings);
+            var invoiceHtml = BuildReplacementInvoiceHtml(original, replacement, creditNote, settings);
+            if (creditNote.PdfData.Length == 0) await RenderAsync(db, creditNote, creditHtml);
+            if (replacement.PdfData.Length == 0) await RenderAsync(db, replacement, invoiceHtml);
+
+            var buyerEmail = (original.Order?.User ?? original.Subscription?.User)?.Email;
+            if (!string.IsNullOrEmpty(buyerEmail))
+            {
+                await _emailService.SendEmailAsync(
+                    buyerEmail,
+                    $"{settings.CompanyName}: invoice #{replacement.Id:D4} with VAT replaces invoice #{original.Id:D4}, nothing more to pay",
+                    invoiceHtml,
+                    [
+                        new EmailAttachment { FileName = $"credit-note-{creditNote.Id:D4}.pdf", Content = creditNote.PdfData, ContentType = "application/pdf" },
+                        new EmailAttachment { FileName = $"invoice-{replacement.Id:D4}.pdf", Content = replacement.PdfData, ContentType = "application/pdf" }
+                    ]);
+            }
+            original.VatCorrectionEmailedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+
+        private static (string Name, List<string> Lines) Buyer(Invoice original)
+        {
+            var user = original.Order?.User ?? original.Subscription?.User;
+            var name = user != null ? $"{user.FirstName} {user.LastName}" : "Customer";
+            var address = original.Order?.ShippingAddress ?? original.Subscription?.BillingAddress;
+            return (name, [user?.Email ?? string.Empty, address ?? string.Empty]);
+        }
+
+        // What was sold, from the original sale.
+        private static List<(string Description, int Quantity)> Goods(Invoice original) =>
+            original.Order != null
+                ? original.Order.OrderItems.Select(i => (i.ShopItem?.Name ?? "Item", i.Quantity)).ToList()
+                : [($"{original.Subscription?.Product?.Name ?? "Subscription"}, recurring charge ({(original.Subscription?.Product?.Interval == BillingInterval.Yearly ? "year" : "month")})", 1)];
+
+        private static string Parties(AppSettings s, Invoice original)
+        {
+            var (name, lines) = Buyer(original);
+            var to = new EmailLayout.Party { Label = "Bill to", Name = name };
+            foreach (var line in lines) to.Lines.Add(line);
+            return EmailLayout.RenderParties(
+                from: new EmailLayout.Party { Label = "From", Name = s.CompanyLegalName, Lines = { s.CompanyAddress, s.CompanyEmail } },
+                to: to);
+        }
+
+        private static string BuildCreditNoteHtml(Invoice original, Invoice creditNote, Invoice replacement, AppSettings s)
+        {
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
+            static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
+            var saleDate = LocalTime.Date(original.IssuedAt).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var goods = string.Join(", ", Goods(original).Select(g => $"{g.Quantity} x {g.Description}"));
+
+            var body = $$"""
+                {{Parties(s, original)}}
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th class="r">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Credit for invoice #{{original.Id.ToString("D4", CultureInfo.InvariantCulture)}} of {{saleDate}}: {{H(goods)}}</td>
+                      <td class="r">NOK {{Nok(creditNote.AmountInOre)}}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div class="totals-section">
+                  <table>
+                    <tbody>
+                      <tr class="grand">
+                        <td>Total credited</td>
+                        <td class="r">NOK {{Nok(creditNote.AmountInOre)}}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="footer">
+                  <p>This credit note cancels invoice #{{original.Id.ToString("D4", CultureInfo.InvariantCulture)}}, which was issued without VAT before VAT registration. Invoice #{{replacement.Id.ToString("D4", CultureInfo.InvariantCulture)}} replaces it with VAT included in the same price. Nothing is paid back and nothing more is owed.</p>
+                </div>
+                """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = $"#{creditNote.Id:D4}",
+                Subtitle = $"CREDIT NOTE  ·  {LocalTime.Date(creditNote.IssuedAt):yyyy-MM-dd}",
+                FootNote = $"Credits invoice #{original.Id:D4}"
+            }, body, vatRegistered: true);
+        }
+
+        private static string BuildReplacementInvoiceHtml(Invoice original, Invoice replacement, Invoice creditNote, AppSettings s)
+        {
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
+            static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
+            var saleDate = LocalTime.Date(original.IssuedAt).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var (exclVat, vatAmount) = Pricing.Split(replacement.AmountInOre, replacement.VatPercentage);
+            var goodsRows = string.Join("", Goods(original).Select(g => $"""
+                    <tr>
+                      <td>{H(g.Description)}</td>
+                      <td class="c">{g.Quantity}</td>
+                    </tr>
+                """));
+
+            var body = $$"""
+                {{Parties(s, original)}}
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th class="c">Qty</th>
+                    </tr>
+                  </thead>
+                  <tbody>{{goodsRows}}</tbody>
+                </table>
+
+                <div class="totals-section">
+                  <table>
+                    <tbody>{{BuildVatSubRows(replacement.VatPercentage, exclVat, vatAmount)}}</tbody>
+                    <tbody>
+                      <tr class="grand">
+                        <td>Total, already paid</td>
+                        <td class="r">NOK {{Nok(replacement.AmountInOre)}}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="footer">
+                  <p>Delivered {{saleDate}}. This invoice replaces invoice #{{original.Id.ToString("D4", CultureInfo.InvariantCulture)}}, credited by credit note #{{creditNote.Id.ToString("D4", CultureInfo.InvariantCulture)}}. The sale was made after turnover passed the VAT registration threshold, so the price that was paid includes 25% VAT. It was paid in full and there is nothing more to pay.</p>
+                </div>
+                """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = $"#{replacement.Id:D4}",
+                Subtitle = $"INVOICE  ·  {LocalTime.Date(replacement.IssuedAt):yyyy-MM-dd}",
+                Badge = "Paid",
+                FootNote = $"Replaces invoice #{original.Id:D4}"
+            }, body, vatRegistered: true);
         }
 
         private static string BuildSubscriptionInvoiceHtml(

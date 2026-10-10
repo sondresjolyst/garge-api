@@ -14,7 +14,7 @@ namespace garge_api.Tests;
 public class InvoiceServiceTests
 {
     private static (InvoiceService svc, ApplicationDbContext db, Mock<IEmailService> email, Mock<IPdfRenderer> pdf) Create(
-        Mock<IPdfRenderer>? pdfRenderer = null, Mock<IVippsService>? vipps = null)
+        Mock<IPdfRenderer>? pdfRenderer = null, Mock<IVippsService>? vipps = null, Func<ApplicationDbContext, IVatThresholdService>? vat = null)
     {
         var db = new ApplicationDbContext(
             new DbContextOptionsBuilder<ApplicationDbContext>()
@@ -24,6 +24,8 @@ public class InvoiceServiceTests
         serviceProvider.Setup(sp => sp.GetService(typeof(ApplicationDbContext))).Returns(db);
         if (vipps != null)
             serviceProvider.Setup(sp => sp.GetService(typeof(IVippsService))).Returns(vipps.Object);
+        if (vat != null)
+            serviceProvider.Setup(sp => sp.GetService(typeof(IVatThresholdService))).Returns(vat(db));
 
         var scope = new Mock<IServiceScope>();
         scope.SetupGet(s => s.ServiceProvider).Returns(serviceProvider.Object);
@@ -112,7 +114,7 @@ public class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task GenerateAndStoreAsync_RenderThrows_RemovesNewRow()
+    public async Task GenerateAndStoreAsync_RenderThrows_KeepsTheSaleForTheRetry()
     {
         var pdf = new Mock<IPdfRenderer>();
         pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
@@ -121,21 +123,22 @@ public class InvoiceServiceTests
 
         await Assert.ThrowsAsync<Exception>(() => svc.GenerateAndStoreAsync(order.Id));
 
-        Assert.Empty(db.Invoices);
+        var kept = await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(order.TotalInOre, kept.AmountInOre);
+        Assert.Empty(kept.PdfData);
+        Assert.NotNull(kept.PdfAttemptedAt);
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
     }
 
     [Fact]
-    public async Task GenerateAndStoreAsync_ExistingEmptyRow_WithoutForce_ShortCircuits()
+    public async Task GenerateAndStoreAsync_PdfBeingMade_WithoutForce_ShortCircuits()
     {
-        // Race scenario: a concurrent caller has inserted an in-progress placeholder
-        // row but hasn't filled the PDF yet. The second caller must NOT render
-        // again (would double-email). Short-circuit on any existing row.
+        // Another caller started the PDF moments ago. Making it again would email twice.
         var (svc, db, email, pdf) = Create();
         var order = await SeedPaidOrderAsync(db);
-        var inProgress = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [] };
+        var inProgress = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow, PdfData = [], PdfAttemptedAt = DateTime.UtcNow };
         db.Invoices.Add(inProgress);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -293,7 +296,7 @@ public class InvoiceServiceTests
     }
 
     [Fact]
-    public async Task GenerateForSubscriptionChargeAsync_RenderFails_RemovesPlaceholderRow()
+    public async Task GenerateForSubscriptionChargeAsync_RenderFails_KeepsTheSaleForTheRetry()
     {
         var pdf = new Mock<IPdfRenderer>();
         pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
@@ -303,7 +306,33 @@ public class InvoiceServiceTests
         await Assert.ThrowsAsync<Exception>(() =>
             svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-fail", 29900, DateTime.UtcNow));
 
-        Assert.Empty(db.Invoices);
+        var kept = await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(("charge-fail", 29900), (kept.VippsChargeId, kept.AmountInOre));
+        Assert.Empty(kept.PdfData);
+    }
+
+    [Fact]
+    public async Task RetryMissingPdfs_MakesFailedPdfsAndEmailsThem_LeavesOnesBeingMade()
+    {
+        var (svc, db, email, pdf) = Create();
+        var order = await SeedPaidOrderAsync(db);
+        var failed = new Invoice { OrderId = order.Id, AmountInOre = order.TotalInOre, IssuedAt = DateTime.UtcNow.AddHours(-1), PdfData = [],
+            PdfAttemptedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1) };
+        db.Invoices.Add(failed);
+        var subscription = new garge_api.Models.Subscription.Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr-r" };
+        db.Subscriptions.Add(subscription);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        db.Invoices.Add(new Invoice { SubscriptionId = subscription.Id, VippsChargeId = "charge-busy", AmountInOre = 29900, IssuedAt = DateTime.UtcNow,
+            PdfData = [], PdfAttemptedAt = DateTime.UtcNow });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, await svc.RetryMissingPdfsAsync());
+
+        var made = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == failed.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(new byte[] { 1, 2, 3 }, made.PdfData);
+        Assert.Equal(failed.IssuedAt, made.IssuedAt);
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+        Assert.Empty((await db.Invoices.AsNoTracking().SingleAsync(i => i.VippsChargeId == "charge-busy", TestContext.Current.CancellationToken)).PdfData);
     }
 
     private static (InvoiceService svc, ApplicationDbContext db, List<string> html) CreateCapturingHtml()
@@ -408,5 +437,242 @@ public class InvoiceServiceTests
 
         Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(11765), html.Single());
         Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(2941), html.Single());
+    }
+
+    private static VatThresholdService RealVat(ApplicationDbContext db)
+    {
+        var cache = new Mock<IAppSettingsCache>();
+        cache.Setup(c => c.GetAsync()).ReturnsAsync(() => db.AppSettings.AsNoTracking().Single(x => x.Id == 1));
+        return new VatThresholdService(db, new Mock<ISecurityNotifier>().Object, cache.Object, NullLogger<VatThresholdService>.Instance);
+    }
+
+    private static async Task<Invoice> OwedInvoiceAsync(ApplicationDbContext db)
+    {
+        var order = await SeedPaidOrderAsync(db);
+        var invoice = new Invoice { OrderId = order.Id, AmountInOre = 5_100_000, IssuedAt = DateTime.UtcNow.AddDays(-2), PdfData = [1] };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        return invoice;
+    }
+
+    [Fact]
+    public async Task RegeneratingAnOrderInvoice_KeepsItsDate()
+    {
+        var (svc, db, _, _) = Create();
+        var order = await SeedPaidOrderAsync(db);
+        await svc.GenerateAndStoreAsync(order.Id);
+        var issued = (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).IssuedAt;
+
+        await Task.Delay(20, TestContext.Current.CancellationToken);
+        await svc.GenerateAndStoreAsync(order.Id, force: true);
+
+        Assert.Equal(issued, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).IssuedAt);
+    }
+
+    [Fact]
+    public async Task NewInvoices_CheckTheVatThreshold_RegeneratedOnesDoNot()
+    {
+        var vat = new Mock<IVatThresholdService>();
+        var (svc, db, _, _) = Create(vat: _ => vat.Object);
+        var order = await SeedPaidOrderAsync(db);
+        await svc.GenerateAndStoreAsync(order.Id);
+        await svc.GenerateAndStoreAsync(order.Id, force: true);
+        vat.Verify(v => v.CheckAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        var subVat = new Mock<IVatThresholdService>();
+        var (subSvc, subDb, _, _) = Create(vat: _ => subVat.Object);
+        var subscription = await SeedSubscriptionAsync(subDb);
+        await subSvc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-check", 29900, DateTime.UtcNow);
+        subVat.Verify(v => v.CheckAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AFailedThresholdCheck_DoesNotFailTheInvoice()
+    {
+        var vat = new Mock<IVatThresholdService>();
+        vat.Setup(v => v.CheckAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("boom"));
+        var (svc, db, _, _) = Create(vat: _ => vat.Object);
+        var order = await SeedPaidOrderAsync(db);
+
+        var id = await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.True(id > 0);
+    }
+
+    private static (InvoiceService svc, ApplicationDbContext db, Mock<IEmailService> email, Dictionary<string, string> pages) CreateForCorrections(Mock<IPdfRenderer>? pdf = null)
+    {
+        var pages = new Dictionary<string, string>();
+        if (pdf == null)
+        {
+            pdf = new Mock<IPdfRenderer>();
+            pdf.Setup(p => p.RenderAsync(It.IsAny<string>()))
+                .Callback<string>(h => pages[h.Contains("CREDIT NOTE") ? "credit" : h.Contains("Replaces invoice") ? "invoice" : "other"] = h)
+                .ReturnsAsync((string h) => h.Contains("CREDIT NOTE") ? new byte[] { 2 } : new byte[] { 3 });
+        }
+        var (svc, db, email, _) = Create(pdf, vat: RealVat);
+        return (svc, db, email, pages);
+    }
+
+    private static async Task TurnVatOnAsync(ApplicationDbContext db)
+    {
+        var settings = await db.AppSettings.SingleAsync();
+        settings.VatEnabled = true;
+        settings.CompanyOrgNumber = "999 888 777";
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task VatCorrections_WithVatOff_AreRefused()
+    {
+        var (svc, db, email, pages) = CreateForCorrections();
+        await OwedInvoiceAsync(db);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.GenerateVatCorrectionsAsync());
+        Assert.Empty(pages);
+        Assert.Equal(1, await db.Invoices.CountAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task VatCorrections_MakeACreditNoteAndANewInvoiceWithVat_AndEmailBothOnce()
+    {
+        var (svc, db, email, pages) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(1, await svc.GenerateVatCorrectionsAsync());
+        Assert.Equal(0, await svc.GenerateVatCorrectionsAsync());
+
+        var credit = await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        var replacement = await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        Assert.Equal((InvoiceKind.CreditNote, -5_100_000, 0), (credit.Kind, credit.AmountInOre, credit.VatPercentage));
+        Assert.Equal((InvoiceKind.Invoice, 5_100_000, 25), (replacement.Kind, replacement.AmountInOre, replacement.VatPercentage));
+        Assert.Equal(new byte[] { 2 }, credit.PdfData);
+        Assert.Equal(new byte[] { 3 }, replacement.PdfData);
+        Assert.Null(credit.OrderId);
+        Assert.Null(replacement.OrderId);
+
+        Assert.Contains($"Credit for invoice #{original.Id:D4}", pages["credit"]);
+        Assert.Contains($"Invoice #{replacement.Id:D4} replaces it", pages["credit"]);
+        var page = pages["invoice"];
+        Assert.Contains($"#{replacement.Id:D4}", page);
+        Assert.Contains($"Replaces invoice #{original.Id:D4}", page);
+        Assert.Contains($"credited by credit note #{credit.Id:D4}", page);
+        Assert.Contains("Garge Sensor", page);
+        Assert.Contains("999 888 777 MVA", page);
+        Assert.Contains("Subtotal excl. VAT</td><td class=\"r\">NOK " + MoneyFormat.Nok(4_080_000), page);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_020_000), page);
+        Assert.Contains("nothing more to pay", page);
+
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(t => t.Contains($"#{replacement.Id:D4}") && t.Contains($"#{original.Id:D4}")),
+            It.IsAny<string>(), It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 2)), Times.Once);
+        var saved = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        Assert.NotNull(saved.VatCorrectedAt);
+        Assert.NotNull(saved.VatCorrectionEmailedAt);
+        Assert.Equal(new byte[] { 1 }, saved.PdfData);
+    }
+
+    [Fact]
+    public async Task VatCorrections_DoNotCountAsTurnover()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+        var before = await RealVat(db).GetStatusAsync(DateTime.UtcNow);
+
+        await svc.GenerateVatCorrectionsAsync();
+
+        var after = await RealVat(db).GetStatusAsync(DateTime.UtcNow);
+        Assert.Equal(before.TurnoverInOre, after.TurnoverInOre);
+        var owed = Assert.Single(after.Owed);
+        Assert.Equal(original.Id, owed.InvoiceId);
+        Assert.NotNull(owed.CreditNoteId);
+        Assert.NotNull(owed.ReplacementInvoiceId);
+        Assert.NotNull(owed.CorrectedAt);
+    }
+
+    [Fact]
+    public async Task VatCorrection_ForAPartlyRefundedSale_InvoicesWhatWasKept()
+    {
+        var (svc, db, _, pages) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        var order = await db.Orders.SingleAsync(o => o.Id == original.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 50_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await TurnVatOnAsync(db);
+
+        await svc.GenerateVatCorrectionsAsync();
+
+        // 51 000 kr less 500 kr refunded is 50 500 kr, of which 10 100 kr is VAT. The credit note cancels the whole original.
+        Assert.Equal(5_050_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
+        Assert.Equal(-5_100_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_010_000), pages["invoice"]);
+    }
+
+    [Fact]
+    public async Task VatCorrections_AreMadeInSaleOrder()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
+        var first = await OwedInvoiceAsync(db);
+        var order2 = new Order { UserId = "user-1", TotalInOre = 10000, Status = OrderStatus.Paid };
+        db.Orders.Add(order2);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var second = new Invoice { OrderId = order2.Id, AmountInOre = 10000, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [1] };
+        db.Invoices.Add(second);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(2, await svc.GenerateVatCorrectionsAsync());
+
+        var firstCredit = (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == first.Id, TestContext.Current.CancellationToken)).Id;
+        var secondCredit = (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == second.Id, TestContext.Current.CancellationToken)).Id;
+        Assert.True(firstCredit < secondCredit);
+    }
+
+    [Fact]
+    public async Task AVatCorrectionWhosePdfFailed_IsFinishedByTheRetryJob_AndEmailedOnce()
+    {
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+            .ThrowsAsync(new Exception("chromium gone"))
+            .ReturnsAsync(new byte[] { 2 })
+            .ReturnsAsync(new byte[] { 3 });
+        var (svc, db, email, _) = CreateForCorrections(pdf);
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(1, await svc.GenerateVatCorrectionsAsync());
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
+
+        var saved = await db.Invoices.SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        saved.VatCorrectedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(1, await svc.RetryMissingPdfsAsync());
+        Assert.Equal(0, await svc.RetryMissingPdfsAsync());
+
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.IsAny<string>(), It.IsAny<string>(), It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 2)), Times.Once);
+        Assert.Equal(new byte[] { 2 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+    }
+
+    [Fact]
+    public async Task AVatCorrectionWhoseNewInvoicePdfFailed_KeepsTheCreditNotePdf()
+    {
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+            .ReturnsAsync(new byte[] { 2 })
+            .ThrowsAsync(new Exception("chromium gone"))
+            .ReturnsAsync(new byte[] { 3 });
+        var (svc, db, email, _) = CreateForCorrections(pdf);
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        await svc.GenerateVatCorrectionsAsync();
+        var saved = await db.Invoices.SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        saved.VatCorrectedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.RetryMissingPdfsAsync();
+
+        Assert.Equal(new byte[] { 2 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+        Assert.Equal(new byte[] { 3 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }
 }

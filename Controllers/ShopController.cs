@@ -339,6 +339,7 @@ namespace garge_api.Controllers
             }
 
             order.Status = OrderStatus.Refunded;
+            order.RefundedInOre = order.TotalInOre;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
@@ -500,7 +501,9 @@ namespace garge_api.Controllers
                     break;
                 case "REFUNDED":
                     // A partial refund leaves the order Paid. Only a refund of the whole amount refunds it.
-                    if (amount == order.TotalInOre || await PaymentTotalsAsync(order) is { RefundedAmountInOre: var refunded } && refunded >= order.TotalInOre)
+                    var refundedSoFar = amount == order.TotalInOre ? order.TotalInOre : (await PaymentTotalsAsync(order)).RefundedAmountInOre;
+                    order.RefundedInOre = Math.Clamp(Math.Max(order.RefundedInOre, refundedSoFar), 0, order.TotalInOre);
+                    if (order.RefundedInOre >= order.TotalInOre)
                     {
                         order.Status = OrderStatus.Refunded;
                     }

@@ -455,6 +455,16 @@ namespace garge_api.Models
                 .IsUnique()
                 .HasFilter("\"VippsChargeId\" IS NOT NULL");
 
+            // A sale is corrected once: one credit note and one new invoice per original.
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.CreditsInvoiceId)
+                .IsUnique()
+                .HasFilter("\"CreditsInvoiceId\" IS NOT NULL");
+            modelBuilder.Entity<Invoice>()
+                .HasIndex(i => i.ReplacesInvoiceId)
+                .IsUnique()
+                .HasFilter("\"ReplacesInvoiceId\" IS NOT NULL");
+
             modelBuilder.Entity<ProcessedWebhookEvent>()
                 .HasIndex(p => new { p.Source, p.Id });
 
