@@ -85,11 +85,18 @@ namespace garge_api.Services
 
             var sensorIds = states.Select(s => s.SensorId).ToList();
             var readingSensorIds = sensorIds.Concat(openLatches.Select(l => l.SensorId)).Distinct().ToList();
-            var latestReadings = await db.SensorData
-                .Where(d => readingSensorIds.Contains(d.SensorId))
-                .GroupBy(d => d.SensorId)
-                .Select(g => new { SensorId = g.Key, Last = g.Max(d => d.Timestamp) })
-                .ToDictionaryAsync(x => x.SensorId, x => x.Last, ct);
+            // One newest-row lookup per sensor uses the (SensorId, Timestamp) index directly. A grouped
+            // Max over all sensors reads every reading those sensors ever sent.
+            var latestReadings = new Dictionary<int, DateTime>();
+            foreach (var sensorId in readingSensorIds)
+            {
+                var last = await db.SensorData
+                    .Where(d => d.SensorId == sensorId)
+                    .OrderByDescending(d => d.Timestamp)
+                    .Select(d => (DateTime?)d.Timestamp)
+                    .FirstOrDefaultAsync(ct);
+                if (last != null) latestReadings[sensorId] = last.Value;
+            }
             var rows = await db.UserSensorSecurities
                 .Where(r => r.Enabled && sensorIds.Contains(r.SensorId))
                 .ToListAsync(ct);

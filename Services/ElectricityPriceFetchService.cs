@@ -176,8 +176,13 @@ namespace garge_api.Services
 
                         if (existing.TryGetValue(deliveryStart, out var row))
                         {
-                            row.Value = valueKwh;
-                            row.FetchedAt = fetchedAt;
+                            // Refetches return mostly unchanged prices. Rewriting those rows only leaves dead
+                            // tuples behind, so FetchedAt marks when the stored value last changed.
+                            if (row.Value != valueKwh)
+                            {
+                                row.Value = valueKwh;
+                                row.FetchedAt = fetchedAt;
+                            }
                         }
                         else
                         {

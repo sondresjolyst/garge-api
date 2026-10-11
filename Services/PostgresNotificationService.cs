@@ -153,12 +153,12 @@ namespace garge_api.Services
                 _dispatcher.EnqueueSensorForUser(userId, evt);
             }
 
-            // Voltage sensors get re-analyzed on every new reading. The
-            // analyzer self-filters by sensor type, so calling it for all
-            // sensors is cheap.
+            // Voltage sensors get re-analyzed on new readings, throttled per
+            // sensor. The analyzer self-filters by sensor type, so calling it
+            // for all sensors is cheap.
             try
             {
-                await _batteryAnalyzer.AnalyzeSensorAsync(sensorData.SensorId, ct);
+                await _batteryAnalyzer.AnalyzeSensorForReadingAsync(sensorData.SensorId, ct);
             }
             catch (Exception ex)
             {

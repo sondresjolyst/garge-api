@@ -92,17 +92,17 @@ namespace garge_api.Models
                 .IsUnique();
 
             modelBuilder.Entity<SensorData>()
-                .HasIndex(sd => sd.SensorId);
-
-            modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => sd.Timestamp);
 
+            // Including Value lets range reads for one sensor be answered from
+            // the index alone. The SensorId-only index it replaced was redundant.
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => new { sd.SensorId, sd.Timestamp })
-                .HasDatabaseName("IX_SensorData_SensorId_Timestamp");
+                .HasDatabaseName("IX_SensorData_SensorId_Timestamp")
+                .IncludeProperties(sd => sd.Value);
 
             modelBuilder.Entity<BatteryHealth>()
-                .HasIndex(bh => bh.SensorId);
+                .HasIndex(bh => new { bh.SensorId, bh.Timestamp });
 
             modelBuilder.Entity<BatteryChargeEvent>()
                 .HasIndex(e => new { e.SensorId, e.StartedAt })

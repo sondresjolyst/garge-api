@@ -8,9 +8,10 @@ namespace garge_api.Services
 {
     /// <summary>
     /// Server-side battery-health analyzer. Replaces the firmware's NVS
-    /// state machine. On every new <c>SensorData</c> insert for a voltage
-    /// sensor, recompute health metrics from the voltage stream and
-    /// upsert a new <c>BatteryHealth</c> row plus any newly-detected
+    /// state machine. On new <c>SensorData</c> inserts for a voltage
+    /// sensor, at most once per <see cref="ReadingAnalysisInterval"/>,
+    /// recompute health metrics from the voltage stream and upsert a new
+    /// <c>BatteryHealth</c> row plus any newly-detected
     /// <c>BatteryChargeEvents</c>.
     ///
     /// Trigger: piggybacks on the existing <c>sensordata_change_trigger</c>
@@ -28,6 +29,11 @@ namespace garge_api.Services
         private readonly ILogger<BatteryHealthAnalyzerService> _logger;
         private static readonly TimeSpan FallbackInterval = TimeSpan.FromHours(1);
         private static readonly TimeSpan StalenessThreshold = TimeSpan.FromMinutes(90);
+        // Each run reads up to 90 days of readings, and readings arrive every
+        // minute. The health metrics move over days, so analyzing every reading
+        // only repeats the same heavy query.
+        private static readonly TimeSpan ReadingAnalysisInterval = TimeSpan.FromMinutes(15);
+        private readonly PerKeyThrottle _readingThrottle = new(ReadingAnalysisInterval);
 
         // Long window: smooths historical lows. Used for peakResting daily
         // checkpoints, slope checkpoints, and charge-event detection baseline.
@@ -86,7 +92,18 @@ namespace garge_api.Services
         }
 
         /// <summary>
-        /// Public entry for the notification handler: analyze a single sensor.
+        /// Entry for the notification handler: analyze a sensor after a new
+        /// reading, unless it was analyzed within the last
+        /// <see cref="ReadingAnalysisInterval"/>.
+        /// </summary>
+        public Task AnalyzeSensorForReadingAsync(int sensorId, CancellationToken ct)
+        {
+            if (!_readingThrottle.TryEnter(sensorId)) return Task.CompletedTask;
+            return AnalyzeSensorAsync(sensorId, ct);
+        }
+
+        /// <summary>
+        /// Analyze a single sensor now. Used by the admin reanalyze endpoints.
         /// </summary>
         public async Task AnalyzeSensorAsync(int sensorId, CancellationToken ct)
         {
