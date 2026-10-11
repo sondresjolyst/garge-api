@@ -181,7 +181,7 @@ namespace garge_api
             builder.Services.AddSingleton<IAuthorizationHandler, ActiveSubscriptionHandler>();
             builder.Services.AddSingleton<IAuthorizationMiddlewareResultHandler, JsonForbidResultHandler>();
             builder.Services.Configure<AppOptions>(builder.Configuration.GetSection("App"));
-            builder.Services.Configure<VippsOptions>(builder.Configuration.GetSection("Vipps"));
+            builder.Services.Configure<VippsSettings>(builder.Configuration.GetSection("Vipps"));
             builder.Services.AddDataProtection()
                 .PersistKeysToDbContext<ApplicationDbContext>()
                 .SetApplicationName("garge-api");
@@ -209,7 +209,27 @@ namespace garge_api
             builder.Services.AddScoped<IAnonymizationService, AnonymizationService>();
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
-            builder.Services.AddHttpClient<IVippsService, VippsService>();
+            builder.Services.AddSingleton<IVippsEnvironment, GargeVippsEnvironment>();
+            builder.Services.AddVipps(_ => { });
+            builder.Services.AddOptions<VippsOptions>().Configure<Microsoft.Extensions.Options.IOptions<VippsSettings>>((vipps, settings) =>
+            {
+                var s = settings.Value;
+                vipps.Live = new VippsCredentials
+                {
+                    BaseUrl = s.BaseUrl, ClientId = s.ClientId, ClientSecret = s.ClientSecret,
+                    SubscriptionKey = s.SubscriptionKey, MerchantSerialNumber = s.MerchantSerialNumber,
+                };
+                vipps.Test = new VippsCredentials
+                {
+                    BaseUrl = s.TestBaseUrl, ClientId = s.TestClientId, ClientSecret = s.TestClientSecret,
+                    SubscriptionKey = s.TestSubscriptionKey, MerchantSerialNumber = s.TestMerchantSerialNumber,
+                };
+                var assembly = Assembly.GetExecutingAssembly();
+                vipps.SystemName = assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "garge";
+                vipps.SystemVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                    ?? assembly.GetName().Version?.ToString() ?? "1.0.0";
+            });
+            builder.Services.AddTransient<IVippsService, VippsService>();
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
             builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
             builder.Services.AddHostedService<SubscriptionChargeSchedulerService>();

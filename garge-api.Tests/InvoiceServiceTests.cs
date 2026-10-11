@@ -262,7 +262,7 @@ public class InvoiceServiceTests
     {
         var vipps = new Mock<IVippsService>();
         vipps.Setup(v => v.GetAgreementAsync("agr-test", isTest))
-            .ReturnsAsync(new VippsAgreementResponse { Id = "agr-test", Sub = "sub-env" });
+            .ReturnsAsync(new VippsAgreement { Id = "agr-test", Sub = "sub-env" });
         vipps.Setup(v => v.GetUserInfoAsync("sub-env", isTest))
             .ReturnsAsync(new VippsUserInfo { Address = new VippsAddress { Formatted = "Storgata 1, 0155 Oslo" } });
         var (svc, db, _, _) = Create(vipps: vipps);

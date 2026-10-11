@@ -15,23 +15,13 @@ public class VippsServiceTests
 {
     private static VippsService CreateService()
     {
-        var opts = Options.Create(new VippsOptions
-        {
-            ClientId = "id",
-            ClientSecret = "secret",
-            MerchantSerialNumber = "msn",
-            SubscriptionKey = "key",
-            BaseUrl = "https://apitest.vipps.no"
-        });
         var appOpts = Options.Create(new AppOptions
         {
             FrontendBaseUrl = "https://www.garge.no",
             ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
         });
-        var http = new HttpClient();
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var scopeFactory = new Mock<IServiceScopeFactory>().Object;
-        return new VippsService(http, opts, appOpts, cache, NullLogger<VippsService>.Instance, scopeFactory);
+        var client = new VippsClient(new HttpClient(), Options.Create(new VippsOptions()), new FixedVippsEnvironment(false), NullLogger<VippsClient>.Instance);
+        return new VippsService(client, appOpts, TimeProvider.System, NullLogger<VippsService>.Instance);
     }
 
     private static HttpRequest BuildRequest(string body, string secret, DateTimeOffset? when = null,
@@ -73,7 +63,7 @@ public class VippsServiceTests
         var body = """{"reference":"42","name":"AUTHORIZED"}""";
         var req = BuildRequest(body, "my-secret");
 
-        Assert.Equal(WebhookVerifyResult.Valid, svc.VerifyWebhookSignature(req, body, "my-secret"));
+        Assert.Equal(VippsWebhookResult.Valid, svc.VerifyWebhookSignature(req, body, "my-secret"));
     }
 
     [Fact]
@@ -83,7 +73,7 @@ public class VippsServiceTests
         var body = """{"reference":"42","name":"AUTHORIZED"}""";
         var req = BuildRequest(body, "correct-secret");
 
-        Assert.Equal(WebhookVerifyResult.BadSignature, svc.VerifyWebhookSignature(req, body, "wrong-secret"));
+        Assert.Equal(VippsWebhookResult.BadSignature, svc.VerifyWebhookSignature(req, body, "wrong-secret"));
     }
 
     [Fact]
@@ -94,7 +84,7 @@ public class VippsServiceTests
         var tampered = """{"reference":"99","name":"AUTHORIZED"}""";
         var req = BuildRequest(original, "secret");
 
-        Assert.Equal(WebhookVerifyResult.BadContentHash,
+        Assert.Equal(VippsWebhookResult.BadContentHash,
             svc.VerifyWebhookSignature(req, tampered, "secret"));
     }
 
@@ -105,7 +95,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", overrideAuth: "");
 
-        Assert.Equal(WebhookVerifyResult.MissingHeader, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookResult.MissingHeader, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -115,7 +105,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "real");
 
-        Assert.Equal(WebhookVerifyResult.MissingSecret, svc.VerifyWebhookSignature(req, body, string.Empty));
+        Assert.Equal(VippsWebhookResult.MissingSecret, svc.VerifyWebhookSignature(req, body, string.Empty));
     }
 
     [Theory]
@@ -128,14 +118,14 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
 
-        Assert.Equal(WebhookVerifyResult.Stale, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookResult.Stale, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
     public void ProcessedEvents_AreKeptLongerThanASignatureStaysValid()
     {
         // A replayed webhook is stopped by its processed-event marker, so the marker must outlive the signature.
-        Assert.True(ProcessedWebhookEventCleanupService.Retention > VippsService.MaxSignatureAge);
+        Assert.True(ProcessedWebhookEventCleanupService.Retention > VippsWebhookSignature.MaxAge);
     }
 
     [Theory]
@@ -150,7 +140,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
 
-        Assert.Equal(WebhookVerifyResult.Valid, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookResult.Valid, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -160,7 +150,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", overrideDate: "not-a-date");
 
-        Assert.Equal(WebhookVerifyResult.BadDate, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookResult.BadDate, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -171,7 +161,7 @@ public class VippsServiceTests
         var bogus = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes("other")));
         var req = BuildRequest(body, "secret", overrideContentHash: bogus);
 
-        Assert.Equal(WebhookVerifyResult.BadContentHash,
+        Assert.Equal(VippsWebhookResult.BadContentHash,
             svc.VerifyWebhookSignature(req, body, "secret"));
     }
 }

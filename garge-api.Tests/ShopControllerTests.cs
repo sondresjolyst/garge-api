@@ -27,16 +27,16 @@ public class ShopControllerTests : ControllerTestBase
                 It.IsAny<HttpRequest>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns((HttpRequest req, string body, string secret) =>
                 string.IsNullOrEmpty(secret)
-                    ? WebhookVerifyResult.MissingSecret
+                    ? VippsWebhookResult.MissingSecret
                     : (req.Headers["X-Test-Valid"] == "1"
                        && (string.IsNullOrEmpty(req.Headers["X-Test-Secret"]) || req.Headers["X-Test-Secret"] == secret)
-                        ? WebhookVerifyResult.Valid
-                        : WebhookVerifyResult.BadSignature));
+                        ? VippsWebhookResult.Valid
+                        : VippsWebhookResult.BadSignature));
         // Vipps reports the whole amount done unless a test says otherwise.
         mock.Setup(v => v.CapturePaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
-            .ReturnsAsync((string _, int amount, string _, bool? _) => new VippsPaymentResponse { CapturedAmountInOre = amount });
+            .ReturnsAsync((string _, int amount, string _, bool? _) => new VippsPayment { CapturedAmountInOre = amount });
         mock.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
-            .ReturnsAsync((string _, int amount, string _, bool? _) => new VippsPaymentResponse { CapturedAmountInOre = amount, RefundedAmountInOre = amount });
+            .ReturnsAsync((string _, int amount, string _, bool? _) => new VippsPayment { CapturedAmountInOre = amount, RefundedAmountInOre = amount });
         return mock;
     }
 
@@ -55,7 +55,7 @@ public class ShopControllerTests : ControllerTestBase
         return m;
     }
 
-    private static IOptions<VippsOptions> VippsOpts() => Options.Create(new VippsOptions
+    private static IOptions<VippsSettings> VippsOpts() => Options.Create(new VippsSettings
     {
         ClientId = "id", ClientSecret = "s", MerchantSerialNumber = "msn-prod",
         SubscriptionKey = "k", BaseUrl = "https://api.vipps.no",
@@ -335,7 +335,7 @@ public class ShopControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId, order.IsTest))
-            .ReturnsAsync(new VippsPaymentResponse
+            .ReturnsAsync(new VippsPayment
             {
                 Reference = order.VippsOrderId, State = "AUTHORIZED", ProfileSub = "sub-abc"
             });
@@ -385,7 +385,7 @@ public class ShopControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetPaymentAsync(order.VippsOrderId, order.IsTest))
-            .ReturnsAsync(new VippsPaymentResponse { Reference = order.VippsOrderId, State = "AUTHORIZED" });
+            .ReturnsAsync(new VippsPayment { Reference = order.VippsOrderId, State = "AUTHORIZED" });
 
         var payload = new
         {
@@ -891,7 +891,7 @@ public class ShopControllerTests : ControllerTestBase
     {
         var vipps = MockVipps();
         vipps.Setup(v => v.GetPaymentAsync(It.IsAny<string>(), It.IsAny<bool?>()))
-            .ReturnsAsync(new VippsPaymentResponse { CapturedAmountInOre = captured, RefundedAmountInOre = refunded });
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = captured, RefundedAmountInOre = refunded });
         return vipps;
     }
 
@@ -1090,7 +1090,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = MockVipps();
         vipps.Setup(v => v.CapturePaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
-            .ReturnsAsync(new VippsPaymentResponse { CapturedAmountInOre = 9999 });
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = 9999 });
 
         var result = await CreateController(db, vipps: vipps).CaptureOrder(order.Id);
 
@@ -1108,7 +1108,7 @@ public class ShopControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = MockVipps();
         vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
-            .ReturnsAsync(new VippsPaymentResponse { CapturedAmountInOre = 10000, RefundedAmountInOre = 5000 });
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = 10000, RefundedAmountInOre = 5000 });
 
         var result = await CreateController(db, vipps: vipps).RefundOrder(order.Id);
 

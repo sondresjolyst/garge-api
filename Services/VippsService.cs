@@ -1,477 +1,121 @@
-using garge_api.Models;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
-using System.Globalization;
-using System.Net.Http.Headers;
-using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 namespace garge_api.Services
 {
-    public class VippsService : IVippsService
+    /// <summary>Turns garge's products and orders into Vipps requests, sent through <see cref="IVippsClient"/>.</summary>
+    public partial class VippsService(IVippsClient client, IOptions<AppOptions> appOpts, TimeProvider time, ILogger<VippsService> logger) : IVippsService
     {
-        private readonly HttpClient _http;
-        private readonly VippsOptions _opts;
-        private readonly AppOptions _appOpts;
-        private readonly IMemoryCache _cache;
-        private readonly ILogger<VippsService> _logger;
-        private readonly IServiceScopeFactory _scopeFactory;
-        private readonly string _systemName;
-        private readonly string _systemVersion;
-
-        private const string TestModeCacheKey = "vipps_test_mode";
-        private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNameCaseInsensitive = true };
-        // Vipps retries a failed webhook for up to 7 days and does not document whether a retry is signed
-        // again, so a signed date may be that old. A replayed event is stopped by the processed-event
-        // check instead, which keeps events for 30 days, longer than this window.
-        internal static readonly TimeSpan MaxSignatureAge = TimeSpan.FromDays(8);
-        // How far a signed date may lie in the future, for clock differences.
-        private static readonly TimeSpan MaxClockAhead = TimeSpan.FromMinutes(5);
         // Older signatures are accepted, and logged so the logs show how Vipps signs its retries.
         private static readonly TimeSpan FreshSignatureAge = TimeSpan.FromMinutes(5);
-        private static readonly Regex SigRegex = new(@"Signature=([^,&\s]+)", RegexOptions.Compiled);
 
-        private readonly record struct VippsEffective(string BaseUrl, string Token, string SubscriptionKey, string Msn, bool IsTest);
-
-        public VippsService(
-            HttpClient http,
-            IOptions<VippsOptions> opts,
-            IOptions<AppOptions> appOpts,
-            IMemoryCache cache,
-            ILogger<VippsService> logger,
-            IServiceScopeFactory scopeFactory)
-        {
-            _http = http;
-            _opts = opts.Value;
-            _appOpts = appOpts.Value;
-            _cache = cache;
-            _logger = logger;
-            _scopeFactory = scopeFactory;
-
-            var assembly = Assembly.GetExecutingAssembly();
-            _systemName = SystemHeader(assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "garge");
-            _systemVersion = SystemHeader(assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-                             ?? assembly.GetName().Version?.ToString()
-                             ?? "1.0.0");
-        }
-
-        private async Task<bool> IsTestModeAsync()
-        {
-            if (_cache.TryGetValue(TestModeCacheKey, out bool cached))
-                return cached;
-
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var settings = await db.AppSettings.FindAsync(1);
-            var isTest = settings?.VippsTestMode ?? false;
-            _cache.Set(TestModeCacheKey, isTest, TimeSpan.FromSeconds(30));
-            return isTest;
-        }
-
-        private async Task<VippsEffective> GetEffectiveAsync(bool? isTestOverride = null)
-        {
-            var isTest = isTestOverride ?? await IsTestModeAsync();
-
-            string baseUrl, clientId, clientSecret, msn, subKey, cacheKey;
-            if (isTest)
-            {
-                baseUrl      = _opts.TestBaseUrl;
-                clientId     = _opts.TestClientId;
-                clientSecret = _opts.TestClientSecret;
-                msn          = _opts.TestMerchantSerialNumber;
-                subKey       = _opts.TestSubscriptionKey;
-                cacheKey     = "vipps_token_test";
-            }
-            else
-            {
-                baseUrl      = _opts.BaseUrl;
-                clientId     = _opts.ClientId;
-                clientSecret = _opts.ClientSecret;
-                msn          = _opts.MerchantSerialNumber;
-                subKey       = _opts.SubscriptionKey;
-                cacheKey     = "vipps_token_live";
-            }
-
-            if (!_cache.TryGetValue(cacheKey, out string? token) || token == null)
-                token = await FetchTokenAsync(baseUrl, clientId, clientSecret, subKey, cacheKey);
-
-            return new VippsEffective(baseUrl, token, subKey, msn, isTest);
-        }
-
-        private async Task<string> FetchTokenAsync(
-            string baseUrl, string clientId, string clientSecret, string subscriptionKey, string cacheKey)
-        {
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/accesstoken/get");
-            request.Headers.Add("client_id", clientId);
-            request.Headers.Add("client_secret", clientSecret);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", subscriptionKey);
-            request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "accesstoken/get");
-            using var doc = JsonDocument.Parse(json);
-            var token = doc.RootElement.GetProperty("access_token").GetString()!;
-
-            var expiresIn = 3600;
-            if (doc.RootElement.TryGetProperty("expires_in", out var exp))
-            {
-                var expStr = exp.ValueKind == JsonValueKind.String ? exp.GetString() : exp.GetRawText();
-                if (!int.TryParse(expStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out expiresIn))
-                    expiresIn = 3600;
-            }
-
-            _cache.Set(cacheKey, token, TimeSpan.FromSeconds(Math.Max(60, expiresIn - 60)));
-            _logger.LogInformation("Vipps access token refreshed ({CacheKey}), expires in {ExpiresIn}s", cacheKey, expiresIn);
-            return token;
-        }
-
-        public async Task<string> GetAccessTokenAsync()
-        {
-            return (await GetEffectiveAsync()).Token;
-        }
-
-        public async Task<VippsCreateAgreementResponse> CreateAgreementAsync(
+        public Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
             int unitPriceInOre, int quantity, string idempotencyKey)
         {
-            var e = await GetEffectiveAsync();
-
-            // VARIABLE pricing: user approves a ceiling equal to the current
-            // unit*quantity. Each scheduled charge may be at most that ceiling.
-            // Raising quantity later PATCHes the ceiling (Vipps re-asks the user);
-            // lowering quantity is a DB-only change since charges stay under the cap.
-            var suggestedMaxAmount = CheckedAgreementAmount((long)unitPriceInOre * quantity);
-            var initialAmount = suggestedMaxAmount;
-
-            // Vipps caps productDescription at 100 chars (validation-error otherwise).
-            // Our descriptions may contain markdown up to 2000 chars; truncate plainly.
-            var productDescription = Truncate(product.Description ?? string.Empty, 100);
-
-            var body = new
+            // VARIABLE pricing: the user approves a ceiling equal to the current unit price times the
+            // quantity, and each charge may be at most that. Raising the quantity later raises the
+            // ceiling, which Vipps asks the user to approve. Lowering it is a database change only.
+            var ceiling = CheckedAgreementAmount((long)unitPriceInOre * quantity);
+            return client.CreateAgreementAsync(new VippsCreateAgreementRequest
             {
-                pricing = new
-                {
-                    type = "VARIABLE",
-                    suggestedMaxAmount,
-                    currency = "NOK"
-                },
-                interval = new
-                {
-                    unit = product.Interval == BillingInterval.Monthly ? "MONTH" : "YEAR",
-                    count = 1
-                },
-                initialCharge = new
-                {
-                    amount = initialAmount,
-                    description = product.Name,
-                    transactionType = "DIRECT_CAPTURE"
-                },
-                merchantRedirectUrl = redirectUrl,
-                merchantAgreementUrl = $"{_appOpts.FrontendBaseUrl}/terms",
-                productName = Truncate(product.Name, 45),
-                productDescription,
-                phoneNumber,
-                scope = "name address email phoneNumber"
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/recurring/v3/agreements");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(body);
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-agreement");
-            var agreement = JsonSerializer.Deserialize<VippsCreateAgreementResponse>(json, _jsonOpts)!;
-            agreement.IsTest = e.IsTest;
-            return agreement;
+                ProductName = product.Name,
+                // Descriptions are markdown of up to 2000 characters. The client cuts them plainly.
+                ProductDescription = product.Description,
+                SuggestedMaxAmountInOre = ceiling,
+                InitialChargeInOre = ceiling,
+                InitialChargeDescription = product.Name,
+                Interval = product.Interval == BillingInterval.Monthly ? VippsInterval.Month : VippsInterval.Year,
+                MerchantRedirectUrl = redirectUrl,
+                MerchantAgreementUrl = $"{appOpts.Value.FrontendBaseUrl}/terms",
+                PhoneNumber = phoneNumber,
+            }, idempotencyKey);
         }
 
-        public async Task<VippsCreateChargeResponse> CreateChargeAsync(
+        public Task<VippsAgreement> GetAgreementAsync(string agreementId, bool? isTest = null) =>
+            client.GetAgreementAsync(agreementId, isTest);
+
+        public Task CancelAgreementAsync(string agreementId, string idempotencyKey, bool? isTest = null) =>
+            client.StopAgreementAsync(agreementId, idempotencyKey, isTest);
+
+        public Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey, bool? isTest = null) =>
+            client.UpdateAgreementMaxAmountAsync(agreementId, newMaxAmountInOre, idempotencyKey, isTest);
+
+        public Task<VippsCreateChargeResponse> CreateChargeAsync(
             string agreementId, int amountInOre, DateTime dueDate,
-            string description, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-
-            var minDue = DateTime.UtcNow.Date.AddDays(2);
-            if (dueDate.Date < minDue) dueDate = minDue;
-
-            var orderId = idempotencyKey.Length <= 50 ? idempotencyKey : idempotencyKey[..50];
-
-            var body = new
+            string description, string idempotencyKey, bool? isTest = null) =>
+            // The idempotency key doubles as the charge's order id, which Vipps makes its charge id.
+            client.CreateChargeAsync(agreementId, new VippsCreateChargeRequest
             {
-                amount = amountInOre,
-                transactionType = "DIRECT_CAPTURE",
-                type = "RECURRING",
-                description,
-                due = dueDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                retryDays = 5,
-                orderId
-            };
+                AmountInOre = amountInOre,
+                Due = dueDate,
+                Description = description,
+                OrderId = idempotencyKey,
+            }, idempotencyKey, isTest);
 
-            var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}/charges");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(body);
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-charge");
-            return JsonSerializer.Deserialize<VippsCreateChargeResponse>(json, _jsonOpts)!;
-        }
-
-        public async Task<VippsAgreementResponse> GetAgreementAsync(string agreementId, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-
-            var request = new HttpRequestMessage(HttpMethod.Get,
-                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, e);
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-agreement");
-            return JsonSerializer.Deserialize<VippsAgreementResponse>(json, _jsonOpts)!;
-        }
-
-        public async Task CancelAgreementAsync(string agreementId, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-
-            var request = new HttpRequestMessage(HttpMethod.Patch,
-                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(new { status = "STOPPED" });
-
-            var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "cancel-agreement");
-        }
-
-        public async Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-
-            var request = new HttpRequestMessage(HttpMethod.Patch,
-                $"{e.BaseUrl}/recurring/v3/agreements/{agreementId}");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(new
-            {
-                pricing = new { suggestedMaxAmount = CheckedAgreementAmount(newMaxAmountInOre) }
-            });
-
-            var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "update-agreement-max-amount");
-        }
-
-        public async Task<VippsCreatePaymentResponse> CreatePaymentAsync(
+        public Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
-            string phoneNumber, string idempotencyKey)
-        {
-            var e = await GetEffectiveAsync();
-
-            var reference = $"garge-order-{order.Id:D6}";
-            var body = new
+            string phoneNumber, string idempotencyKey) =>
+            client.CreatePaymentAsync(new VippsCreatePaymentRequest
             {
-                amount = new { value = order.TotalInOre, currency = "NOK" },
-                paymentMethod = new { type = "WALLET" },
-                customer = new { phoneNumber },
-                reference,
-                returnUrl = $"{redirectUrl}?orderId={order.Id}",
-                userFlow = "WEB_REDIRECT",
-                paymentDescription = $"Garge order #{order.Id}",
-                captureType = "RESERVE_CAPTURE",
-                receipt = new
+                Reference = $"garge-order-{order.Id:D6}",
+                AmountInOre = order.TotalInOre,
+                PhoneNumber = phoneNumber,
+                ReturnUrl = $"{redirectUrl}?orderId={order.Id}",
+                Description = $"Garge order #{order.Id}",
+                ReceiptLines = receiptLines.Select(l => new VippsReceiptLine
                 {
-                    orderLines = receiptLines.Select(l =>
-                    {
-                        var lineTotal = l.UnitPriceInOre * l.Quantity;
-                        // The VAT is split from the line total, the same way the invoice does it.
-                        var excludingTax = Pricing.Split(lineTotal, l.TaxPercentageBasisPoints / 100).ExclVat;
-                        return new
-                        {
-                            name = l.Name,
-                            id = l.Id,
-                            totalAmount = lineTotal,
-                            totalAmountExcludingTax = excludingTax,
-                            totalTaxAmount = lineTotal - excludingTax,
-                            taxRate = l.TaxPercentageBasisPoints,
-                            unitInfo = new
-                            {
-                                unitPrice = l.UnitPriceInOre,
-                                quantity = l.Quantity.ToString(),
-                                quantityUnit = "PCS"
-                            },
-                            discount = 0,
-                            isReturn = false,
-                            isShipping = false
-                        };
-                    }),
-                    bottomLine = new { currency = "NOK", receiptNumber = reference }
-                },
-                profile = new { scope = "name address email phoneNumber" }
-            };
+                    Id = l.Id,
+                    Name = l.Name,
+                    UnitPriceInOre = l.UnitPriceInOre,
+                    Quantity = l.Quantity,
+                    TaxRateBasisPoints = l.TaxPercentageBasisPoints,
+                }).ToList(),
+            }, idempotencyKey);
 
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/epayment/v1/payments");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(body);
+        public Task<VippsPayment> GetPaymentAsync(string reference, bool? isTest = null) =>
+            client.GetPaymentAsync(reference, isTest);
 
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "create-payment");
-            var created = JsonSerializer.Deserialize<VippsCreatePaymentResponse>(json, _jsonOpts)!;
-            created.IsTest = e.IsTest;
-            return created;
+        public Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null) =>
+            client.GetUserInfoAsync(sub, isTest);
+
+        public Task<VippsPayment> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null) =>
+            client.CapturePaymentAsync(reference, amountInOre, idempotencyKey, isTest);
+
+        public Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null) =>
+            client.CancelPaymentAsync(reference, idempotencyKey, isTest);
+
+        public Task<VippsPayment> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null) =>
+            client.RefundPaymentAsync(reference, amountInOre, idempotencyKey, isTest);
+
+        public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest)
+        {
+            var registered = await client.RegisterWebhookAsync(url, events, isTest);
+            return (registered.Id, registered.Secret);
         }
 
-        public async Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null)
+        public Task<IReadOnlyList<VippsWebhook>> ListWebhooksAsync(bool isTest) => client.ListWebhooksAsync(isTest);
+
+        public Task DeleteWebhookAsync(string webhookId, bool isTest) => client.DeleteWebhookAsync(webhookId, isTest);
+
+        public VippsWebhookResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
         {
-            var e = await GetEffectiveAsync(isTest);
-
-            var request = new HttpRequestMessage(HttpMethod.Get,
-                $"{e.BaseUrl}/epayment/v1/payments/{reference}");
-            AddCommonHeaders(request, e);
-
-            var response = await _http.SendAsync(request);
-            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "get-payment"));
-        }
-
-        private VippsPaymentResponse ToPaymentResponse(string json)
-        {
-            var dto = JsonSerializer.Deserialize<PaymentApiDto>(json, _jsonOpts) ?? new PaymentApiDto();
-            return new VippsPaymentResponse
+            var host = request.Headers.Host.ToString();
+            var result = VippsWebhookSignature.Verify(new VippsWebhookRequest
             {
-                Reference = dto.Reference ?? string.Empty,
-                State = dto.State ?? string.Empty,
-                ProfileSub = dto.Profile?.Sub,
-                CapturedAmountInOre = dto.Aggregate?.CapturedAmount?.Value ?? 0,
-                RefundedAmountInOre = dto.Aggregate?.RefundedAmount?.Value ?? 0,
-                CancelledAmountInOre = dto.Aggregate?.CancelledAmount?.Value ?? 0
-            };
-        }
+                Method = request.Method,
+                PathAndQuery = request.Path.Value + request.QueryString.Value,
+                Host = string.IsNullOrEmpty(host) ? request.Host.Value ?? string.Empty : host,
+                Authorization = request.Headers.Authorization.ToString(),
+                Date = request.Headers["x-ms-date"].ToString(),
+                ContentSha256 = request.Headers["x-ms-content-sha256"].ToString(),
+                Body = rawBody,
+            }, secret, time.GetUtcNow());
 
-        public async Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null)
-        {
-            if (string.IsNullOrEmpty(sub)) return null;
-
-            var e = await GetEffectiveAsync(isTest);
-            var request = new HttpRequestMessage(HttpMethod.Get,
-                $"{e.BaseUrl}/vipps-userinfo-api/userinfo/{sub}");
-            AddCommonHeaders(request, e);
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "get-userinfo");
-            var dto = JsonSerializer.Deserialize<UserInfoApiDto>(json, _jsonOpts);
-            if (dto == null) return null;
-
-            return new VippsUserInfo
-            {
-                Name = dto.Name,
-                Email = dto.Email,
-                PhoneNumber = dto.PhoneNumber,
-                Address = dto.Address == null ? null : new VippsAddress
-                {
-                    StreetAddress = dto.Address.StreetAddress,
-                    PostalCode = dto.Address.PostalCode,
-                    Region = dto.Address.Region,
-                    Country = dto.Address.Country,
-                    Formatted = dto.Address.Formatted
-                }
-            };
-        }
-
-        private sealed class PaymentApiDto
-        {
-            public string? Reference { get; set; }
-            public string? State { get; set; }
-            public PaymentProfileApiDto? Profile { get; set; }
-            public PaymentAggregateApiDto? Aggregate { get; set; }
-        }
-
-        private sealed class PaymentAggregateApiDto
-        {
-            public PaymentAmountApiDto? CapturedAmount { get; set; }
-            public PaymentAmountApiDto? RefundedAmount { get; set; }
-            public PaymentAmountApiDto? CancelledAmount { get; set; }
-        }
-
-        private sealed class PaymentAmountApiDto
-        {
-            public int Value { get; set; }
-        }
-
-        private sealed class PaymentProfileApiDto
-        {
-            public string? Sub { get; set; }
-        }
-
-        private sealed class UserInfoApiDto
-        {
-            public string? Name { get; set; }
-            public string? Email { get; set; }
-
-            [JsonPropertyName("phone_number")]
-            public string? PhoneNumber { get; set; }
-
-            public AddressApiDto? Address { get; set; }
-        }
-
-        private sealed class AddressApiDto
-        {
-            [JsonPropertyName("street_address")]
-            public string? StreetAddress { get; set; }
-
-            [JsonPropertyName("postal_code")]
-            public string? PostalCode { get; set; }
-
-            public string? Region { get; set; }
-            public string? Country { get; set; }
-            public string? Formatted { get; set; }
-        }
-
-        public async Task<VippsPaymentResponse> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
-            var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{e.BaseUrl}/epayment/v1/payments/{reference}/capture");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(body);
-            var response = await _http.SendAsync(request);
-            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "capture-payment"));
-        }
-
-        public async Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{e.BaseUrl}/epayment/v1/payments/{reference}/cancel");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(new { });
-            var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "cancel-payment");
-        }
-
-        public async Task<VippsPaymentResponse> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var body = new { modificationAmount = new { value = amountInOre, currency = "NOK" } };
-            var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{e.BaseUrl}/epayment/v1/payments/{reference}/refund");
-            AddCommonHeaders(request, e, idempotencyKey);
-            request.Content = BuildJsonContent(body);
-            var response = await _http.SendAsync(request);
-            return ToPaymentResponse(await ReadAsStringAndEnsureSuccessAsync(response, "refund-payment"));
-        }
-
-        // Vipps takes a productName of at most 45 characters and a productDescription of at most 100.
-        // A cut never splits a character made of two UTF-16 units.
-        internal static string Truncate(string value, int max)
-        {
-            if (value.Length <= max) return value;
-            var cut = char.IsHighSurrogate(value[max - 1]) ? max - 1 : max;
-            return value[..cut];
+            if (result.IsValid && result.Age > FreshSignatureAge)
+                LogOldSignature(logger, result.Age.TotalMinutes);
+            return result.Result;
         }
 
         private static int CheckedAgreementAmount(long amountInOre) =>
@@ -480,174 +124,7 @@ namespace garge_api.Services
                 : throw new ArgumentOutOfRangeException(nameof(amountInOre), amountInOre,
                     $"A Vipps agreement amount must be between 1 and {SubscriptionCharges.MaxAgreementAmountInOre} øre.");
 
-        public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var body = new { url, events };
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{e.BaseUrl}/webhooks/v1/webhooks");
-            AddCommonHeaders(request, e, Guid.NewGuid().ToString());
-            request.Content = BuildJsonContent(body);
-
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "register-webhook");
-            using var doc = JsonDocument.Parse(json);
-            var id = doc.RootElement.GetProperty("id").GetString()!;
-            var secret = doc.RootElement.GetProperty("secret").GetString()!;
-            return (id, secret);
-        }
-
-        public async Task<IReadOnlyList<VippsWebhookInfo>> ListWebhooksAsync(bool isTest)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var request = new HttpRequestMessage(HttpMethod.Get, $"{e.BaseUrl}/webhooks/v1/webhooks");
-            AddCommonHeaders(request, e);
-            var response = await _http.SendAsync(request);
-            var json = await ReadAsStringAndEnsureSuccessAsync(response, "list-webhooks");
-            using var doc = JsonDocument.Parse(json);
-            var list = new List<VippsWebhookInfo>();
-            if (doc.RootElement.TryGetProperty("webhooks", out var hooks) && hooks.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var hook in hooks.EnumerateArray())
-                {
-                    list.Add(new VippsWebhookInfo
-                    {
-                        Id = hook.TryGetProperty("id", out var id) ? id.GetString() ?? string.Empty : string.Empty,
-                        Url = hook.TryGetProperty("url", out var url) ? url.GetString() ?? string.Empty : string.Empty
-                    });
-                }
-            }
-            return list;
-        }
-
-        public async Task DeleteWebhookAsync(string webhookId, bool isTest)
-        {
-            var e = await GetEffectiveAsync(isTest);
-            var request = new HttpRequestMessage(HttpMethod.Delete, $"{e.BaseUrl}/webhooks/v1/webhooks/{webhookId}");
-            AddCommonHeaders(request, e);
-            var response = await _http.SendAsync(request);
-            await ReadAsStringAndEnsureSuccessAsync(response, "delete-webhook");
-        }
-
-        public WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
-        {
-            if (string.IsNullOrEmpty(secret))
-                return WebhookVerifyResult.MissingSecret;
-
-            var auth = request.Headers["Authorization"].ToString();
-            if (string.IsNullOrEmpty(auth) || !auth.StartsWith("HMAC-SHA256 ", StringComparison.Ordinal))
-                return WebhookVerifyResult.MissingHeader;
-
-            var sigMatch = SigRegex.Match(auth);
-            if (!sigMatch.Success) return WebhookVerifyResult.MissingHeader;
-            var receivedSig = sigMatch.Groups[1].Value;
-
-            var dateHeader = request.Headers["x-ms-date"].ToString();
-            var contentHashHeader = request.Headers["x-ms-content-sha256"].ToString();
-            if (string.IsNullOrEmpty(dateHeader) || string.IsNullOrEmpty(contentHashHeader))
-                return WebhookVerifyResult.MissingHeader;
-
-            if (!DateTimeOffset.TryParse(dateHeader, CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var sentAt))
-                return WebhookVerifyResult.BadDate;
-            var age = DateTimeOffset.UtcNow - sentAt;
-            if (age > MaxSignatureAge || -age > MaxClockAhead)
-                return WebhookVerifyResult.Stale;
-
-            // Content hash check
-            var bodyHashBase64 = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(rawBody)));
-            if (!CryptographicOperations.FixedTimeEquals(
-                    Encoding.ASCII.GetBytes(bodyHashBase64),
-                    Encoding.ASCII.GetBytes(contentHashHeader)))
-                return WebhookVerifyResult.BadContentHash;
-
-            // Canonical: METHOD\n<pathAndQuery>\n<x-ms-date>;<host>;<x-ms-content-sha256>
-            var pathAndQuery = request.Path.Value + request.QueryString.Value;
-            var host = request.Headers["Host"].ToString();
-            if (string.IsNullOrEmpty(host)) host = request.Host.Value ?? string.Empty;
-            var canonical = $"{request.Method}\n{pathAndQuery}\n{dateHeader};{host};{contentHashHeader}";
-
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var computed = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(canonical)));
-
-            var valid = CryptographicOperations.FixedTimeEquals(
-                Encoding.ASCII.GetBytes(computed),
-                Encoding.ASCII.GetBytes(receivedSig));
-            if (valid && age > FreshSignatureAge)
-                _logger.LogWarning("Vipps webhook signed {AgeMinutes:F0} minutes ago accepted, as a retry may keep its first signature",
-                    age.TotalMinutes);
-            return valid
-                ? WebhookVerifyResult.Valid
-                : WebhookVerifyResult.BadSignature;
-        }
-
-        // Vipps-System-Name and Vipps-System-Version take at most 30 characters. The build metadata
-        // after a '+', such as a commit hash, is left out.
-        internal static string SystemHeader(string value)
-        {
-            var plus = value.IndexOf('+');
-            if (plus >= 0) value = value[..plus];
-            return value.Length <= 30 ? value : value[..30];
-        }
-
-        private void AddCommonHeaders(HttpRequestMessage request, VippsEffective e, string? idempotencyKey = null)
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", e.Token);
-            request.Headers.Add("Ocp-Apim-Subscription-Key", e.SubscriptionKey);
-            request.Headers.Add("Merchant-Serial-Number", e.Msn);
-            request.Headers.Add("Vipps-System-Name", _systemName);
-            request.Headers.Add("Vipps-System-Version", _systemVersion);
-            if (!string.IsNullOrEmpty(idempotencyKey))
-                request.Headers.Add("Idempotency-Key", idempotencyKey);
-        }
-
-        private static StringContent BuildJsonContent(object body) =>
-            new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-
-        private static (string? errorCode, string? errorRef, string? traceId) TryExtractVippsErrorIds(string body)
-        {
-            if (string.IsNullOrEmpty(body)) return (null, null, null);
-            try
-            {
-                using var doc = JsonDocument.Parse(body);
-                var root = doc.RootElement;
-                string? errorCode = null, errorRef = null, traceId = null;
-                if (root.ValueKind == JsonValueKind.Object)
-                {
-                    if (root.TryGetProperty("errorCode", out var ec) && ec.ValueKind == JsonValueKind.String) errorCode = ec.GetString();
-                    if (root.TryGetProperty("errorRef", out var er) && er.ValueKind == JsonValueKind.String) errorRef = er.GetString();
-                    if (root.TryGetProperty("traceId", out var ti) && ti.ValueKind == JsonValueKind.String) traceId = ti.GetString();
-                }
-                return (errorCode, errorRef, traceId);
-            }
-            catch
-            {
-                return (null, null, null);
-            }
-        }
-
-        private async Task<string> ReadAsStringAndEnsureSuccessAsync(HttpResponseMessage response, string operation)
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode)
-            {
-                // Body may echo phone, agreementId, name etc. Prefer logging Vipps's
-                // own identifiers (errorCode/ref/traceId) so PII doesn't land in log
-                // sinks. Fall back to the raw body when none are present — happens
-                // for problem+json shapes that don't use Vipps's legacy error envelope.
-                var (errorCode, errorRef, traceId) = TryExtractVippsErrorIds(body);
-                if (errorCode == null && errorRef == null && traceId == null)
-                {
-                    _logger.LogError("Vipps {Operation} failed: {Status} body={Body}",
-                        operation, (int)response.StatusCode, body);
-                }
-                else
-                {
-                    _logger.LogError("Vipps {Operation} failed: {Status} ErrorCode={ErrorCode} ErrorRef={ErrorRef} TraceId={TraceId}",
-                        operation, (int)response.StatusCode, errorCode ?? "-", errorRef ?? "-", traceId ?? "-");
-                }
-                response.EnsureSuccessStatusCode();
-            }
-            return body;
-        }
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Vipps webhook signed {AgeMinutes:F0} minutes ago accepted, as a retry may keep its first signature")]
+        private static partial void LogOldSignature(ILogger logger, double ageMinutes);
     }
 }

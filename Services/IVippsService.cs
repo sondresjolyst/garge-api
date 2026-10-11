@@ -3,82 +3,7 @@ using garge_api.Models.Subscription;
 
 namespace garge_api.Services
 {
-    public enum WebhookVerifyResult
-    {
-        Valid,
-        MissingSecret,
-        MissingHeader,
-        BadDate,
-        Stale,
-        BadContentHash,
-        BadSignature
-    }
-
-    public class VippsCreateAgreementResponse
-    {
-        public string AgreementId { get; set; } = string.Empty;
-        public string VippsConfirmationUrl { get; set; } = string.Empty;
-        /// <summary>Whether the agreement was created with the test credentials.</summary>
-        public bool IsTest { get; set; }
-    }
-
-    public class VippsCreateChargeResponse
-    {
-        public string ChargeId { get; set; } = string.Empty;
-    }
-
-    public class VippsAgreementResponse
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Status { get; set; } = string.Empty;
-        public string ProductName { get; set; } = string.Empty;
-        public DateTime? Start { get; set; }
-        public DateTime? Stop { get; set; }
-        public string? Sub { get; set; }
-    }
-
-    public class VippsCreatePaymentResponse
-    {
-        public string RedirectUrl { get; set; } = string.Empty;
-        public string Reference { get; set; } = string.Empty;
-        /// <summary>Whether the payment was created with the test credentials.</summary>
-        public bool IsTest { get; set; }
-    }
-
-    public class VippsPaymentResponse
-    {
-        public string Reference { get; set; } = string.Empty;
-        public string State { get; set; } = string.Empty;
-        public string? ProfileSub { get; set; }
-        /// <summary>Totals over every capture, refund and cancel on the payment so far, in øre.</summary>
-        public int CapturedAmountInOre { get; set; }
-        public int RefundedAmountInOre { get; set; }
-        public int CancelledAmountInOre { get; set; }
-    }
-
-    public class VippsUserInfo
-    {
-        public string? Name { get; set; }
-        public string? Email { get; set; }
-        public string? PhoneNumber { get; set; }
-        public VippsAddress? Address { get; set; }
-    }
-
-    public class VippsAddress
-    {
-        public string? StreetAddress { get; set; }
-        public string? PostalCode { get; set; }
-        public string? Region { get; set; }
-        public string? Country { get; set; }
-        public string? Formatted { get; set; }
-    }
-
-    public class VippsWebhookInfo
-    {
-        public string Id { get; set; } = string.Empty;
-        public string Url { get; set; } = string.Empty;
-    }
-
+    /// <summary>One line of a shop order, as the receipt in Vipps shows it.</summary>
     public class VippsOrderLine
     {
         public string Name { get; set; } = string.Empty;
@@ -86,20 +11,18 @@ namespace garge_api.Services
         public int UnitPriceInOre { get; set; }
         public int UnitPriceExclVatInOre { get; set; }
         public int Quantity { get; set; }
-        /// <summary>VAT in basis points (Vipps spec: 0..10000, where 2500 = 25%).</summary>
         public int TaxPercentageBasisPoints { get; set; }
     }
 
+    /// <summary>The Vipps calls garge makes, in terms of its own products, orders and requests.</summary>
     public interface IVippsService
     {
-        Task<string> GetAccessTokenAsync();
-
         Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
             int unitPriceInOre, int quantity, string idempotencyKey);
         // Calls on an existing payment or agreement take the environment it was created in. Null means
         // the current test mode, for calls that create something new.
-        Task<VippsAgreementResponse> GetAgreementAsync(string agreementId, bool? isTest = null);
+        Task<VippsAgreement> GetAgreementAsync(string agreementId, bool? isTest = null);
         Task CancelAgreementAsync(string agreementId, string idempotencyKey, bool? isTest = null);
         Task UpdateAgreementMaxAmountAsync(string agreementId, int newMaxAmountInOre, string idempotencyKey, bool? isTest = null);
 
@@ -110,18 +33,15 @@ namespace garge_api.Services
         Task<VippsCreatePaymentResponse> CreatePaymentAsync(
             Order order, List<VippsOrderLine> receiptLines, string redirectUrl,
             string phoneNumber, string idempotencyKey);
-        /// <summary>Reads a payment. Pass the environment the payment was created in, or null for the current one.</summary>
-        Task<VippsPaymentResponse> GetPaymentAsync(string reference, bool? isTest = null);
+        Task<VippsPayment> GetPaymentAsync(string reference, bool? isTest = null);
         Task<VippsUserInfo?> GetUserInfoAsync(string sub, bool? isTest = null);
-        /// <summary>Captures the amount and returns the payment's totals after the capture.</summary>
-        Task<VippsPaymentResponse> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        Task<VippsPayment> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
         Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null);
-        /// <summary>Refunds the amount and returns the payment's totals after the refund.</summary>
-        Task<VippsPaymentResponse> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        Task<VippsPayment> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
 
-        Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, string[] events, bool isTest);
-        Task<IReadOnlyList<VippsWebhookInfo>> ListWebhooksAsync(bool isTest);
+        Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest);
+        Task<IReadOnlyList<VippsWebhook>> ListWebhooksAsync(bool isTest);
         Task DeleteWebhookAsync(string webhookId, bool isTest);
-        WebhookVerifyResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
+        VippsWebhookResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
     }
 }

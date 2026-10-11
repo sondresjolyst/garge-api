@@ -8,14 +8,14 @@ namespace garge_api.Services
     public class SubscriptionChargeSchedulerService : BackgroundService
     {
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly VippsOptions _vippsOpts;
+        private readonly VippsSettings _vippsOpts;
         private readonly ILogger<SubscriptionChargeSchedulerService> _logger;
         private static readonly TimeSpan Interval = TimeSpan.FromDays(1);
         private static readonly TimeSpan Lookahead = TimeSpan.FromDays(7);
 
         public SubscriptionChargeSchedulerService(
             IServiceScopeFactory scopeFactory,
-            IOptions<VippsOptions> vippsOpts,
+            IOptions<VippsSettings> vippsOpts,
             ILogger<SubscriptionChargeSchedulerService> logger)
         {
             _scopeFactory = scopeFactory;

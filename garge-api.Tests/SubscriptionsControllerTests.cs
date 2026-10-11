@@ -25,11 +25,11 @@ public class SubscriptionsControllerTests : ControllerTestBase
                 It.IsAny<HttpRequest>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns((HttpRequest req, string body, string secret) =>
                 string.IsNullOrEmpty(secret)
-                    ? WebhookVerifyResult.MissingSecret
+                    ? VippsWebhookResult.MissingSecret
                     : (req.Headers["X-Test-Valid"] == "1"
                        && (string.IsNullOrEmpty(req.Headers["X-Test-Secret"]) || req.Headers["X-Test-Secret"] == secret)
-                        ? WebhookVerifyResult.Valid
-                        : WebhookVerifyResult.BadSignature));
+                        ? VippsWebhookResult.Valid
+                        : VippsWebhookResult.BadSignature));
         return mock;
     }
 
@@ -48,7 +48,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         return m;
     }
 
-    private static IOptions<VippsOptions> VippsOpts() => Options.Create(new VippsOptions
+    private static IOptions<VippsSettings> VippsOpts() => Options.Create(new VippsSettings
     {
         ClientId = "id", ClientSecret = "s", SubscriptionKey = "k", BaseUrl = "https://api.vipps.no",
         MerchantSerialNumber = "msn-prod",
@@ -256,7 +256,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr1", false))
-            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr1", Sub = "sub-x" });
+            .ReturnsAsync(new VippsAgreement { Id = "agr_addr1", Sub = "sub-x" });
         vipps.Setup(v => v.GetUserInfoAsync("sub-x", false))
             .ReturnsAsync(new VippsUserInfo
             {
@@ -296,7 +296,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr2", false))
-            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr2", Sub = null });
+            .ReturnsAsync(new VippsAgreement { Id = "agr_addr2", Sub = null });
 
         var payload = new
         {
@@ -332,7 +332,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var vipps = MockVipps();
         vipps.Setup(v => v.GetAgreementAsync("agr_addr3", false))
-            .ReturnsAsync(new VippsAgreementResponse { Id = "agr_addr3", Sub = "sub-y" });
+            .ReturnsAsync(new VippsAgreement { Id = "agr_addr3", Sub = "sub-y" });
         vipps.Setup(v => v.GetUserInfoAsync("sub-y", false))
             .ThrowsAsync(new HttpRequestException("Vipps userinfo down"));
 

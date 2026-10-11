@@ -27,7 +27,7 @@ namespace garge_api.Controllers
         private readonly IAppSettingsCache _settingsCache;
         private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
-        private readonly VippsOptions _vippsOpts;
+        private readonly VippsSettings _vippsOpts;
         private readonly AppOptions _appOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<ShopController> _logger;
@@ -40,7 +40,7 @@ namespace garge_api.Controllers
             IAppSettingsCache settingsCache,
             IWebhookSecretProtector protector,
             IWebPushService push,
-            IOptions<VippsOptions> vippsOpts,
+            IOptions<VippsSettings> vippsOpts,
             IOptions<AppOptions> appOpts,
             IMapper mapper,
             ILogger<ShopController> logger)
@@ -403,7 +403,7 @@ namespace garge_api.Controllers
             var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
                 new Registration(settings.VippsShopWebhookSecret, false),
                 new Registration(settings.VippsTestShopWebhookSecret, true));
-            if (verify != WebhookVerifyResult.Valid)
+            if (verify != VippsWebhookResult.Valid)
             {
                 _logger.LogWarning("Shop webhook verify failed: {Reason}", verify);
                 return Unauthorized();
@@ -584,7 +584,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>The payment's capture, refund and cancel totals, read in the environment the order was created in.</summary>
-        private Task<VippsPaymentResponse> PaymentTotalsAsync(Order order)
+        private Task<VippsPayment> PaymentTotalsAsync(Order order)
             => _vipps.GetPaymentAsync(order.VippsOrderId ?? string.Empty, order.IsTest);
 
         private async Task SafePushAsync(string userId, string title, string body)

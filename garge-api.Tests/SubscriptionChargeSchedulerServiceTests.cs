@@ -35,7 +35,7 @@ public class SubscriptionChargeSchedulerServiceTests
         var provider = services.BuildServiceProvider();
         var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         var svc = new SubscriptionChargeSchedulerService(scopeFactory,
-            Options.Create(new VippsOptions
+            Options.Create(new VippsSettings
             {
                 BaseUrl = "https://api.vipps.no",
                 ClientId = "id", ClientSecret = "s", SubscriptionKey = "k", MerchantSerialNumber = "msn-prod",

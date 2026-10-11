@@ -16,28 +16,28 @@ namespace garge_api.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly AppOptions _appOpts;
-        private readonly VippsOptions _vippsOpts;
+        private readonly VippsSettings _vippsOpts;
         private readonly ILogger<VippsWebhookRegistrationService> _logger;
 
-        private sealed record Slot(string Label, string Path, string[] Events, bool IsTest,
+        private sealed record Slot(string Label, string Path, IReadOnlyList<string> Events, bool IsTest,
             Func<AppSettings, string?> GetId, Action<AppSettings, string?, string?> Set);
 
         private static readonly Slot[] Slots =
         [
-            new("shop", "/api/shop/webhook", VippsEvents.ShopEvents, false,
+            new("shop", "/api/shop/webhook", VippsEvents.Payments, false,
                 s => s.VippsShopWebhookId, (s, id, secret) => { s.VippsShopWebhookId = id; s.VippsShopWebhookSecret = secret; }),
-            new("subscription", "/api/subscriptions/webhook", VippsEvents.SubscriptionEvents, false,
+            new("subscription", "/api/subscriptions/webhook", VippsEvents.Recurring, false,
                 s => s.VippsSubscriptionWebhookId, (s, id, secret) => { s.VippsSubscriptionWebhookId = id; s.VippsSubscriptionWebhookSecret = secret; }),
-            new("test shop", "/api/shop/webhook", VippsEvents.ShopEvents, true,
+            new("test shop", "/api/shop/webhook", VippsEvents.Payments, true,
                 s => s.VippsTestShopWebhookId, (s, id, secret) => { s.VippsTestShopWebhookId = id; s.VippsTestShopWebhookSecret = secret; }),
-            new("test subscription", "/api/subscriptions/webhook", VippsEvents.SubscriptionEvents, true,
+            new("test subscription", "/api/subscriptions/webhook", VippsEvents.Recurring, true,
                 s => s.VippsTestSubscriptionWebhookId, (s, id, secret) => { s.VippsTestSubscriptionWebhookId = id; s.VippsTestSubscriptionWebhookSecret = secret; }),
         ];
 
         public VippsWebhookRegistrationService(
             IServiceScopeFactory scopeFactory,
             IOptions<AppOptions> appOpts,
-            IOptions<VippsOptions> vippsOpts,
+            IOptions<VippsSettings> vippsOpts,
             ILogger<VippsWebhookRegistrationService> logger)
         {
             _scopeFactory = scopeFactory;
@@ -71,7 +71,7 @@ namespace garge_api.Services
                 await db.SaveChangesAsync(cancellationToken);
             }
 
-            var registered = new Dictionary<bool, IReadOnlyList<VippsWebhookInfo>>();
+            var registered = new Dictionary<bool, IReadOnlyList<VippsWebhook>>();
             foreach (var isTest in new[] { false, true })
             {
                 if (!_vippsOpts.IsConfigured(isTest)) continue;
@@ -147,7 +147,7 @@ namespace garge_api.Services
 
         // A production slot holds a test registration when the test environment lists its id. It moves
         // to the test slot.
-        private static bool MoveToTheirEnvironment(AppSettings settings, Dictionary<bool, IReadOnlyList<VippsWebhookInfo>> registered)
+        private static bool MoveToTheirEnvironment(AppSettings settings, Dictionary<bool, IReadOnlyList<VippsWebhook>> registered)
         {
             if (!registered.TryGetValue(true, out var test)) return false;
             var moved = false;

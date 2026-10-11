@@ -35,18 +35,21 @@ public class VippsServiceRequestTests
         var handler = new CapturingHandler();
         var opts = Options.Create(new VippsOptions
         {
-            ClientId = "id", ClientSecret = "secret", MerchantSerialNumber = "123456",
-            SubscriptionKey = "key", BaseUrl = "https://api.vipps.no"
+            Live = new VippsCredentials
+            {
+                ClientId = "id", ClientSecret = "secret", MerchantSerialNumber = "123456",
+                SubscriptionKey = "key", BaseUrl = "https://api.vipps.no"
+            },
+            SystemName = "garge-api",
+            SystemVersion = "1.4.2+0123456789abcdef",
         });
         var appOpts = Options.Create(new AppOptions
         {
             FrontendBaseUrl = "https://www.garge.no",
             ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
         });
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        cache.Set("vipps_test_mode", false);
-        var service = new VippsService(new HttpClient(handler), opts, appOpts, cache,
-            NullLogger<VippsService>.Instance, new Mock<IServiceScopeFactory>().Object);
+        var client = new VippsClient(new HttpClient(handler), opts, new FixedVippsEnvironment(false), NullLogger<VippsClient>.Instance);
+        var service = new VippsService(client, appOpts, TimeProvider.System, NullLogger<VippsService>.Instance);
         return (service, handler);
     }
 
@@ -148,15 +151,6 @@ public class VippsServiceRequestTests
         Assert.DoesNotContain(handler.Sent, x => x.Request.RequestUri!.AbsolutePath.StartsWith("/recurring/"));
     }
 
-    [Theory]
-    [InlineData("1.4.2+0123456789abcdef0123456789abcdef01234567", "1.4.2")]
-    [InlineData("1.0.0", "1.0.0")]
-    [InlineData("garge-api-with-a-name-longer-than-thirty", "garge-api-with-a-name-longer-t")]
-    public void SystemHeader_DropsBuildMetadataAndKeepsAtMost30Characters(string value, string expected)
-    {
-        Assert.Equal(expected, VippsService.SystemHeader(value));
-    }
-
     [Fact]
     public async Task EveryRequest_SendsSystemHeadersOfAtMost30Characters()
     {
@@ -168,15 +162,5 @@ public class VippsServiceRequestTests
             Assert.InRange(request.Headers.GetValues("Vipps-System-Name").Single().Length, 1, 30);
             Assert.InRange(request.Headers.GetValues("Vipps-System-Version").Single().Length, 1, 30);
         }
-    }
-
-    [Theory]
-    [InlineData("abc", 45, "abc")]
-    [InlineData("abcdef", 3, "abc")]
-    [InlineData("ab\U0001F600cd", 3, "ab")]
-    [InlineData("ab\U0001F600cd", 4, "ab\U0001F600")]
-    public void Truncate_NeverSplitsASurrogatePair(string value, int max, string expected)
-    {
-        Assert.Equal(expected, VippsService.Truncate(value, max));
     }
 }
