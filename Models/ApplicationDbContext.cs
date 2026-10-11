@@ -95,10 +95,10 @@ namespace garge_api.Models
                 .HasIndex(sd => sd.Timestamp);
 
             // Including Value lets range reads for one sensor be answered from
-            // the index alone. The SensorId-only index it replaced was redundant.
+            // the index alone. It also serves lookups by SensorId alone.
             modelBuilder.Entity<SensorData>()
                 .HasIndex(sd => new { sd.SensorId, sd.Timestamp })
-                .HasDatabaseName("IX_SensorData_SensorId_Timestamp")
+                .HasDatabaseName("IX_SensorData_SensorId_Timestamp_Value")
                 .IncludeProperties(sd => sd.Value);
 
             modelBuilder.Entity<BatteryHealth>()

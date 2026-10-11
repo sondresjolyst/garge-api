@@ -1268,7 +1268,7 @@ namespace garge_api.Migrations
                     b.HasIndex("Timestamp");
 
                     b.HasIndex("SensorId", "Timestamp")
-                        .HasDatabaseName("IX_SensorData_SensorId_Timestamp");
+                        .HasDatabaseName("IX_SensorData_SensorId_Timestamp_Value");
 
                     NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("SensorId", "Timestamp"), new[] { "Value" });
 

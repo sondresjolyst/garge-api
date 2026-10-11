@@ -281,7 +281,10 @@ namespace garge_api
                             "Applying {Count} pending migration(s): {Migrations}",
                             pendingMigrations.Count,
                             string.Join(", ", pendingMigrations));
+                        // An index build on a large table takes longer than the default command timeout.
+                        context.Database.SetCommandTimeout(TimeSpan.FromMinutes(15));
                         await context.Database.MigrateAsync();
+                        context.Database.SetCommandTimeout(null);
                     }
                 }
 
