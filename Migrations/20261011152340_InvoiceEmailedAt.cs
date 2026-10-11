@@ -17,9 +17,10 @@ namespace garge_api.Migrations
                 type: "timestamp with time zone",
                 nullable: true);
 
-            // Invoices from before this column were emailed when made, so the retry job leaves them be.
+            // Invoices from before this column with a PDF were emailed when it was made, so the retry job leaves them be.
+            // One without a PDF is emailed when the retry job makes it.
             // A data backfill has no EF migration operation, so it is SQL.
-            migrationBuilder.Sql("""UPDATE "Invoices" SET "EmailedAt" = "IssuedAt";""");
+            migrationBuilder.Sql("""UPDATE "Invoices" SET "EmailedAt" = "IssuedAt" WHERE length("PdfData") > 0;""");
         }
 
         /// <inheritdoc />
