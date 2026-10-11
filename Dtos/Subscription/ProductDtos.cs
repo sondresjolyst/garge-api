@@ -56,4 +56,32 @@ namespace garge_api.Dtos.Subscription
 
         public bool IsActive { get; set; }
     }
+    public class SchedulePriceChangeDto
+    {
+        [Required]
+        [Range(1, int.MaxValue)]
+        public int NewPriceInOre { get; set; }
+
+        /// <summary>The first charge due date, a UTC date at least 30 days out, that pays the new price.</summary>
+        [Required]
+        public DateTime EffectiveFrom { get; set; }
+    }
+
+    public class PriceChangeResponseDto
+    {
+        public int Id { get; set; }
+        public int ProductId { get; set; }
+        public int OldPriceInOre { get; set; }
+        public int NewPriceInOre { get; set; }
+        public DateTime EffectiveFrom { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? CancelledAt { get; set; }
+        public DateTime? AppliedAt { get; set; }
+        /// <summary>Subscribers due a notice.</summary>
+        public int NoticeCount { get; set; }
+        /// <summary>Subscribers whose notice email was sent.</summary>
+        public int NotifiedCount { get; set; }
+        /// <summary>Subscribers now paying the new price.</summary>
+        public int AppliedCount { get; set; }
+    }
 }

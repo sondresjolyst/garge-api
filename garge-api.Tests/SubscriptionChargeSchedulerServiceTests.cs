@@ -60,7 +60,7 @@ public class SubscriptionChargeSchedulerServiceTests
         await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
-            UserId = "user-1", ProductId = 1,
+            UserId = "user-1", ProductId = 1, UnitPriceInOre = 29900,
             VippsAgreementId = "agr_due", Status = SubscriptionStatus.Active,
             NextChargeDate = dueDate
         };
@@ -210,7 +210,7 @@ public class SubscriptionChargeSchedulerServiceTests
         await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
         var sub = new Subscription
         {
-            UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_sched", Status = SubscriptionStatus.Active,
+            UserId = "user-1", ProductId = 1, UnitPriceInOre = 29900, VippsAgreementId = "agr_sched", Status = SubscriptionStatus.Active,
             NextChargeDate = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(3), DateTimeKind.Utc), IsTest = isTest,
             FailedChargeAttempts = failedAttempts
         };
@@ -332,5 +332,26 @@ public class SubscriptionChargeSchedulerServiceTests
         await svc.ScheduleDueChargesAsync(CancellationToken.None);
 
         vipps.Verify(v => v.CreateChargeAsync("agr_sched", 59800, It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0, 39900)]
+    [InlineData(1, 29900)]
+    public async Task Scheduler_ChargesANotifiedNewPrice_FromItsEffectiveDueDate(int daysAfterDue, int expected)
+    {
+        var (svc, vipps, db) = BuildHarness();
+        var sub = await AddDueSubAsync(db);
+        var change = new PriceChange { ProductId = 1, OldPriceInOre = 29900, NewPriceInOre = 39900, EffectiveFrom = sub.NextChargeDate!.Value };
+        db.PriceChanges.Add(change);
+        db.PriceChangeNotices.Add(new PriceChangeNotice
+        {
+            PriceChange = change, SubscriptionId = sub.Id, NotifiedAt = DateTime.UtcNow.AddDays(-30),
+            EffectiveFrom = sub.NextChargeDate.Value.AddDays(daysAfterDue)
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        vipps.Verify(v => v.CreateChargeAsync("agr_sched", expected, sub.NextChargeDate.Value, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
     }
 }

@@ -1498,6 +1498,9 @@ namespace garge_api.Migrations
                     b.Property<int?>("CreditsInvoiceId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("EmailedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime>("IssuedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1716,6 +1719,82 @@ namespace garge_api.Migrations
                     b.ToTable("ShopItemPhotos");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Subscription.PriceChange", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("NewPriceInOre")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("OldPriceInOre")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.ToTable("PriceChanges");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Subscription.PriceChangeNotice", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AppliedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("NotifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PriceChangeId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SubscriptionId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("PriceChangeId", "SubscriptionId")
+                        .IsUnique();
+
+                    b.ToTable("PriceChangeNotices");
+                });
+
             modelBuilder.Entity("garge_api.Models.Subscription.Product", b =>
                 {
                     b.Property<int>("Id")
@@ -1804,6 +1883,9 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UnitPriceInOre")
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
@@ -2374,6 +2456,36 @@ namespace garge_api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("garge_api.Models.Subscription.PriceChange", b =>
+                {
+                    b.HasOne("garge_api.Models.Subscription.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Subscription.PriceChangeNotice", b =>
+                {
+                    b.HasOne("garge_api.Models.Subscription.PriceChange", "PriceChange")
+                        .WithMany("Notices")
+                        .HasForeignKey("PriceChangeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("garge_api.Models.Subscription.Subscription", "Subscription")
+                        .WithMany("PriceChangeNotices")
+                        .HasForeignKey("SubscriptionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PriceChange");
+
+                    b.Navigation("Subscription");
+                });
+
             modelBuilder.Entity("garge_api.Models.Subscription.Subscription", b =>
                 {
                     b.HasOne("garge_api.Models.Subscription.Product", "Product")
@@ -2473,6 +2585,16 @@ namespace garge_api.Migrations
                     b.Navigation("Invoice");
 
                     b.Navigation("OrderItems");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Subscription.PriceChange", b =>
+                {
+                    b.Navigation("Notices");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Subscription.Subscription", b =>
+                {
+                    b.Navigation("PriceChangeNotices");
                 });
 #pragma warning restore 612, 618
         }

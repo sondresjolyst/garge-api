@@ -57,6 +57,9 @@ namespace garge_api.Models.Shop
         /// <summary>When the credit note and the new invoice were emailed to the customer.</summary>
         public DateTime? VatCorrectionEmailedAt { get; set; }
 
+        /// <summary>When Brevo accepted the invoice email. Null until it does, and the retry job sends it again.</summary>
+        public DateTime? EmailedAt { get; set; }
+
         /// <summary>
         /// When the PDF was last tried. A row with no PDF is a sale whose PDF failed or is being made,
         /// and the retry job makes it again after a while.

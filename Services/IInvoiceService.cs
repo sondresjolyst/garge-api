@@ -10,7 +10,10 @@ namespace garge_api.Services
         /// </summary>
         Task<int> GenerateVatCorrectionsAsync(CancellationToken ct = default);
 
-        /// <summary>Makes the PDFs that failed or were never made. Returns how many were made.</summary>
+        /// <summary>
+        /// Makes the PDFs that failed or were never made, and sends the invoice and VAT correction
+        /// emails Brevo did not accept. Returns how many PDFs and corrections were made.
+        /// </summary>
         Task<int> RetryMissingPdfsAsync(CancellationToken ct = default);
 
         /// <summary>

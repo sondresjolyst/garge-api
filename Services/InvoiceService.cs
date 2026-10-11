@@ -66,28 +66,7 @@ namespace garge_api.Services
             var html = BuildInvoiceHtml(order, settings, invoice.Id, invoice.IssuedAt);
             await RenderAsync(db, invoice, html);
 
-            try
-            {
-                var buyerEmail = order.User?.Email;
-                if (!string.IsNullOrEmpty(buyerEmail))
-                {
-                    var attachment = new EmailAttachment
-                    {
-                        FileName = $"invoice-{invoice.Id:D4}.pdf",
-                        Content = invoice.PdfData,
-                        ContentType = "application/pdf"
-                    };
-                    await _emailService.SendEmailAsync(
-                        buyerEmail,
-                        $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html,
-                        [attachment]);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to email invoice {InvoiceId} for order {OrderId}", invoice.Id, orderId);
-            }
+            await EmailInvoiceAsync(db, invoice, order.User?.Email, settings, html);
 
             _logger.LogInformation("Invoice {InvoiceId} generated for order {OrderId}", invoice.Id, orderId);
             return invoice.Id;
@@ -164,33 +143,62 @@ namespace garge_api.Services
             var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, invoice.IssuedAt, invoice.AmountInOre, invoice.VatPercentage);
             await RenderAsync(db, invoice, html);
 
-            try
-            {
-                var buyerEmail = subscription.User?.Email;
-                if (!string.IsNullOrEmpty(buyerEmail))
-                {
-                    var attachment = new EmailAttachment
-                    {
-                        FileName = $"invoice-{invoice.Id:D4}.pdf",
-                        Content = invoice.PdfData,
-                        ContentType = "application/pdf"
-                    };
-                    await _emailService.SendEmailAsync(
-                        buyerEmail,
-                        $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html,
-                        [attachment]);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to email invoice {InvoiceId} for subscription {SubscriptionId} charge {ChargeId}",
-                    invoice.Id, subscriptionId, vippsChargeId);
-            }
+            await EmailInvoiceAsync(db, invoice, subscription.User?.Email, settings, html);
 
             _logger.LogInformation("Invoice {InvoiceId} generated for subscription {SubscriptionId} charge {ChargeId}",
                 invoice.Id, subscriptionId, vippsChargeId);
             return invoice.Id;
+        }
+
+        /// <summary>How long the retry job keeps sending an invoice email that Brevo did not accept.</summary>
+        internal static readonly TimeSpan EmailRetryFor = TimeSpan.FromDays(7);
+
+        // Emails an invoice with its PDF, and records it once Brevo accepts it. A failed email never fails the invoice.
+        private async Task EmailInvoiceAsync(ApplicationDbContext db, Invoice invoice, string? buyerEmail, AppSettings settings, string html)
+        {
+            if (string.IsNullOrEmpty(buyerEmail)) return;
+            try
+            {
+                var attachment = new EmailAttachment
+                {
+                    FileName = $"invoice-{invoice.Id:D4}.pdf",
+                    Content = invoice.PdfData,
+                    ContentType = "application/pdf"
+                };
+                if (await _emailService.SendEmailAsync(buyerEmail, $"Invoice #{invoice.Id:D4} — {settings.CompanyName}", html, [attachment]))
+                {
+                    invoice.EmailedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync();
+                }
+                else
+                {
+                    _logger.LogWarning("Invoice {InvoiceId} email was not accepted, it is retried later", invoice.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to email invoice {InvoiceId}, it is retried later", invoice.Id);
+            }
+        }
+
+        // Sends an invoice email again from the stored PDF.
+        private async Task ResendInvoiceEmailAsync(int invoiceId, CancellationToken ct)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var invoice = await db.Invoices
+                .Include(i => i.Order).ThenInclude(o => o!.User)
+                .Include(i => i.Order).ThenInclude(o => o!.OrderItems).ThenInclude(oi => oi.ShopItem)
+                .Include(i => i.Subscription).ThenInclude(s => s!.User)
+                .Include(i => i.Subscription).ThenInclude(s => s!.Product)
+                .FirstAsync(i => i.Id == invoiceId, ct);
+            var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+            if (invoice.Order != null)
+                await EmailInvoiceAsync(db, invoice, invoice.Order.User?.Email, settings,
+                    BuildInvoiceHtml(invoice.Order, settings, invoice.Id, invoice.IssuedAt));
+            else if (invoice.Subscription != null)
+                await EmailInvoiceAsync(db, invoice, invoice.Subscription.User?.Email, settings,
+                    BuildSubscriptionInvoiceHtml(invoice.Subscription, settings, invoice.Id, invoice.IssuedAt, invoice.AmountInOre, invoice.VatPercentage));
         }
 
         /// <summary>How long a PDF counts as being made before the retry job tries it again.</summary>
@@ -221,6 +229,7 @@ namespace garge_api.Services
         {
             List<(int Id, int? OrderId, int? SubscriptionId, string? ChargeId, int Amount, DateTime IssuedAt)> pending;
             List<int> corrections;
+            List<int> unsent;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -235,6 +244,13 @@ namespace garge_api.Services
                 // VAT corrections whose PDFs or email did not go through.
                 corrections = await db.Invoices.AsNoTracking()
                     .Where(i => i.VatCorrectedAt != null && i.VatCorrectionEmailedAt == null && i.VatCorrectedAt <= cutoff)
+                    .Select(i => i.Id)
+                    .ToListAsync(ct);
+                // Invoices with a PDF whose email Brevo did not accept.
+                var since = DateTime.UtcNow - EmailRetryFor;
+                unsent = await db.Invoices.AsNoTracking()
+                    .Where(i => i.PdfData.Length > 0 && i.EmailedAt == null && i.CreditsInvoiceId == null && i.ReplacesInvoiceId == null
+                                && i.IssuedAt >= since && i.IssuedAt <= cutoff)
                     .Select(i => i.Id)
                     .ToListAsync(ct);
             }
@@ -267,6 +283,17 @@ namespace garge_api.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Retrying the VAT correction for invoice {InvoiceId} failed", originalId);
+                }
+            }
+            foreach (var invoiceId in unsent)
+            {
+                try
+                {
+                    await ResendInvoiceEmailAsync(invoiceId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Resending the email for invoice {InvoiceId} failed", invoiceId);
                 }
             }
             return made;
@@ -361,7 +388,7 @@ namespace garge_api.Services
             var buyerEmail = (original.Order?.User ?? original.Subscription?.User)?.Email;
             if (!string.IsNullOrEmpty(buyerEmail))
             {
-                await _emailService.SendEmailAsync(
+                var accepted = await _emailService.SendEmailAsync(
                     buyerEmail,
                     $"{settings.CompanyName}: invoice #{replacement.Id:D4} with VAT replaces invoice #{original.Id:D4}, nothing more to pay",
                     invoiceHtml,
@@ -369,6 +396,8 @@ namespace garge_api.Services
                         new EmailAttachment { FileName = $"credit-note-{creditNote.Id:D4}.pdf", Content = creditNote.PdfData, ContentType = "application/pdf" },
                         new EmailAttachment { FileName = $"invoice-{replacement.Id:D4}.pdf", Content = replacement.PdfData, ContentType = "application/pdf" }
                     ]);
+                if (!accepted)
+                    throw new InvalidOperationException($"The VAT correction email for invoice {originalId} was not accepted.");
             }
             original.VatCorrectionEmailedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);

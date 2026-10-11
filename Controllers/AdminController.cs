@@ -301,10 +301,13 @@ namespace garge_api.Controllers
                 .Where(s => s.Status == SubscriptionStatus.Active)
                 .Include(s => s.Product)
                 .Where(s => s.Product != null)
-                .Select(s => new { s.Product!.PriceInOre, s.Product.Interval })
+                .Select(s => new { s.UnitPriceInOre, s.Quantity, s.Product!.Interval })
                 .ToListAsync();
             subscriptions.MonthlyRecurringInOre = activeWithProduct.Sum(p =>
-                p.Interval == BillingInterval.Yearly ? (long)(p.PriceInOre / 12) : (long)p.PriceInOre);
+            {
+                var total = (long)p.UnitPriceInOre * p.Quantity;
+                return p.Interval == BillingInterval.Yearly ? total / 12 : total;
+            });
 
             var stats = new AdminStatsDto
             {

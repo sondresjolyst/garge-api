@@ -74,7 +74,7 @@ namespace garge_api.Controllers
                     UserName = s.User != null ? (s.User.FirstName + " " + s.User.LastName).Trim() : string.Empty,
                     ProductName = s.Product != null ? s.Product.Name : string.Empty,
                     ProductType = s.Product != null ? s.Product.Type.ToString() : string.Empty,
-                    PriceInOre = s.Product != null ? s.Product.PriceInOre : 0,
+                    PriceInOre = s.UnitPriceInOre,
                     Quantity = s.Quantity,
                     Interval = s.Product != null ? s.Product.Interval.ToString() : string.Empty,
                     Status = s.Status.ToString(),
@@ -143,6 +143,8 @@ namespace garge_api.Controllers
 
             var subscriptions = await _context.Subscriptions
                 .Include(s => s.Product)
+                .Include(s => s.PriceChangeNotices.Where(n => n.AppliedAt == null && n.NotifiedAt != null))
+                    .ThenInclude(n => n.PriceChange)
                 .Where(s => s.UserId == userId &&
                             (s.Status == SubscriptionStatus.Active ||
                              s.Status == SubscriptionStatus.Pending ||
@@ -222,6 +224,7 @@ namespace garge_api.Controllers
                 UserId = userId,
                 ProductId = dto.ProductId,
                 Quantity = dto.Quantity,
+                UnitPriceInOre = unitPriceInOre,
                 VippsAgreementId = string.Empty,
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
@@ -350,7 +353,12 @@ namespace garge_api.Controllers
 
             if (isIncrease)
             {
-                var unitPriceInOre = subscription.Product.PriceInOre;
+                // The ceiling covers a notified price increase too, so its first charge can go through.
+                var notices = await _context.PriceChangeNotices
+                    .Include(n => n.PriceChange)
+                    .Where(n => n.SubscriptionId == subscription.Id && n.AppliedAt == null)
+                    .ToListAsync();
+                var unitPriceInOre = SubscriptionPricing.CeilingUnitPrice(subscription, notices);
                 if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
                     return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
                 var newCeiling = unitPriceInOre * dto.Quantity;
@@ -554,15 +562,22 @@ namespace garge_api.Controllers
                 if (product != null)
                 {
                     // The invoice shows what Vipps captured. Without an amount in the event it falls
-                    // back to what the scheduler charges for this subscription.
-                    var amountInOre = payload.AmountCaptured ?? payload.Amount
-                        ?? product.PriceInOre * subscription.Quantity;
+                    // back to what the scheduler charges for this subscription on the capture date.
+                    var amountInOre = payload.AmountCaptured ?? payload.Amount;
+                    if (amountInOre == null)
+                    {
+                        var notices = await _context.PriceChangeNotices
+                            .Include(n => n.PriceChange)
+                            .Where(n => n.SubscriptionId == subscription.Id && n.AppliedAt == null)
+                            .ToListAsync();
+                        amountInOre = SubscriptionPricing.UnitPriceFor(subscription, notices, payload.Occurred ?? DateTime.UtcNow) * subscription.Quantity;
+                    }
                     try
                     {
                         await _invoice.GenerateForSubscriptionChargeAsync(
                             subscription.Id,
                             payload.ChargeId,
-                            amountInOre,
+                            amountInOre.Value,
                             payload.Occurred ?? DateTime.UtcNow);
                     }
                     catch (Exception ex)

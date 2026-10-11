@@ -15,7 +15,7 @@ public class EmailService : IEmailService
         _logger = logger;
     }
 
-    public async System.Threading.Tasks.Task SendEmailAsync(
+    public async System.Threading.Tasks.Task<bool> SendEmailAsync(
         string email, string subject, string message,
         IReadOnlyList<EmailAttachment>? attachments = null)
     {
@@ -53,11 +53,13 @@ public class EmailService : IEmailService
 
         try
         {
-            var result = await apiInstance.SendTransacEmailAsync(sendSmtpEmail);
+            await apiInstance.SendTransacEmailAsync(sendSmtpEmail);
+            return true;
         }
         catch (ApiException ex)
         {
             _logger.LogError("Failed to send email. Error: {Error}", ex.Message);
+            return false;
         }
     }
 

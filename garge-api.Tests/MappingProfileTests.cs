@@ -1,3 +1,5 @@
+using garge_api.Models.Subscription;
+using garge_api.Dtos.Subscription;
 using garge_api.Dtos.Automation;
 using garge_api.Dtos.Group;
 using garge_api.Models.Automation;
@@ -123,5 +125,43 @@ public class MappingProfileTests : ControllerTestBase
         Assert.Null(dto.Icon);
         Assert.Empty(dto.SensorIds);
         Assert.Empty(dto.SwitchIds);
+    }
+
+    [Fact]
+    public void Subscription_MapsTheAgreedPrice_AndTheNotifiedIncreaseAhead()
+    {
+        var effective = new DateTime(2026, 11, 10, 0, 0, 0, DateTimeKind.Utc);
+        var sub = new garge_api.Models.Subscription.Subscription
+        {
+            Id = 1, UserId = "u", VippsAgreementId = "a", UnitPriceInOre = 4900,
+            Product = new Product { Name = "Extra", PriceInOre = 9900 },
+            PriceChangeNotices =
+            [
+                new PriceChangeNotice { NotifiedAt = effective.AddDays(-30), EffectiveFrom = effective, PriceChange = new PriceChange { NewPriceInOre = 5900 } },
+                new PriceChangeNotice { NotifiedAt = null, PriceChange = new PriceChange { NewPriceInOre = 7900 } },
+                new PriceChangeNotice { NotifiedAt = effective, EffectiveFrom = effective.AddDays(5), PriceChange = new PriceChange { NewPriceInOre = 8900, CancelledAt = effective } },
+            ],
+        };
+
+        var dto = Mapper.Map<SubscriptionResponseDto>(sub);
+
+        Assert.Equal(4900, dto.PriceInOre);
+        Assert.Equal(5900, dto.UpcomingPriceInOre);
+        Assert.Equal(effective, dto.UpcomingPriceFrom);
+    }
+
+    [Fact]
+    public void Subscription_WithoutANotifiedIncrease_HasNoUpcomingPrice()
+    {
+        var sub = new garge_api.Models.Subscription.Subscription
+        {
+            UserId = "u", VippsAgreementId = "a", UnitPriceInOre = 4900,
+            PriceChangeNotices = [new PriceChangeNotice { PriceChange = new PriceChange { NewPriceInOre = 5900 } }],
+        };
+
+        var dto = Mapper.Map<SubscriptionResponseDto>(sub);
+
+        Assert.Null(dto.UpcomingPriceInOre);
+        Assert.Null(dto.UpcomingPriceFrom);
     }
 }

@@ -34,6 +34,8 @@ public class InvoiceServiceTests
         scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
 
         var email = new Mock<IEmailService>();
+        email.Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()))
+            .ReturnsAsync(true);
         var pdf = pdfRenderer ?? new Mock<IPdfRenderer>();
         if (pdfRenderer == null)
         {
@@ -449,7 +451,7 @@ public class InvoiceServiceTests
     private static async Task<Invoice> OwedInvoiceAsync(ApplicationDbContext db)
     {
         var order = await SeedPaidOrderAsync(db);
-        var invoice = new Invoice { OrderId = order.Id, AmountInOre = 5_100_000, IssuedAt = DateTime.UtcNow.AddDays(-2), PdfData = [1] };
+        var invoice = new Invoice { OrderId = order.Id, AmountInOre = 5_100_000, IssuedAt = DateTime.UtcNow.AddDays(-2), EmailedAt = DateTime.UtcNow.AddDays(-2), PdfData = [1] };
         db.Invoices.Add(invoice);
         await db.SaveChangesAsync();
         return invoice;
@@ -674,5 +676,116 @@ public class InvoiceServiceTests
         Assert.Equal(new byte[] { 2 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
         Assert.Equal(new byte[] { 3 }, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).PdfData);
         email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+    }
+
+    private static void EmailAccepted(Mock<IEmailService> email, params bool[] results)
+    {
+        var setup = email.SetupSequence(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()));
+        foreach (var r in results) setup = setup.ReturnsAsync(r);
+    }
+
+    private static async Task AgeAsync(ApplicationDbContext db, int invoiceId, TimeSpan by)
+    {
+        var invoice = await db.Invoices.SingleAsync(i => i.Id == invoiceId, TestContext.Current.CancellationToken);
+        invoice.IssuedAt -= by;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task AnOrderInvoiceEmailBrevoAccepted_IsRecorded()
+    {
+        var (svc, db, _, _) = Create();
+        var order = await SeedPaidOrderAsync(db);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.NotNull((await db.Invoices.SingleAsync(TestContext.Current.CancellationToken)).EmailedAt);
+    }
+
+    [Fact]
+    public async Task AnInvoiceEmailBrevoRefused_IsSentAgainByTheRetryJob_WithItsPdf_Once()
+    {
+        var (svc, db, email, pdf) = Create();
+        EmailAccepted(email, false, true);
+        var order = await SeedPaidOrderAsync(db);
+        var id = await svc.GenerateAndStoreAsync(order.Id);
+        Assert.Null((await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).EmailedAt);
+
+        // Not before the retry delay, so a send in progress is not doubled.
+        await svc.RetryMissingPdfsAsync();
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+
+        await AgeAsync(db, id, InvoiceService.PdfRetryAfter + TimeSpan.FromMinutes(1));
+        await svc.RetryMissingPdfsAsync();
+        await svc.RetryMissingPdfsAsync();
+
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(s => s.Contains($"#{id:D4}")), It.IsAny<string>(),
+            It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Single().Content.SequenceEqual(new byte[] { 1, 2, 3 }))), Times.Exactly(2));
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        Assert.NotNull((await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).EmailedAt);
+    }
+
+    [Fact]
+    public async Task ASubscriptionInvoiceEmailBrevoRefused_IsSentAgainByTheRetryJob()
+    {
+        var (svc, db, email, _) = Create();
+        EmailAccepted(email, false, true);
+        var subscription = await SeedSubscriptionAsync(db);
+        var id = await svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-r", 29900, DateTime.UtcNow);
+        await AgeAsync(db, id, InvoiceService.PdfRetryAfter + TimeSpan.FromMinutes(1));
+
+        await svc.RetryMissingPdfsAsync();
+
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(s => s.Contains($"#{id:D4}")), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Exactly(2));
+        Assert.NotNull((await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).EmailedAt);
+    }
+
+    [Fact]
+    public async Task TheRetryJob_GivesUpOnAnInvoiceEmailAfterSevenDays()
+    {
+        var (svc, db, email, _) = Create();
+        EmailAccepted(email, false, true);
+        var order = await SeedPaidOrderAsync(db);
+        var id = await svc.GenerateAndStoreAsync(order.Id);
+        await AgeAsync(db, id, InvoiceService.EmailRetryFor + TimeSpan.FromMinutes(1));
+
+        await svc.RetryMissingPdfsAsync();
+
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task TheRetryJob_SkipsAnInvoiceWhoseBuyerHasNoEmail()
+    {
+        var (svc, db, email, _) = Create();
+        var order = await SeedPaidOrderAsync(db);
+        (await db.Users.SingleAsync(TestContext.Current.CancellationToken)).Email = null;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var id = await svc.GenerateAndStoreAsync(order.Id);
+        await AgeAsync(db, id, InvoiceService.PdfRetryAfter + TimeSpan.FromMinutes(1));
+
+        await svc.RetryMissingPdfsAsync();
+
+        email.Verify(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AVatCorrectionEmailBrevoRefused_IsNotRecorded_AndTheRetryJobSendsIt()
+    {
+        var (svc, db, email, _) = CreateForCorrections();
+        EmailAccepted(email, false, true);
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+
+        Assert.Equal(1, await svc.GenerateVatCorrectionsAsync());
+        var saved = await db.Invoices.SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken);
+        Assert.Null(saved.VatCorrectionEmailedAt);
+
+        saved.VatCorrectedAt = DateTime.UtcNow - InvoiceService.PdfRetryAfter - TimeSpan.FromMinutes(1);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.RetryMissingPdfsAsync();
+
+        Assert.NotNull((await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == original.Id, TestContext.Current.CancellationToken)).VatCorrectionEmailedAt);
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.IsAny<string>(), It.IsAny<string>(), It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Count == 2)), Times.Exactly(2));
     }
 }

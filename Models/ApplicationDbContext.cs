@@ -59,6 +59,8 @@ namespace garge_api.Models
         public DbSet<AppSettings> AppSettings { get; set; }
         public DbSet<Product> Products { get; set; }
         public DbSet<Subscription.Subscription> Subscriptions { get; set; }
+        public DbSet<Subscription.PriceChange> PriceChanges { get; set; }
+        public DbSet<Subscription.PriceChangeNotice> PriceChangeNotices { get; set; }
         public DbSet<ShopItem> ShopItems { get; set; }
         public DbSet<ShopItemPhoto> ShopItemPhotos { get; set; }
         public DbSet<Order> Orders { get; set; }
@@ -100,6 +102,14 @@ namespace garge_api.Models
                 .HasIndex(sd => new { sd.SensorId, sd.Timestamp })
                 .HasDatabaseName("IX_SensorData_SensorId_Timestamp_Value")
                 .IncludeProperties(sd => sd.Value);
+
+            // One notice per subscriber per price change, so a retried sweep never emails twice.
+            modelBuilder.Entity<Subscription.PriceChangeNotice>()
+                .HasIndex(n => new { n.PriceChangeId, n.SubscriptionId })
+                .IsUnique();
+
+            modelBuilder.Entity<Subscription.PriceChange>()
+                .HasIndex(c => c.ProductId);
 
             modelBuilder.Entity<BatteryHealth>()
                 .HasIndex(bh => new { bh.SensorId, bh.Timestamp });

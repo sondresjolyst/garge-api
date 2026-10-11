@@ -55,6 +55,12 @@ namespace garge_api.Services
                                 && s.Product != null)
                     .ToListAsync(stoppingToken);
 
+                var dueIds = due.Select(s => s.Id).ToList();
+                var notices = await db.PriceChangeNotices
+                    .Include(n => n.PriceChange)
+                    .Where(n => dueIds.Contains(n.SubscriptionId) && n.AppliedAt == null && n.EffectiveFrom != null)
+                    .ToListAsync(stoppingToken);
+
                 foreach (var sub in due)
                 {
                     if (sub.Product == null || !sub.NextChargeDate.HasValue) continue;
@@ -69,7 +75,7 @@ namespace garge_api.Services
                     // A failed attempt needs a new charge with its own key. Reusing a key returns the failed charge.
                     var key = SubscriptionCharges.Key(sub.Id, dueDate, sub.FailedChargeAttempts);
                     if (sub.LastChargeKey == key) continue;
-                    var amountInOre = sub.Product.PriceInOre * sub.Quantity;
+                    var amountInOre = SubscriptionPricing.UnitPriceFor(sub, notices, dueDate) * sub.Quantity;
                     try
                     {
                         await vipps.CreateChargeAsync(

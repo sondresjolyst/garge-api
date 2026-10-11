@@ -223,9 +223,9 @@ public class AdminControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         db.Subscriptions.AddRange(
-            new Subscription { UserId = "u1", ProductId = monthly.Id, VippsAgreementId = "agr-1", Status = SubscriptionStatus.Active },
-            new Subscription { UserId = "u2", ProductId = monthly.Id, VippsAgreementId = "agr-2", Status = SubscriptionStatus.Active },
-            new Subscription { UserId = "u3", ProductId = yearly.Id, VippsAgreementId = "agr-3", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u1", ProductId = monthly.Id, UnitPriceInOre = 29900, VippsAgreementId = "agr-1", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u2", ProductId = monthly.Id, UnitPriceInOre = 29900, Quantity = 2, VippsAgreementId = "agr-2", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u3", ProductId = yearly.Id, UnitPriceInOre = 299000, VippsAgreementId = "agr-3", Status = SubscriptionStatus.Active },
             new Subscription { UserId = "u4", ProductId = monthly.Id, VippsAgreementId = "agr-4", Status = SubscriptionStatus.Pending });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -236,7 +236,7 @@ public class AdminControllerTests : ControllerTestBase
         Assert.Equal(3, dto.Subscriptions.Active);
         Assert.Equal(1, dto.Subscriptions.PendingConfirm);
         // 2 * 29900 (monthly) + 299000 / 12 (yearly normalized) = 59800 + 24916 = 84716
-        Assert.Equal(29900L * 2 + 299000L / 12, dto.Subscriptions.MonthlyRecurringInOre);
+        Assert.Equal(29900L * 3 + 299000L / 12, dto.Subscriptions.MonthlyRecurringInOre);
     }
 
     [Fact]
@@ -273,8 +273,8 @@ public class AdminControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         db.Subscriptions.AddRange(
-            new Subscription { UserId = "u1", ProductId = 1, VippsAgreementId = "live", Status = SubscriptionStatus.Active, IsTest = false },
-            new Subscription { UserId = "u2", ProductId = 1, VippsAgreementId = "test", Status = SubscriptionStatus.Active, IsTest = true });
+            new Subscription { UserId = "u1", ProductId = 1, UnitPriceInOre = 5000, VippsAgreementId = "live", Status = SubscriptionStatus.Active, IsTest = false },
+            new Subscription { UserId = "u2", ProductId = 1, UnitPriceInOre = 5000, VippsAgreementId = "test", Status = SubscriptionStatus.Active, IsTest = true });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAdminController(db).GetStats(test: true);

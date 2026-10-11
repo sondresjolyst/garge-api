@@ -53,8 +53,7 @@ namespace garge_api.Services
                 {
                     var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
                     var html = SecurityEmailTemplates.Alert(settings, profile.User.FirstName, title, message);
-                    await email.SendEmailAsync(profile.User.Email, title, html);
-                    emailDelivered = true;
+                    emailDelivered = await email.SendEmailAsync(profile.User.Email, title, html);
                 }
                 catch (Exception ex)
                 {
