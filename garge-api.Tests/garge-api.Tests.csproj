@@ -21,6 +21,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Using Include="SjolystInnovation.AppKit.Vipps" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\garge-api.csproj" />
   </ItemGroup>
 

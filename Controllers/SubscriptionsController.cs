@@ -27,7 +27,7 @@ namespace garge_api.Controllers
         private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
         private readonly AppOptions _appOpts;
-        private readonly VippsOptions _vippsOpts;
+        private readonly VippsSettings _vippsOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<SubscriptionsController> _logger;
 
@@ -40,7 +40,7 @@ namespace garge_api.Controllers
             IWebhookSecretProtector protector,
             IWebPushService push,
             IOptions<AppOptions> appOpts,
-            IOptions<VippsOptions> vippsOpts,
+            IOptions<VippsSettings> vippsOpts,
             IMapper mapper,
             ILogger<SubscriptionsController> logger)
         {
@@ -394,7 +394,7 @@ namespace garge_api.Controllers
             var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
                 new Registration(settings.VippsSubscriptionWebhookSecret, false),
                 new Registration(settings.VippsTestSubscriptionWebhookSecret, true));
-            if (verify != WebhookVerifyResult.Valid)
+            if (verify != VippsWebhookResult.Valid)
             {
                 _logger.LogWarning("Subscription webhook verify failed: {Reason}", verify);
                 return Unauthorized();

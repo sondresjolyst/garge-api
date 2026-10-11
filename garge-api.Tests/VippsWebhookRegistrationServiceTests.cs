@@ -32,8 +32,8 @@ public class VippsWebhookRegistrationServiceTests
 
     private static Harness Build(
         AppSettings? settings,
-        List<VippsWebhookInfo>? live,
-        List<VippsWebhookInfo>? test)
+        List<VippsWebhook>? live,
+        List<VippsWebhook>? test)
     {
         var dbName = Guid.NewGuid().ToString();
         var services = new ServiceCollection();
@@ -43,8 +43,8 @@ public class VippsWebhookRegistrationServiceTests
         if (live != null) vipps.Setup(v => v.ListWebhooksAsync(false)).ReturnsAsync(live);
         if (test != null) vipps.Setup(v => v.ListWebhooksAsync(true)).ReturnsAsync(test);
         var seq = 0;
-        vipps.Setup(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<string[]>(), It.IsAny<bool>()))
-            .ReturnsAsync((string url, string[] _, bool isTest) =>
+        vipps.Setup(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<bool>()))
+            .ReturnsAsync((string url, IReadOnlyList<string> _, bool isTest) =>
             {
                 seq++;
                 return ($"new-{(isTest ? "test" : "live")}-{seq}", $"secret-{seq}");
@@ -67,7 +67,7 @@ public class VippsWebhookRegistrationServiceTests
             db.SaveChanges();
         }
 
-        var vippsOpts = new VippsOptions
+        var vippsOpts = new VippsSettings
         {
             BaseUrl = "https://api.vipps.no",
             ClientId = live != null ? "id" : "", ClientSecret = "s", SubscriptionKey = "k", MerchantSerialNumber = "msn-prod",
@@ -81,7 +81,7 @@ public class VippsWebhookRegistrationServiceTests
         return new Harness { Service = svc, Vipps = vipps, Cache = cache, Provider = provider };
     }
 
-    private static VippsWebhookInfo Hook(string id, string url) => new() { Id = id, Url = url };
+    private static VippsWebhook Hook(string id, string url) => new() { Id = id, Url = url };
 
     [Fact]
     public async Task NothingStored_RegistersBothWebhooksInEachConfiguredEnvironment()
@@ -90,10 +90,10 @@ public class VippsWebhookRegistrationServiceTests
 
         await h.Service.StartAsync(CancellationToken.None);
 
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), false), Times.Once);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<string[]>(), false), Times.Once);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), true), Times.Once);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<string[]>(), true), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), false), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<IReadOnlyList<string>>(), false), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), true), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<IReadOnlyList<string>>(), true), Times.Once);
         var s = await h.SettingsAsync();
         Assert.StartsWith("new-live-", s.VippsShopWebhookId);
         Assert.StartsWith("new-live-", s.VippsSubscriptionWebhookId);
@@ -113,7 +113,7 @@ public class VippsWebhookRegistrationServiceTests
         await h.Service.StartAsync(CancellationToken.None);
 
         h.Vipps.Verify(v => v.ListWebhooksAsync(true), Times.Never);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<string[]>(), true), Times.Never);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), true), Times.Never);
         var s = await h.SettingsAsync();
         Assert.NotNull(s.VippsShopWebhookId);
         Assert.Null(s.VippsTestShopWebhookId);
@@ -136,7 +136,7 @@ public class VippsWebhookRegistrationServiceTests
 
         await h.Service.StartAsync(CancellationToken.None);
 
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<string[]>(), It.IsAny<bool>()), Times.Never);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<bool>()), Times.Never);
         h.Vipps.Verify(v => v.DeleteWebhookAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
         h.Cache.Verify(c => c.Invalidate(), Times.Never);
         var s = await h.SettingsAsync();
@@ -164,7 +164,7 @@ public class VippsWebhookRegistrationServiceTests
         Assert.Equal("sub-secret", s.VippsTestSubscriptionWebhookSecret);
         Assert.StartsWith("new-live-", s.VippsShopWebhookId);
         Assert.StartsWith("new-live-", s.VippsSubscriptionWebhookId);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<string[]>(), true), Times.Never);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), true), Times.Never);
         h.Vipps.Verify(v => v.DeleteWebhookAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
@@ -181,7 +181,7 @@ public class VippsWebhookRegistrationServiceTests
             live: [Hook("live-shop", ShopUrl), Hook("orphan", SubscriptionUrl), Hook("someone-else", "https://other.example.invalid/hook")],
             test: null);
         var order = new List<string>();
-        h.Vipps.Setup(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<string[]>(), false))
+        h.Vipps.Setup(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<IReadOnlyList<string>>(), false))
             .Callback(() => order.Add("register")).ReturnsAsync(("new-live-sub", "secret-sub"));
         h.Vipps.Setup(v => v.DeleteWebhookAsync("orphan", false)).Callback(() => order.Add("delete")).Returns(Task.CompletedTask);
 
@@ -191,7 +191,7 @@ public class VippsWebhookRegistrationServiceTests
         Assert.True(order.IndexOf("register") < order.IndexOf("delete"), string.Join(",", order));
         h.Vipps.Verify(v => v.DeleteWebhookAsync("someone-else", It.IsAny<bool>()), Times.Never);
         h.Vipps.Verify(v => v.DeleteWebhookAsync("live-shop", It.IsAny<bool>()), Times.Never);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<string[]>(), false), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<IReadOnlyList<string>>(), false), Times.Once);
         var s = await h.SettingsAsync();
         Assert.Equal("live-shop", s.VippsShopWebhookId);
         Assert.StartsWith("new-live-", s.VippsSubscriptionWebhookId);
@@ -203,7 +203,7 @@ public class VippsWebhookRegistrationServiceTests
         // Deleting first would leave Vipps with nowhere to send events until the next start.
         var settings = new AppSettings { Id = 1, VippsShopWebhookId = "gone", VippsShopWebhookSecret = "a" };
         var h = Build(settings, live: [Hook("orphan", ShopUrl)], test: null);
-        h.Vipps.Setup(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), false)).ThrowsAsync(new HttpRequestException("down"));
+        h.Vipps.Setup(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), false)).ThrowsAsync(new HttpRequestException("down"));
 
         await h.Service.StartAsync(CancellationToken.None);
 
@@ -242,8 +242,8 @@ public class VippsWebhookRegistrationServiceTests
 
         await h.Service.StartAsync(CancellationToken.None);
 
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), false), Times.Never);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<string[]>(), false), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), false), Times.Never);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(SubscriptionUrl, It.IsAny<IReadOnlyList<string>>(), false), Times.Once);
         var s = await h.SettingsAsync();
         Assert.Equal("maybe-test", s.VippsShopWebhookId);
         Assert.Equal("a", s.VippsShopWebhookSecret);
@@ -258,9 +258,9 @@ public class VippsWebhookRegistrationServiceTests
 
         await h.Service.StartAsync(CancellationToken.None);
 
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<string[]>(), false), Times.Never);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), false), Times.Never);
         h.Vipps.Verify(v => v.DeleteWebhookAsync(It.IsAny<string>(), false), Times.Never);
-        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), true), Times.Once);
+        h.Vipps.Verify(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), true), Times.Once);
         Assert.Equal("live-shop", (await h.SettingsAsync()).VippsShopWebhookId);
     }
 
@@ -268,7 +268,7 @@ public class VippsWebhookRegistrationServiceTests
     public async Task RegistrationFails_KeepsTheStoredValuesForThatSlot()
     {
         var h = Build(new AppSettings { Id = 1 }, live: [], test: null);
-        h.Vipps.Setup(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<string[]>(), false)).ThrowsAsync(new HttpRequestException("down"));
+        h.Vipps.Setup(v => v.RegisterWebhookAsync(ShopUrl, It.IsAny<IReadOnlyList<string>>(), false)).ThrowsAsync(new HttpRequestException("down"));
 
         await h.Service.StartAsync(CancellationToken.None);
 
