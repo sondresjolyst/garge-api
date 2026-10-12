@@ -11,6 +11,10 @@ namespace garge_api.Services
 
         public static int VatPercentFor(bool vatEnabled) => vatEnabled ? VatPercent : 0;
 
+        /// <summary>The VAT rate of a sale made at <paramref name="saleAt"/>. The date of the sale decides, not today.</summary>
+        public static int VatPercentFor(Models.Admin.AppSettings settings, DateTime saleAt) =>
+            VatPercentFor(settings.VatOnAt(saleAt));
+
         /// <summary>
         /// Splits a price into the amount excluding VAT and the VAT. The VAT is the price times
         /// rate / (100 + rate), rounded to whole øre, and the two parts always add up to the price.

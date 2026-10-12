@@ -537,6 +537,17 @@ namespace garge_api.Controllers
             }
 
             _mapper.Map(dto, settings);
+            // The registration date and the switch move together. A date turns VAT on, turning VAT on
+            // without one starts it now, and turning it off clears the date.
+            if (dto.VatRegisteredFrom is { } from)
+            {
+                settings.VatEnabled = true;
+                settings.VatRegisteredFrom = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+            }
+            else if (settings.VatEnabled)
+                settings.VatRegisteredFrom ??= DateTime.UtcNow;
+            else
+                settings.VatRegisteredFrom = null;
             await _context.SaveChangesAsync();
             _settingsCache?.Invalidate();
 

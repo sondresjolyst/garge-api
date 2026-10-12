@@ -7,6 +7,15 @@ namespace garge_api.Models.Admin
         public int Id { get; set; } = 1;
         public bool CookieBannerEnabled { get; set; } = true;
         public bool VatEnabled { get; set; } = false;
+
+        /// <summary>
+        /// The first moment sales carry VAT, which is the registration date. Set when VAT is turned on
+        /// and cleared when it is turned off. Without a date, VAT on covers every sale.
+        /// </summary>
+        public DateTime? VatRegisteredFrom { get; set; }
+
+        /// <summary>Whether a sale made at <paramref name="saleAt"/> carries VAT.</summary>
+        public bool VatOnAt(DateTime saleAt) => VatEnabled && (VatRegisteredFrom is not { } from || saleAt >= from);
         public string? VippsShopWebhookId { get; set; }
         public string? VippsShopWebhookSecret { get; set; }
         public string? VippsSubscriptionWebhookId { get; set; }

@@ -346,6 +346,37 @@ public class InvoiceServiceTests
         return (svc, db, html);
     }
 
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(0, 25)]
+    [InlineData(1, 25)]
+    public async Task SubscriptionInvoice_TakesTheRateOfTheCaptureDate_NotOfToday(int minutesFromRegistration, int expected)
+    {
+        var (svc, db, _, _) = Create();
+        var subscription = await SeedSubscriptionAsync(db);
+        var registered = DateTime.UtcNow.AddDays(-2);
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        settings.VatEnabled = true;
+        settings.VatRegisteredFrom = registered;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        // The webhook is handled now, long after the capture.
+        await svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-late", 29900, registered.AddMinutes(minutesFromRegistration));
+
+        Assert.Equal(expected, (await db.Invoices.SingleAsync(TestContext.Current.CancellationToken)).VatPercentage);
+    }
+
+    [Fact]
+    public async Task SubscriptionInvoice_WithVatOff_HasNoVat()
+    {
+        var (svc, db, _, _) = Create();
+        var subscription = await SeedSubscriptionAsync(db);
+
+        await svc.GenerateForSubscriptionChargeAsync(subscription.Id, "charge-off", 29900, DateTime.UtcNow);
+
+        Assert.Equal(0, (await db.Invoices.SingleAsync(TestContext.Current.CancellationToken)).VatPercentage);
+    }
+
     [Fact]
     public async Task OrderInvoice_SoldBeforeVat_ShowsNoVatEvenAfterVatIsSwitchedOn()
     {

@@ -188,6 +188,7 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("Revoked")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Token")
@@ -391,6 +392,9 @@ namespace garge_api.Migrations
 
                     b.Property<bool>("VatEnabled")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("VatRegisteredFrom")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("VatThresholdWarnedPercent")
                         .HasColumnType("integer");

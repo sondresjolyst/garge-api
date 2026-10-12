@@ -37,6 +37,7 @@ public class AdminControllerTests : ControllerTestBase
             .Returns<UpdateAppSettingsDto, AppSettings>((src, dst) =>
             {
                 if (src.CookieBannerEnabled.HasValue) dst.CookieBannerEnabled = src.CookieBannerEnabled.Value;
+                if (src.VatEnabled.HasValue) dst.VatEnabled = src.VatEnabled.Value;
                 return dst;
             });
 
@@ -113,6 +114,60 @@ public class AdminControllerTests : ControllerTestBase
         var ok = Assert.IsType<OkObjectResult>(result);
         var dto = Assert.IsType<AppSettingsDto>(ok.Value);
         Assert.False(dto.CookieBannerEnabled);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_TurningVatOn_StartsItNow()
+    {
+        var db = CreateDbContext();
+        var before = DateTime.UtcNow;
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = true });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.True(settings.VatEnabled);
+        Assert.InRange(settings.VatRegisteredFrom!.Value, before, DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_ARegistrationDate_TurnsVatOnFromThatDate()
+    {
+        var db = CreateDbContext();
+        var registered = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Unspecified);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatRegisteredFrom = registered });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.True(settings.VatEnabled);
+        Assert.Equal(registered, settings.VatRegisteredFrom);
+        Assert.Equal(DateTimeKind.Utc, settings.VatRegisteredFrom!.Value.Kind);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_ChangingSomethingElse_KeepsTheRegistrationDate()
+    {
+        var db = CreateDbContext();
+        var registered = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        db.AppSettings.Add(new AppSettings { Id = 1, VatEnabled = true, VatRegisteredFrom = registered });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = true, CookieBannerEnabled = false });
+
+        Assert.Equal(registered, (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatRegisteredFrom);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_TurningVatOff_ClearsTheRegistrationDate()
+    {
+        var db = CreateDbContext();
+        db.AppSettings.Add(new AppSettings { Id = 1, VatEnabled = true, VatRegisteredFrom = DateTime.UtcNow.AddDays(-3) });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = false });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.False(settings.VatEnabled);
+        Assert.Null(settings.VatRegisteredFrom);
     }
 
     [Fact]

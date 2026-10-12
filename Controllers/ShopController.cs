@@ -160,8 +160,8 @@ namespace garge_api.Controllers
             }
 
             var settings = await _settingsCache.GetAsync();
-            var vatPercent = Pricing.VatPercentFor(settings.VatEnabled);
-            var taxBp = settings.VatEnabled ? Pricing.VatBasisPoints : 0;
+            var vatPercent = Pricing.VatPercentFor(settings, DateTime.UtcNow);
+            var taxBp = vatPercent > 0 ? Pricing.VatBasisPoints : 0;
 
             var itemPrices = dto.Items.ToDictionary(line => line.ShopItemId, line => shopItems[line.ShopItemId].PriceInOre);
             var itemPricesExclVat = itemPrices.ToDictionary(kv => kv.Key, kv => Pricing.Split(kv.Value, vatPercent).ExclVat);

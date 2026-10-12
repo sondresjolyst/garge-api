@@ -1172,9 +1172,12 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Theory]
-    [InlineData(false, 20000, 0)]
-    [InlineData(true, 16000, 25)]
-    public async Task Checkout_CustomersPayTheSamePriceWithVatOnOrOff(bool vatEnabled, int exclVat, int vatPercent)
+    [InlineData(false, 20000, 0, null)]
+    [InlineData(true, 16000, 25, null)]
+    [InlineData(true, 16000, 25, -1)]
+    // Registered from tomorrow: today's sale has no VAT yet.
+    [InlineData(true, 20000, 0, 1)]
+    public async Task Checkout_CustomersPayTheSamePriceWithVatOnOrOff(bool vatEnabled, int exclVat, int vatPercent, int? registeredInDays)
     {
         using var db = CreateDbContext();
         var item = new ShopItem { Name = "Sensor", PriceInOre = 20000, IsActive = true, StockCount = -1 };
@@ -1186,7 +1189,7 @@ public class ShopControllerTests : ControllerTestBase
             .Callback((Order _, List<VippsOrderLine> lines, string _, string _, string _) => sentLines = lines)
             .ReturnsAsync(new VippsCreatePaymentResponse { Reference = "ref", RedirectUrl = "https://vipps.no/pay" });
 
-        var ctrl = CreateController(db, vipps: vipps, settings: new AppSettings { Id = 1, VatEnabled = vatEnabled });
+        var ctrl = CreateController(db, vipps: vipps, settings: new AppSettings { Id = 1, VatEnabled = vatEnabled, VatRegisteredFrom = registeredInDays is { } d ? DateTime.UtcNow.AddDays(d) : null });
         await ctrl.Checkout(new CreateOrderDto { Items = [new OrderItemRequestDto { ShopItemId = item.Id, Quantity = 2 }], PhoneNumber = "4791234567" });
 
         Assert.Equal(40000, (await db.Orders.SingleAsync(TestContext.Current.CancellationToken)).TotalInOre);
@@ -1197,6 +1200,6 @@ public class ShopControllerTests : ControllerTestBase
         var line = Assert.Single(sentLines!);
         Assert.Equal(20000, line.UnitPriceInOre);
         Assert.Equal(exclVat, line.UnitPriceExclVatInOre);
-        Assert.Equal(vatEnabled ? Pricing.VatBasisPoints : 0, line.TaxPercentageBasisPoints);
+        Assert.Equal(vatPercent > 0 ? Pricing.VatBasisPoints : 0, line.TaxPercentageBasisPoints);
     }
 }

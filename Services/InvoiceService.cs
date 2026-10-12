@@ -133,7 +133,8 @@ namespace garge_api.Services
                     AmountInOre = amountInOre,
                     IssuedAt = occurredAt,
                     PdfData = [],
-                    VatPercentage = Pricing.VatPercentFor(settings.VatEnabled)
+                    // The capture is the sale, so its date decides the rate however late the webhook is handled.
+                    VatPercentage = Pricing.VatPercentFor(settings, occurredAt)
                 };
                 db.Invoices.Add(invoice);
                 await db.SaveChangesAsync();
