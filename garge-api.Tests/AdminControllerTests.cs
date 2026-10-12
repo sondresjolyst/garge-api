@@ -133,14 +133,26 @@ public class AdminControllerTests : ControllerTestBase
     public async Task UpdateAppSettings_ARegistrationDate_TurnsVatOnFromThatDate()
     {
         var db = CreateDbContext();
-        var registered = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        var registered = new DateTime(2026, 9, 1, 12, 30, 0, DateTimeKind.Utc);
 
         await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatRegisteredFrom = registered });
 
         var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
         Assert.True(settings.VatEnabled);
         Assert.Equal(registered, settings.VatRegisteredFrom);
-        Assert.Equal(DateTimeKind.Utc, settings.VatRegisteredFrom!.Value.Kind);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_APlainDate_MeansMidnightInNorway()
+    {
+        var db = CreateDbContext();
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatRegisteredFrom = new DateTime(2026, 9, 1) });
+
+        // 1 September is summer time in Norway, two hours ahead of UTC.
+        var from = (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatRegisteredFrom!.Value;
+        Assert.Equal(new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), from);
+        Assert.Equal(DateTimeKind.Utc, from.Kind);
     }
 
     [Fact]

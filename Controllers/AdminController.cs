@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
 using garge_api.Models.Admin;
+using garge_api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -542,7 +543,8 @@ namespace garge_api.Controllers
             if (dto.VatRegisteredFrom is { } from)
             {
                 settings.VatEnabled = true;
-                settings.VatRegisteredFrom = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+                // A plain date, as the admin page sends it, means midnight in Norway.
+                settings.VatRegisteredFrom = from.Kind == DateTimeKind.Utc ? from : LocalTime.ToUtc(from);
             }
             else if (settings.VatEnabled)
                 settings.VatRegisteredFrom ??= DateTime.UtcNow;
