@@ -279,9 +279,14 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            var captured = await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre, $"capture-{order.Id}", order.IsTest);
+            // After a partial capture only the rest is captured, under its own key.
+            var captureKey = order.CapturedInOre == 0 ? $"capture-{order.Id}" : $"capture-{order.Id}-{order.CapturedInOre}";
+            var captured = await _vipps.CapturePaymentAsync(order.VippsOrderId, order.TotalInOre - order.CapturedInOre, captureKey, order.IsTest);
+            order.CapturedInOre = Math.Clamp(Math.Max(order.CapturedInOre, captured.CapturedAmountInOre), 0, order.TotalInOre);
             if (captured.CapturedAmountInOre < order.TotalInOre)
             {
+                order.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
                 _logger.LogError("Order {OrderId} capture reported {Captured} of {Total} øre captured, order stays Reserved",
                     id, captured.CapturedAmountInOre, order.TotalInOre);
                 return StatusCode(502, "Vipps did not confirm the full capture.");
@@ -330,16 +335,20 @@ namespace garge_api.Controllers
             if (string.IsNullOrEmpty(order.VippsOrderId))
                 return BadRequest("No Vipps reference found.");
 
-            var refunded = await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre, $"refund-{order.Id}", order.IsTest);
+            // After a partial refund only the rest is refunded, under its own key.
+            var refundKey = order.RefundedInOre == 0 ? $"refund-{order.Id}" : $"refund-{order.Id}-{order.RefundedInOre}";
+            var refunded = await _vipps.RefundPaymentAsync(order.VippsOrderId, order.TotalInOre - order.RefundedInOre, refundKey, order.IsTest);
+            order.RefundedInOre = Math.Clamp(Math.Max(order.RefundedInOre, refunded.RefundedAmountInOre), 0, order.TotalInOre);
             if (refunded.RefundedAmountInOre < order.TotalInOre)
             {
+                order.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
                 _logger.LogError("Order {OrderId} refund reported {Refunded} of {Total} øre refunded, order stays Paid",
                     id, refunded.RefundedAmountInOre, order.TotalInOre);
                 return StatusCode(502, "Vipps did not confirm the full refund.");
             }
 
             order.Status = OrderStatus.Refunded;
-            order.RefundedInOre = order.TotalInOre;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
@@ -488,7 +497,9 @@ namespace garge_api.Controllers
                     break;
                 case "CAPTURED":
                     // A partial capture leaves the order Reserved until the whole amount is captured.
-                    if (amount == order.TotalInOre || await PaymentTotalsAsync(order) is { CapturedAmountInOre: var captured } && captured >= order.TotalInOre)
+                    var capturedSoFar = amount == order.TotalInOre ? order.TotalInOre : (await PaymentTotalsAsync(order)).CapturedAmountInOre;
+                    order.CapturedInOre = Math.Clamp(Math.Max(order.CapturedInOre, capturedSoFar), 0, order.TotalInOre);
+                    if (order.CapturedInOre >= order.TotalInOre)
                     {
                         order.Status = OrderStatus.Paid;
                         if (order.ShippedAt == null) order.ShippedAt = DateTime.UtcNow;
@@ -522,6 +533,7 @@ namespace garge_api.Controllers
                     // Cancelling after a partial capture only releases the rest, and the customer has paid.
                     if (prevStatus == OrderStatus.Reserved && await PaymentTotalsAsync(order) is { CapturedAmountInOre: > 0 } partly)
                     {
+                        order.CapturedInOre = Math.Clamp(Math.Max(order.CapturedInOre, partly.CapturedAmountInOre), 0, order.TotalInOre);
                         // The customer paid part of the order and the rest was released. That needs a person.
                         _logger.LogError("Shop webhook {EventId}: order {OrderId} was captured for {Captured} of {Total} øre and the rest cancelled, order stays {Status} and needs manual handling",
                             eventId, order.Id, partly.CapturedAmountInOre, order.TotalInOre, order.Status);

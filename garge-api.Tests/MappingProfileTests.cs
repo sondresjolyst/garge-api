@@ -164,4 +164,16 @@ public class MappingProfileTests : ControllerTestBase
         Assert.Null(dto.UpcomingPriceInOre);
         Assert.Null(dto.UpcomingPriceFrom);
     }
+
+    [Fact]
+    public void Order_MapsTheCapturedAndRefundedAmounts()
+    {
+        var order = new garge_api.Models.Shop.Order { UserId = "u", TotalInOre = 10000, CapturedInOre = 4000, RefundedInOre = 1500 };
+
+        var dto = Mapper.Map<garge_api.Dtos.Shop.OrderResponseDto>(order);
+        var admin = Mapper.Map<garge_api.Dtos.Shop.AdminOrderResponseDto>(order);
+
+        Assert.Equal((4000, 1500), (dto.CapturedInOre, dto.RefundedInOre));
+        Assert.Equal((4000, 1500), (admin.CapturedInOre, admin.RefundedInOre));
+    }
 }

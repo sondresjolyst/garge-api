@@ -657,6 +657,7 @@ public class ShopControllerTests : ControllerTestBase
         vipps.Verify(v => v.CapturePaymentAsync("garge-order-cap", 10000, $"capture-{reserved.Id}", orderIsTest), Times.Once);
         vipps.Verify(v => v.CancelPaymentAsync("garge-order-can", $"cancel-{toCancel.Id}", orderIsTest), Times.Once);
         vipps.Verify(v => v.RefundPaymentAsync("garge-order-ref", 10000, $"refund-{paid.Id}", orderIsTest), Times.Once);
+        Assert.Equal(10000, (await db.Orders.AsNoTracking().SingleAsync(o => o.Id == reserved.Id, TestContext.Current.CancellationToken)).CapturedInOre);
     }
 
     [Fact]
@@ -922,11 +923,26 @@ public class ShopControllerTests : ControllerTestBase
         var invoice = new Mock<IInvoiceService>();
 
         await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 4000, name: "CAPTURED", psp: "psp-cap-1"), VippsReporting(captured: 4000), invoice.Object);
-        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        var afterPart = await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Reserved, 4000), (afterPart.Status, afterPart.CapturedInOre));
         invoice.VerifyNoOtherCalls();
 
         await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 6000, name: "CAPTURED", psp: "psp-cap-2"), VippsReporting(captured: 10000), invoice.Object);
-        Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        var afterAll = await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Paid, 10000), (afterAll.Status, afterAll.CapturedInOre));
+    }
+
+    [Fact]
+    public async Task Webhook_ALateCaptureEvent_NeverLowersTheCapturedAmount()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-late", OrderStatus.Reserved);
+        order.CapturedInOre = 6000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 2000, name: "CAPTURED", psp: "psp-cap-late"), VippsReporting(captured: 2000));
+
+        Assert.Equal(6000, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).CapturedInOre);
     }
 
     [Theory]
@@ -965,7 +981,8 @@ public class ShopControllerTests : ControllerTestBase
 
         await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 6000, name: "CANCELLED"), VippsReporting(captured: 4000));
 
-        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).Status);
+        var saved = await db.Orders.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Reserved, 4000), (saved.Status, saved.CapturedInOre));
         Assert.Equal(3, (await db.ShopItems.AsNoTracking().FirstAsync(TestContext.Current.CancellationToken)).StockCount);
     }
 
@@ -1095,7 +1112,8 @@ public class ShopControllerTests : ControllerTestBase
         var result = await CreateController(db, vipps: vipps).CaptureOrder(order.Id);
 
         Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
-        Assert.Equal(OrderStatus.Reserved, (await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Status);
+        var saved = await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Reserved, 9999), (saved.Status, saved.CapturedInOre));
         Assert.Equal(0, await db.Invoices.CountAsync(TestContext.Current.CancellationToken));
     }
 
@@ -1113,7 +1131,44 @@ public class ShopControllerTests : ControllerTestBase
         var result = await CreateController(db, vipps: vipps).RefundOrder(order.Id);
 
         Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
-        Assert.Equal(OrderStatus.Paid, (await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Status);
+        var saved = await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Paid, 5000), (saved.Status, saved.RefundedInOre));
+    }
+
+    [Fact]
+    public async Task CaptureOrder_AfterAPartialCapture_CapturesTheRestUnderItsOwnKey()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-rest", TotalInOre = 10000, CapturedInOre = 4000, Status = OrderStatus.Reserved };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CapturePaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = 10000 });
+
+        Assert.IsType<OkResult>(await CreateController(db, vipps: vipps).CaptureOrder(order.Id));
+
+        vipps.Verify(v => v.CapturePaymentAsync("garge-order-rest", 6000, $"capture-{order.Id}-4000", false), Times.Once);
+        var saved = await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Paid, 10000), (saved.Status, saved.CapturedInOre));
+    }
+
+    [Fact]
+    public async Task RefundOrder_AfterAPartialRefund_RefundsTheRestUnderItsOwnKey()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-refrest", TotalInOre = 10000, CapturedInOre = 10000, RefundedInOre = 2500, Status = OrderStatus.Paid };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = 10000, RefundedAmountInOre = 10000 });
+
+        Assert.IsType<OkResult>(await CreateController(db, vipps: vipps).RefundOrder(order.Id));
+
+        vipps.Verify(v => v.RefundPaymentAsync("garge-order-refrest", 7500, $"refund-{order.Id}-2500", false), Times.Once);
+        var saved = await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken);
+        Assert.Equal((OrderStatus.Refunded, 10000), (saved.Status, saved.RefundedInOre));
     }
 
     [Theory]
