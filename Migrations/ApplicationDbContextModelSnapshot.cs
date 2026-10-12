@@ -173,6 +173,38 @@ namespace garge_api.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("SjolystInnovation.AppKit.Auth.RefreshToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("Created")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("Expires")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("Revoked")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens", (string)null);
+                });
+
             modelBuilder.Entity("User", b =>
                 {
                     b.Property<string>("Id")
@@ -200,6 +232,9 @@ namespace garge_api.Migrations
 
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("EmailVerificationAttempts")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("EmailVerificationCodeExpiration")
                         .HasColumnType("timestamp with time zone");
@@ -513,38 +548,6 @@ namespace garge_api.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("AnonymizedSeries");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Auth.RefreshToken", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("Created")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("Expires")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("Revoked")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Token")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("garge_api.Models.Automation.AutomationRule", b =>
@@ -2131,6 +2134,15 @@ namespace garge_api.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SjolystInnovation.AppKit.Auth.RefreshToken", b =>
+                {
+                    b.HasOne("User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("UserProfile", b =>
                 {
                     b.HasOne("User", "User")
@@ -2151,17 +2163,6 @@ namespace garge_api.Migrations
                         .IsRequired();
 
                     b.Navigation("Series");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Auth.RefreshToken", b =>
-                {
-                    b.HasOne("User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("garge_api.Models.Group.GroupSensor", b =>
