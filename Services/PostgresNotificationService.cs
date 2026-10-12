@@ -35,9 +35,56 @@ namespace garge_api.Services
             _logger.LogWarning("PostgresNotificationService initialized");
         }
 
+        private static readonly TimeSpan FirstRetryDelay = TimeSpan.FromSeconds(1);
+        private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(30);
+
+        /// <summary>Waits between reconnect attempts. Tests replace it to skip the wait.</summary>
+        internal Func<TimeSpan, CancellationToken, Task> Delay { get; set; } = Task.Delay;
+
+        /// <summary>The wait before the next attempt: doubled each time, at most 30 seconds.</summary>
+        internal static TimeSpan NextRetryDelay(TimeSpan previous) =>
+            previous <= TimeSpan.Zero ? FirstRetryDelay : TimeSpan.FromTicks(Math.Min(previous.Ticks * 2, MaxRetryDelay.Ticks));
+
+        // A lost connection, such as after a database restart, is opened again and LISTEN is sent again.
+        // Notifications sent while it was down are not delivered.
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await using var connection = new NpgsqlConnection(_connectionString);
+            var delay = TimeSpan.Zero;
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await ListenAsync(() => delay = TimeSpan.Zero, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    delay = NextRetryDelay(delay);
+                    _logger.LogWarning(ex, "Lost the database notification connection, connecting again in {Delay}", delay);
+                    // The database most likely dropped every connection, such as on a restart. Pooled ones
+                    // would fail once each on their next use, which is the first notification handled.
+                    NpgsqlConnection.ClearAllPools();
+                    try
+                    {
+                        await Delay(delay, stoppingToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+
+        /// <summary>Opens a connection, listens and waits for notifications until the connection fails.</summary>
+        internal virtual async Task ListenAsync(Action connected, CancellationToken stoppingToken)
+        {
+            // Keepalive notices a connection that died without being closed, so the wait does not hang.
+            var builder = new NpgsqlConnectionStringBuilder(_connectionString) { KeepAlive = 30 };
+            await using var connection = new NpgsqlConnection(builder.ConnectionString);
             await connection.OpenAsync(stoppingToken);
 
             connection.Notification += async (sender, args) =>
@@ -71,6 +118,8 @@ namespace garge_api.Services
             {
                 await command.ExecuteNonQueryAsync(stoppingToken);
             }
+            _logger.LogInformation("Listening for database notifications");
+            connected();
 
             while (!stoppingToken.IsCancellationRequested)
             {
