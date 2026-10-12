@@ -178,17 +178,7 @@ namespace garge_api.Services
                 : ("VAT threshold",
                    $"Turnover over the last 12 months is {MoneyFormat.Nok((int)Math.Min(status.TurnoverInOre, int.MaxValue))} kr, {level} % of the 50 000 kr VAT registration threshold.");
 
-            var adminIds = await (
-                from ur in db.UserRoles
-                join r in db.Roles on ur.RoleId equals r.Id
-                where r.Name == RoleNames.Admin
-                select ur.UserId)
-                .Distinct()
-                .ToListAsync(ct);
-
-            var reached = false;
-            foreach (var adminId in adminIds)
-                reached |= await notifier.NotifyUserAsync(adminId, title, message, $"garge-vat-threshold-{level}", ct);
+            var reached = await notifier.NotifyAdminsAsync(db, title, message, $"garge-vat-threshold-{level}", ct);
             if (!reached)
                 logger.LogError("VAT threshold warning at {Level} % reached no admin, it is tried again with the next sale", level);
             return reached;

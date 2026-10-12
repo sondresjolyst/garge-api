@@ -14,6 +14,7 @@ namespace garge_api.Tests;
 public class SubscriptionChargeSchedulerServiceTests
 {
     private Mock<ISubscriptionEmailService> Email { get; } = new();
+    private Mock<ISecurityNotifier> Notifier { get; } = new();
 
     private (SubscriptionChargeSchedulerService svc, Mock<IVippsService> vipps, ApplicationDbContext db)
         BuildHarness(bool testMode = false, bool testConfigured = true)
@@ -27,6 +28,7 @@ public class SubscriptionChargeSchedulerServiceTests
         var vipps = new Mock<IVippsService>();
         services.AddSingleton(vipps.Object);
         services.AddSingleton(Email.Object);
+        services.AddSingleton(Notifier.Object);
 
         var settings = new Mock<IAppSettingsCache>();
         settings.Setup(s => s.GetAsync()).ReturnsAsync(new AppSettings { Id = 1, VippsTestMode = testMode });
@@ -267,6 +269,77 @@ public class SubscriptionChargeSchedulerServiceTests
 
         vipps.Verify(v => v.CreateChargeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Exactly(2));
+    }
+
+    private static async Task AddAdminAsync(ApplicationDbContext db, string userId = "admin-1")
+    {
+        if (!await db.Roles.AnyAsync(r => r.Name == "Admin"))
+            db.Roles.Add(new Microsoft.AspNetCore.Identity.IdentityRole { Id = "role-admin", Name = "Admin", NormalizedName = "ADMIN" });
+        db.UserRoles.Add(new Microsoft.AspNetCore.Identity.IdentityUserRole<string> { UserId = userId, RoleId = "role-admin" });
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task Scheduler_PostRefused_TellsEveryAdmin()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db, "admin-1");
+        await AddAdminAsync(db, "admin-2");
+        // A user with another role is not an admin.
+        db.Roles.Add(new Microsoft.AspNetCore.Identity.IdentityRole { Id = "role-default", Name = "Default", NormalizedName = "DEFAULT" });
+        db.UserRoles.Add(new Microsoft.AspNetCore.Identity.IdentityUserRole<string> { UserId = "user-1", RoleId = "role-default" });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var sub = await AddDueSubAsync(db);
+        vipps.Setup(v => v.CreateChargeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("refused"));
+        Notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        foreach (var admin in new[] { "admin-1", "admin-2" })
+            Notifier.Verify(n => n.NotifyUserAsync(admin, "Vipps refused a charge",
+                It.Is<string>(m => m.Contains($"subscription #{sub.Id} (Garge Basic)") && m.Contains("299.00 kr")
+                    && m.Contains(LocalTime.Format(sub.NextChargeDate!.Value, "yyyy-MM-dd"))),
+                $"garge-charge-refused-{sub.Id}", It.IsAny<CancellationToken>()), Times.Once);
+        Notifier.Verify(n => n.NotifyUserAsync("user-1", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Scheduler_PostAccepted_TellsNobody()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db);
+        await AddDueSubAsync(db);
+        vipps.Setup(v => v.CreateChargeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ReturnsAsync(new VippsCreateChargeResponse());
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        Notifier.Verify(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Scheduler_AlertThatFails_DoesNotStopTheOtherCharges()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db);
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var due = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(3), DateTimeKind.Utc);
+        db.Subscriptions.AddRange(
+            new Subscription { UserId = "u1", ProductId = 1, UnitPriceInOre = 29900, VippsAgreementId = "agr_bad", Status = SubscriptionStatus.Active, NextChargeDate = due },
+            new Subscription { UserId = "u2", ProductId = 1, UnitPriceInOre = 29900, VippsAgreementId = "agr_good", Status = SubscriptionStatus.Active, NextChargeDate = due });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        vipps.Setup(v => v.CreateChargeAsync("agr_bad", It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("refused"));
+        Notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("push down"));
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        vipps.Verify(v => v.CreateChargeAsync("agr_good", It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
     }
 
     [Fact]
