@@ -1508,6 +1508,9 @@ namespace garge_api.Migrations
                     b.Property<DateTime?>("EmailedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("ForRefund")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime>("IssuedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1523,6 +1526,9 @@ namespace garge_api.Migrations
                     b.Property<byte[]>("PdfData")
                         .IsRequired()
                         .HasColumnType("bytea");
+
+                    b.Property<int>("RefundedInOre")
+                        .HasColumnType("integer");
 
                     b.Property<int?>("ReplacesInvoiceId")
                         .HasColumnType("integer");
@@ -1547,7 +1553,7 @@ namespace garge_api.Migrations
 
                     b.HasIndex("CreditsInvoiceId")
                         .IsUnique()
-                        .HasFilter("\"CreditsInvoiceId\" IS NOT NULL");
+                        .HasFilter("\"CreditsInvoiceId\" IS NOT NULL AND NOT \"ForRefund\"");
 
                     b.HasIndex("OrderId")
                         .IsUnique()

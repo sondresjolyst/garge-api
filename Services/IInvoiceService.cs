@@ -11,6 +11,16 @@ namespace garge_api.Services
         Task<int> GenerateVatCorrectionsAsync(CancellationToken ct = default);
 
         /// <summary>
+        /// Makes a credit note for what has been paid back on a sale and not credited yet, against the
+        /// sale's current invoice: the replacement after a VAT correction, otherwise the original. Emails
+        /// it to the customer. Returns the credit note's id, or null when nothing was left to credit.
+        /// </summary>
+        Task<int?> CreditRefundsAsync(int saleInvoiceId, CancellationToken ct = default);
+
+        /// <summary>Credits the refunds of a shop order, once its invoice exists.</summary>
+        Task<int?> CreditOrderRefundsAsync(int orderId, CancellationToken ct = default);
+
+        /// <summary>
         /// Makes the PDFs that failed or were never made, and sends the invoice and VAT correction
         /// emails Brevo did not accept. Returns how many PDFs and corrections were made.
         /// </summary>

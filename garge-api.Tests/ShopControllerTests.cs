@@ -1118,6 +1118,67 @@ public class ShopControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task RefundOrder_CreditsTheRefund()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-credit", TotalInOre = 12500, Status = OrderStatus.Paid };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var invoice = new Mock<IInvoiceService>();
+
+        await CreateController(db, vipps: MockVipps(), invoice: invoice.Object).RefundOrder(order.Id);
+
+        invoice.Verify(i => i.CreditOrderRefundsAsync(order.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefundOrder_ShortRefund_StillCreditsWhatWasRefunded()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-shortcredit", TotalInOre = 10000, Status = OrderStatus.Paid };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundPaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ReturnsAsync(new VippsPayment { CapturedAmountInOre = 10000, RefundedAmountInOre = 5000 });
+        var invoice = new Mock<IInvoiceService>();
+
+        await CreateController(db, vipps: vipps, invoice: invoice.Object).RefundOrder(order.Id);
+
+        invoice.Verify(i => i.CreditOrderRefundsAsync(order.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefundOrder_ACreditNoteThatFails_DoesNotFailTheRefund()
+    {
+        using var db = CreateDbContext();
+        var order = new Order { UserId = "user-1", VippsOrderId = "garge-order-creditfail", TotalInOre = 12500, Status = OrderStatus.Paid };
+        await db.Orders.AddAsync(order, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.CreditOrderRefundsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("pdf down"));
+
+        var result = await CreateController(db, vipps: MockVipps(), invoice: invoice.Object).RefundOrder(order.Id);
+
+        Assert.IsType<OkResult>(result);
+        Assert.Equal(OrderStatus.Refunded, (await db.Orders.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Fact]
+    public async Task Webhook_Refund_CreditsTheRefund_AndOtherEventsDoNot()
+    {
+        using var db = CreateDbContext();
+        var order = await SeedOrderAsync(db, "garge-order-whcredit", OrderStatus.Paid);
+        var invoice = new Mock<IInvoiceService>();
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 2500, name: "REFUNDED", psp: "psp-cr-1"), VippsReporting(captured: 10000, refunded: 2500), invoice.Object);
+        invoice.Verify(i => i.CreditOrderRefundsAsync(order.Id, It.IsAny<CancellationToken>()), Times.Once);
+
+        await DeliverAsync(db, ShopEvent(order.VippsOrderId!, "msn-prod", amount: 10000, name: "CAPTURED", psp: "psp-cr-2"), VippsReporting(captured: 10000, refunded: 2500), invoice.Object);
+        invoice.Verify(i => i.CreditOrderRefundsAsync(order.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RefundOrder_VippsReportsLessRefunded_OrderStaysPaid()
     {
         using var db = CreateDbContext();

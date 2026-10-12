@@ -64,7 +64,7 @@ namespace garge_api.Services
                 .OrderBy(i => i.IssuedAt).ThenBy(i => i.Id)
                 .Select(i => new Sale(
                     i.Id, i.IssuedAt,
-                    i.Order == null ? i.AmountInOre : Math.Max(0, i.AmountInOre - i.Order.RefundedInOre),
+                    Math.Max(0, i.AmountInOre - (i.Order == null ? i.RefundedInOre : i.Order.RefundedInOre)),
                     i.VatPercentage, i.VatCorrectedAt))
                 .ToListAsync(ct);
 
@@ -111,7 +111,7 @@ namespace garge_api.Services
                     .ToList();
                 var ids = sales.Select(s => s.Id).ToList();
                 var documents = await db.Invoices.AsNoTracking()
-                    .Where(i => (i.CreditsInvoiceId != null && ids.Contains(i.CreditsInvoiceId.Value)) || (i.ReplacesInvoiceId != null && ids.Contains(i.ReplacesInvoiceId.Value)))
+                    .Where(i => (!i.ForRefund && i.CreditsInvoiceId != null && ids.Contains(i.CreditsInvoiceId.Value)) || (i.ReplacesInvoiceId != null && ids.Contains(i.ReplacesInvoiceId.Value)))
                     .Select(i => new { i.Id, i.CreditsInvoiceId, i.ReplacesInvoiceId })
                     .ToListAsync(ct);
                 owed = sales.Select(s => new VatOwedSale(

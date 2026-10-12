@@ -89,6 +89,9 @@ namespace garge_api.Services
         public Task<VippsPayment> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null) =>
             client.RefundPaymentAsync(reference, amountInOre, idempotencyKey, isTest);
 
+        public Task RefundChargeAsync(string agreementId, string chargeId, int amountInOre, string description, string idempotencyKey, bool? isTest = null) =>
+            client.RefundChargeAsync(agreementId, chargeId, amountInOre, description, idempotencyKey, isTest);
+
         public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest)
         {
             var registered = await client.RegisterWebhookAsync(url, events, isTest);

@@ -89,6 +89,33 @@ public class VatThresholdServiceTests
     }
 
     [Fact]
+    public async Task Turnover_LeavesOutWhatWasPaidBackOnSubscriptionCharges()
+    {
+        var h = await BuildAsync();
+        var charge = await h.ChargeAsync(37_375, Now.AddDays(-3));
+        charge.RefundedInOre = 7_375;
+        await h.SaleAsync(10_000, Now.AddDays(-2));
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(40_000, status.TurnoverInOre);
+    }
+
+    [Fact]
+    public async Task OwedSales_ShowTheCorrectionDocuments_NotARefundCreditNote()
+    {
+        var h = await BuildAsync();
+        var crossing = await h.SaleAsync(5_100_000, Now.AddDays(-5));
+        h.Db.Invoices.Add(new Invoice { Kind = InvoiceKind.CreditNote, ForRefund = true, CreditsInvoiceId = crossing.Id, AmountInOre = -1000, IssuedAt = Now.AddDays(-4), PdfData = [1] });
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var owed = Assert.Single((await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken)).Owed);
+
+        Assert.Null(owed.CreditNoteId);
+    }
+
+    [Fact]
     public async Task TheSaleThatPassesTheThreshold_AndEverySaleAfter_OweVatTakenOutOfThePrice()
     {
         var h = await BuildAsync();

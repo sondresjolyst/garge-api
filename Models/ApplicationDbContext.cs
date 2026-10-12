@@ -470,7 +470,8 @@ namespace garge_api.Models
             modelBuilder.Entity<Invoice>()
                 .HasIndex(i => i.CreditsInvoiceId)
                 .IsUnique()
-                .HasFilter("\"CreditsInvoiceId\" IS NOT NULL");
+                // A sale has one VAT correction credit note, and any number for refunds.
+                .HasFilter("\"CreditsInvoiceId\" IS NOT NULL AND NOT \"ForRefund\"");
             modelBuilder.Entity<Invoice>()
                 .HasIndex(i => i.ReplacesInvoiceId)
                 .IsUnique()

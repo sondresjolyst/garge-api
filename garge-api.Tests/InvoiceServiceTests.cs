@@ -554,6 +554,206 @@ public class InvoiceServiceTests
         await db.SaveChangesAsync();
     }
 
+    private static async Task<(Invoice Sale, Order Order)> InvoicedOrderAsync(ApplicationDbContext db, int vatPercent = 0)
+    {
+        var order = await SeedPaidOrderAsync(db);
+        var sale = new Invoice { OrderId = order.Id, AmountInOre = 50000, VatPercentage = vatPercent, IssuedAt = DateTime.UtcNow.AddDays(-1), EmailedAt = DateTime.UtcNow.AddDays(-1), PdfData = [1] };
+        db.Invoices.Add(sale);
+        await db.SaveChangesAsync();
+        return (sale, order);
+    }
+
+    [Fact]
+    public async Task RefundCredit_CreditsWhatWasPaidBackAndEmailsIt()
+    {
+        var (svc, db, email, _) = Create();
+        var (sale, order) = await InvoicedOrderAsync(db, vatPercent: 25);
+        order.RefundedInOre = 12500;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var noteId = await svc.CreditOrderRefundsAsync(order.Id);
+
+        var note = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == noteId, TestContext.Current.CancellationToken);
+        Assert.True(note.ForRefund);
+        Assert.Equal(InvoiceKind.CreditNote, note.Kind);
+        Assert.Equal((sale.Id, -12500, 25), (note.CreditsInvoiceId!.Value, note.AmountInOre, note.VatPercentage));
+        Assert.Null(note.OrderId);
+        Assert.NotEmpty(note.PdfData);
+        Assert.NotNull(note.EmailedAt);
+        email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(t => t.Contains($"credit note #{note.Id:D4}")), It.IsAny<string>(),
+            It.Is<IReadOnlyList<EmailAttachment>?>(a => a!.Single().FileName == $"credit-note-{note.Id:D4}.pdf")), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefundCredit_ShowsTheVatOfTheRefund()
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var (_, order) = await InvoicedOrderAsync(db, vatPercent: 25);
+        order.RefundedInOre = 12500;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        var page = html.Single();
+        Assert.Contains("CREDIT NOTE", page);
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(-2500), page);
+        Assert.Contains("Total credited</td>", page);
+    }
+
+    [Fact]
+    public async Task RefundCredit_CreditsOnlyWhatIsNew_AndNothingTwice()
+    {
+        var (svc, db, _, _) = Create();
+        var (_, order) = await InvoicedOrderAsync(db);
+        order.RefundedInOre = 10000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        Assert.Null(await svc.CreditOrderRefundsAsync(order.Id));
+        order.RefundedInOre = 50000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        Assert.Equal([-10000, -40000], await db.Invoices.Where(i => i.ForRefund).OrderBy(i => i.Id).Select(i => i.AmountInOre).ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RefundCredit_WithoutAnInvoiceYet_DoesNothing()
+    {
+        var (svc, db, _, _) = Create();
+        var order = await SeedPaidOrderAsync(db);
+        order.RefundedInOre = 10000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(await svc.CreditOrderRefundsAsync(order.Id));
+        Assert.Empty(db.Invoices);
+    }
+
+    [Fact]
+    public async Task RefundCredit_ForASubscriptionCharge_UsesTheChargesRefund()
+    {
+        var (svc, db, _, _) = Create();
+        var subscription = await SeedSubscriptionAsync(db);
+        var charge = new Invoice { SubscriptionId = subscription.Id, VippsChargeId = "chr-r", AmountInOre = 29900, RefundedInOre = 9900, IssuedAt = DateTime.UtcNow, EmailedAt = DateTime.UtcNow, PdfData = [1] };
+        db.Invoices.Add(charge);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var noteId = await svc.CreditRefundsAsync(charge.Id);
+
+        var note = await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == noteId, TestContext.Current.CancellationToken);
+        Assert.Equal((charge.Id, -9900), (note.CreditsInvoiceId!.Value, note.AmountInOre));
+    }
+
+    [Fact]
+    public async Task RefundCredit_AfterAVatCorrection_CreditsTheNewInvoiceWithItsVat()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+        await svc.GenerateVatCorrectionsAsync();
+        var replacement = await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        var order = await db.Orders.SingleAsync(o => o.Id == original.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 100_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        var note = await db.Invoices.AsNoTracking().SingleAsync(i => i.ForRefund, TestContext.Current.CancellationToken);
+        Assert.Equal((replacement.Id, -100_000, 25), (note.CreditsInvoiceId!.Value, note.AmountInOre, note.VatPercentage));
+    }
+
+    [Fact]
+    public async Task RefundCredit_AfterAVatCorrection_CountsWhatWasCreditedOnTheNewInvoice()
+    {
+        var (svc, db, _, _) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        await TurnVatOnAsync(db);
+        await svc.GenerateVatCorrectionsAsync();
+        var order = await db.Orders.SingleAsync(o => o.Id == original.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 10_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        order.RefundedInOre = 30_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+
+        Assert.Equal([-10_000, -20_000], await db.Invoices.Where(i => i.ForRefund).OrderBy(i => i.Id).Select(i => i.AmountInOre).ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RefundCredit_WhenLessIsRefundedThanCredited_CreditsNothing()
+    {
+        var (svc, db, _, _) = Create();
+        var (_, order) = await InvoicedOrderAsync(db);
+        order.RefundedInOre = 10000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+        order.RefundedInOre = 5000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Null(await svc.CreditOrderRefundsAsync(order.Id));
+        Assert.Single(db.Invoices.Where(i => i.ForRefund));
+    }
+
+    [Fact]
+    public async Task VatCorrection_AfterARefundWasCredited_CancelsOnlyWhatIsLeft()
+    {
+        var (svc, db, _, pages) = CreateForCorrections();
+        var original = await OwedInvoiceAsync(db);
+        var order = await db.Orders.SingleAsync(o => o.Id == original.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 50_000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.CreditOrderRefundsAsync(order.Id);
+        await TurnVatOnAsync(db);
+
+        await svc.GenerateVatCorrectionsAsync();
+
+        var correction = await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id && !i.ForRefund, TestContext.Current.CancellationToken);
+        var replacement = await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        Assert.Equal((-5_050_000, 5_050_000), (correction.AmountInOre, replacement.AmountInOre));
+        Assert.Single(db.Invoices.Where(i => i.ForRefund));
+        Assert.Contains($"#{correction.Id:D4}", pages["credit"]);
+    }
+
+    [Fact]
+    public async Task RefundCredit_ThatBrevoRefused_IsSentAgainByTheRetryJob()
+    {
+        var (svc, db, email, _) = Create();
+        var (_, order) = await InvoicedOrderAsync(db);
+        order.RefundedInOre = 10000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        email.Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()))
+            .ReturnsAsync(false);
+        var noteId = await svc.CreditOrderRefundsAsync(order.Id);
+        var note = await db.Invoices.SingleAsync(i => i.Id == noteId, TestContext.Current.CancellationToken);
+        Assert.Null(note.EmailedAt);
+
+        email.Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()))
+            .ReturnsAsync(true);
+        note.IssuedAt = DateTime.UtcNow.AddHours(-1);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await svc.RetryMissingPdfsAsync();
+
+        Assert.NotNull((await db.Invoices.AsNoTracking().SingleAsync(i => i.Id == noteId, TestContext.Current.CancellationToken)).EmailedAt);
+    }
+
+    [Fact]
+    public async Task RetryJob_CreditsARefundThatHasNoCreditNoteYet()
+    {
+        var (svc, db, _, _) = Create();
+        var (sale, order) = await InvoicedOrderAsync(db);
+        order.RefundedInOre = 20000;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.RetryMissingPdfsAsync();
+
+        var note = await db.Invoices.AsNoTracking().SingleAsync(i => i.ForRefund, TestContext.Current.CancellationToken);
+        Assert.Equal((sale.Id, -20000), (note.CreditsInvoiceId!.Value, note.AmountInOre));
+        await svc.RetryMissingPdfsAsync();
+        Assert.Single(db.Invoices.Where(i => i.ForRefund));
+    }
+
     [Fact]
     public async Task VatCorrections_WithVatOff_AreRefused()
     {
@@ -635,10 +835,14 @@ public class InvoiceServiceTests
 
         await svc.GenerateVatCorrectionsAsync();
 
-        // 51 000 kr less 500 kr refunded is 50 500 kr, of which 10 100 kr is VAT. The credit note cancels the whole original.
-        Assert.Equal(5_050_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
+        // The correction swaps the whole 51 000 kr sale for an invoice with VAT, and the 500 kr refund that
+        // had no credit note yet is credited against the new invoice, with its share of the VAT.
+        var replacement = await db.Invoices.AsNoTracking().SingleAsync(i => i.ReplacesInvoiceId == original.Id, TestContext.Current.CancellationToken);
+        Assert.Equal(5_100_000, replacement.AmountInOre);
         Assert.Equal(-5_100_000, (await db.Invoices.AsNoTracking().SingleAsync(i => i.CreditsInvoiceId == original.Id, TestContext.Current.CancellationToken)).AmountInOre);
-        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_010_000), pages["invoice"]);
+        var refundNote = await db.Invoices.AsNoTracking().SingleAsync(i => i.ForRefund, TestContext.Current.CancellationToken);
+        Assert.Equal((replacement.Id, -50_000, 25), (refundNote.CreditsInvoiceId!.Value, refundNote.AmountInOre, refundNote.VatPercentage));
+        Assert.Contains("VAT 25%</td><td class=\"r\">NOK " + MoneyFormat.Nok(1_020_000), pages["invoice"]);
     }
 
     [Fact]

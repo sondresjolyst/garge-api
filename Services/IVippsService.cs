@@ -38,6 +38,8 @@ namespace garge_api.Services
         Task<VippsPayment> CapturePaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
         Task CancelPaymentAsync(string reference, string idempotencyKey, bool? isTest = null);
         Task<VippsPayment> RefundPaymentAsync(string reference, int amountInOre, string idempotencyKey, bool? isTest = null);
+        /// <summary>Refunds part or all of a captured recurring charge. Vipps sends no webhook for it.</summary>
+        Task RefundChargeAsync(string agreementId, string chargeId, int amountInOre, string description, string idempotencyKey, bool? isTest = null);
 
         Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest);
         Task<IReadOnlyList<VippsWebhook>> ListWebhooksAsync(bool isTest);

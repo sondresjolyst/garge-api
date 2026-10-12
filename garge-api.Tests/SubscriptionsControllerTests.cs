@@ -4,6 +4,7 @@ using garge_api.Dtos.Subscription;
 using Microsoft.AspNetCore.Http;
 using garge_api.Models;
 using garge_api.Models.Admin;
+using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -124,6 +125,137 @@ public class SubscriptionsControllerTests : ControllerTestBase
         Assert.IsType<OkResult>(result);
         var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(expected, updated.Status);
+    }
+
+    private static async Task<Invoice> SeedChargeInvoiceAsync(ApplicationDbContext db, int amount = 29900, int refunded = 0, string? chargeId = "chr-77")
+    {
+        db.Products.Add(new Product { Id = 41, Name = "Garge Basic", PriceInOre = 29900, Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true });
+        var sub = new Subscription { UserId = "user-1", ProductId = 41, VippsAgreementId = "agr_refund", Status = SubscriptionStatus.Active, IsTest = true };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+        var invoice = new Invoice { SubscriptionId = sub.Id, VippsChargeId = chargeId, AmountInOre = amount, RefundedInOre = refunded, IssuedAt = DateTime.UtcNow, PdfData = [1] };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        return invoice;
+    }
+
+    [Fact]
+    public async Task RefundCharge_WithoutAnAmount_RefundsWhatIsLeft_AndCreditsIt()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 9900);
+        var vipps = MockVipps();
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.CreditRefundsAsync(charge.Id, It.IsAny<CancellationToken>())).ReturnsAsync(99);
+
+        var result = await CreateController(db, vipps: vipps, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.IsType<OkObjectResult>(result);
+        vipps.Verify(v => v.RefundChargeAsync("agr_refund", "chr-77", 20000, "Refund, Garge Basic", $"refund-inv-{charge.Id}-9900", true), Times.Once);
+        Assert.Equal(29900, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+        invoice.Verify(i => i.CreditRefundsAsync(charge.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefundCharge_PartOfTheCharge_RecordsJustThat()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+
+        await CreateController(db, vipps: vipps).RefundCharge(charge.Id, new RefundChargeDto { AmountInOre = 5000 });
+
+        vipps.Verify(v => v.RefundChargeAsync("agr_refund", "chr-77", 5000, It.IsAny<string>(), $"refund-inv-{charge.Id}-0", true), Times.Once);
+        Assert.Equal(5000, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(29901)]
+    public async Task RefundCharge_AnAmountOutsideWhatIsLeft_IsRefused(int amount)
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+
+        var result = await CreateController(db, vipps: vipps).RefundCharge(charge.Id, new RefundChargeDto { AmountInOre = amount });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        vipps.Verify(v => v.RefundChargeAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefundCharge_AlreadyRefundedInFull_IsRefused()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 29900);
+
+        var result = Assert.IsType<BadRequestObjectResult>(await CreateController(db).RefundCharge(charge.Id, new RefundChargeDto()));
+        Assert.Equal("The charge is already refunded in full.", result.Value);
+    }
+
+    [Fact]
+    public async Task RefundCharge_WithoutAVippsCharge_IsRefused()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, chargeId: null);
+
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db).RefundCharge(charge.Id, new RefundChargeDto()));
+    }
+
+    [Fact]
+    public async Task RefundCharge_OfAnOrderInvoiceOrUnknown_IsNotFound()
+    {
+        using var db = CreateDbContext();
+        db.Orders.Add(new Order { Id = 5, UserId = "user-1", TotalInOre = 100, Status = OrderStatus.Paid });
+        db.Invoices.Add(new Invoice { Id = 70, OrderId = 5, AmountInOre = 100, IssuedAt = DateTime.UtcNow, PdfData = [1] });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db).RefundCharge(70, new RefundChargeDto()));
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db).RefundCharge(999, new RefundChargeDto()));
+    }
+
+    [Fact]
+    public async Task RefundCharge_ThatVippsRefuses_RecordsNothing()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundChargeAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("400"));
+        var invoice = new Mock<IInvoiceService>();
+
+        var result = await CreateController(db, vipps: vipps, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(0, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+        invoice.Verify(i => i.CreditRefundsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefundCharge_ACreditNoteThatFails_StillRecordsTheRefund()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.CreditRefundsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("pdf down"));
+
+        var result = await CreateController(db, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(29900, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+    }
+
+    [Fact]
+    public async Task SubscriptionInvoices_ShowWhatWasRefunded()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 5000);
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateController(db).GetSubscriptionInvoices(charge.SubscriptionId!.Value));
+
+        Assert.Contains("\"RefundedInOre\":5000", JsonSerializer.Serialize(ok.Value));
     }
 
     [Fact]

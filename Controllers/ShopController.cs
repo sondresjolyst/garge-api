@@ -345,15 +345,24 @@ namespace garge_api.Controllers
                 await _context.SaveChangesAsync();
                 _logger.LogError("Order {OrderId} refund reported {Refunded} of {Total} øre refunded, order stays Paid",
                     id, refunded.RefundedAmountInOre, order.TotalInOre);
+                await TryCreditRefundsAsync(order.Id);
                 return StatusCode(502, "Vipps did not confirm the full refund.");
             }
 
             order.Status = OrderStatus.Refunded;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+            await TryCreditRefundsAsync(order.Id);
 
             _logger.LogInformation("Order {OrderId} refunded by admin", id);
             return Ok();
+        }
+
+        // A refund is never undone by a credit note that fails. The retry job makes it later.
+        private async Task TryCreditRefundsAsync(int orderId)
+        {
+            try { await _invoice.CreditOrderRefundsAsync(orderId); }
+            catch (Exception ex) { _logger.LogError(ex, "The credit note for the refund of order {OrderId} is made later", orderId); }
         }
 
         [HttpPost("orders/{id}/cancel")]
@@ -565,6 +574,9 @@ namespace garge_api.Controllers
                 _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
                 return Ok();
             }
+
+            if (payload.Name == "REFUNDED")
+                await TryCreditRefundsAsync(order.Id);
 
             if (prevStatus != OrderStatus.Paid && order.Status == OrderStatus.Paid)
             {
