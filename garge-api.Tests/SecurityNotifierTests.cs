@@ -17,6 +17,8 @@ public class SecurityNotifierTests : ControllerTestBase
         push.Setup(p => p.SendAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(pushDelivers);
         var email = new Mock<IEmailService>();
+        email.Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()))
+            .ReturnsAsync(true);
         return (new SecurityNotifier(db, push.Object, email.Object, NullLogger<SecurityNotifier>.Instance), push, email);
     }
 
@@ -79,5 +81,18 @@ public class SecurityNotifierTests : ControllerTestBase
 
         Assert.True(await SecurityNotifier.HasAlertChannelAsync(db, "u1", pushEnabled: true, emailEnabled: false, Ct));
         Assert.True(await SecurityNotifier.HasAlertChannelAsync(db, "u1", pushEnabled: false, emailEnabled: true, Ct));
+    }
+
+    [Fact]
+    public async Task AnEmailBrevoRefused_IsNotADeliveredAlert()
+    {
+        var db = CreateDbContext();
+        AddProfile(db, push: false, email: true);
+        await db.SaveChangesAsync(Ct);
+        var (sut, _, email) = Build(db, pushDelivers: true);
+        email.Setup(e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()))
+            .ReturnsAsync(false);
+
+        Assert.False(await sut.NotifyUserAsync("u1", "t", "m", null, Ct));
     }
 }

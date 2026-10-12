@@ -14,6 +14,7 @@ using garge_api.Services;
 using AspNetCoreRateLimit;
 using garge_api.Models.Admin;
 using Serilog;
+using SjolystInnovation.AppKit.Auth;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
@@ -106,6 +107,7 @@ namespace garge_api
             builder.Services.AddSingleton<IWebPushService, WebPushService>();
             builder.Services.AddHostedService<SensorOfflineCheckService>();
             builder.Services.AddScoped<IEmailService, EmailService>();
+            builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAuthentication(options =>
@@ -233,6 +235,9 @@ namespace garge_api
             builder.Services.AddHostedService<VippsWebhookRegistrationService>();
             builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
             builder.Services.AddHostedService<SubscriptionChargeSchedulerService>();
+            builder.Services.AddScoped<IPriceChangeService, PriceChangeService>();
+            builder.Services.AddSingleton<PriceChangeSweepService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<PriceChangeSweepService>());
 
             var allowedOrigins = builder.Configuration
                 .GetSection("Cors:AllowedOrigins")

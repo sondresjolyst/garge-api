@@ -10,6 +10,10 @@ namespace garge_api.Dtos.Subscription
         public string ProductName { get; set; } = string.Empty;
         public string ProductType { get; set; } = string.Empty;
         public int PriceInOre { get; set; }
+        /// <summary>The unit price of a notified increase, or null when none is coming.</summary>
+        public int? UpcomingPriceInOre { get; set; }
+        /// <summary>The first charge due date that pays <see cref="UpcomingPriceInOre"/>.</summary>
+        public DateTime? UpcomingPriceFrom { get; set; }
         public int Quantity { get; set; }
         public string Interval { get; set; } = string.Empty;
         public string VippsAgreementId { get; set; } = string.Empty;

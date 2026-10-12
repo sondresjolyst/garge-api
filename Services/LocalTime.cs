@@ -19,6 +19,10 @@ namespace garge_api.Services
         public static DateTime Date(DateTime utc) =>
             DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Zone).Date, DateTimeKind.Utc);
 
+        /// <summary>A Norwegian local time, such as a calendar date's midnight, as UTC.</summary>
+        public static DateTime ToUtc(DateTime local) =>
+            TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Zone);
+
         private static TimeZoneInfo Resolve()
         {
             foreach (var id in new[] { "Europe/Oslo", "W. Europe Standard Time" })

@@ -90,6 +90,10 @@ namespace garge_api.Dtos.Shop
         public string? VippsOrderId { get; set; }
         public string Status { get; set; } = string.Empty;
         public int TotalInOre { get; set; }
+        /// <summary>How much Vipps has captured. Below the total on a partly captured order.</summary>
+        public int CapturedInOre { get; set; }
+        /// <summary>How much Vipps has refunded. Above zero and below the total on a partly refunded order.</summary>
+        public int RefundedInOre { get; set; }
         public string? ShippingAddress { get; set; }
         public DateTime? ShippedAt { get; set; }
         public bool HasInvoice { get; set; }
@@ -121,6 +125,10 @@ namespace garge_api.Dtos.Shop
         public string? VippsOrderId { get; set; }
         public string Status { get; set; } = string.Empty;
         public int TotalInOre { get; set; }
+        /// <summary>How much Vipps has captured. Below the total on a partly captured order.</summary>
+        public int CapturedInOre { get; set; }
+        /// <summary>How much Vipps has refunded. Above zero and below the total on a partly refunded order.</summary>
+        public int RefundedInOre { get; set; }
         public string? ShippingAddress { get; set; }
         public DateTime? ShippedAt { get; set; }
         public bool HasInvoice { get; set; }

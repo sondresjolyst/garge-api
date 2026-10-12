@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
 using garge_api.Models.Admin;
+using garge_api.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -301,10 +302,13 @@ namespace garge_api.Controllers
                 .Where(s => s.Status == SubscriptionStatus.Active)
                 .Include(s => s.Product)
                 .Where(s => s.Product != null)
-                .Select(s => new { s.Product!.PriceInOre, s.Product.Interval })
+                .Select(s => new { s.UnitPriceInOre, s.Quantity, s.Product!.Interval })
                 .ToListAsync();
             subscriptions.MonthlyRecurringInOre = activeWithProduct.Sum(p =>
-                p.Interval == BillingInterval.Yearly ? (long)(p.PriceInOre / 12) : (long)p.PriceInOre);
+            {
+                var total = (long)p.UnitPriceInOre * p.Quantity;
+                return p.Interval == BillingInterval.Yearly ? total / 12 : total;
+            });
 
             var stats = new AdminStatsDto
             {
@@ -534,6 +538,18 @@ namespace garge_api.Controllers
             }
 
             _mapper.Map(dto, settings);
+            // The registration date and the switch move together. A date turns VAT on, turning VAT on
+            // without one starts it now, and turning it off clears the date.
+            if (dto.VatRegisteredFrom is { } from)
+            {
+                settings.VatEnabled = true;
+                // A plain date, as the admin page sends it, means midnight in Norway.
+                settings.VatRegisteredFrom = from.Kind == DateTimeKind.Utc ? from : LocalTime.ToUtc(from);
+            }
+            else if (settings.VatEnabled)
+                settings.VatRegisteredFrom ??= DateTime.UtcNow;
+            else
+                settings.VatRegisteredFrom = null;
             await _context.SaveChangesAsync();
             _settingsCache?.Invalidate();
 

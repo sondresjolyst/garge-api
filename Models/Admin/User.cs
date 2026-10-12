@@ -1,7 +1,8 @@
 using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
+using SjolystInnovation.AppKit.Auth;
 
-public class User : IdentityUser
+public class User : IdentityUser, IPasswordResetUser, IEmailVerificationUser
 {
     [Required]
     [MaxLength(50)]
@@ -11,6 +12,7 @@ public class User : IdentityUser
     public required string LastName { get; set; }
     public string? EmailVerificationCodeHash { get; set; }
     public DateTime? EmailVerificationCodeExpiration { get; set; }
+    public int EmailVerificationAttempts { get; set; }
     public string? PasswordResetCodeHash { get; set; }
     public DateTime? PasswordResetCodeExpiration { get; set; }
     public int PasswordResetAttempts { get; set; } = 0;

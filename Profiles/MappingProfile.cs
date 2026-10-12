@@ -88,7 +88,9 @@ public class MappingProfile : IRegister
             .Map(d => d.Interval, s => s.Product != null ? s.Product.Interval.ToString() : string.Empty)
             .Map(d => d.ProductName, s => s.Product != null ? s.Product.Name : string.Empty)
             .Map(d => d.ProductType, s => s.Product != null ? s.Product.Type.ToString() : string.Empty)
-            .Map(d => d.PriceInOre, s => s.Product != null ? s.Product.PriceInOre : 0)
+            .Map(d => d.PriceInOre, s => s.UnitPriceInOre)
+            .Map(d => d.UpcomingPriceInOre, s => UpcomingNotice(s) != null ? UpcomingNotice(s)!.PriceChange!.NewPriceInOre : (int?)null)
+            .Map(d => d.UpcomingPriceFrom, s => UpcomingNotice(s) != null ? UpcomingNotice(s)!.EffectiveFrom : null)
             .Map(d => d.Quantity, s => s.Quantity);
 
         // Shop mappings
@@ -113,4 +115,11 @@ public class MappingProfile : IRegister
             .Map(d => d.UserEmail, s => s.User != null ? s.User.Email ?? string.Empty : string.Empty)
             .Map(d => d.UserName, s => s.User != null ? s.User.FirstName + " " + s.User.LastName : string.Empty);
     }
+
+    // The notified increase still ahead of the subscriber, from the notices the query loaded.
+    private static PriceChangeNotice? UpcomingNotice(garge_api.Models.Subscription.Subscription sub) =>
+        sub.PriceChangeNotices
+            .Where(n => n.AppliedAt == null && n.NotifiedAt != null && n.PriceChange is { CancelledAt: null })
+            .OrderByDescending(n => n.EffectiveFrom)
+            .FirstOrDefault();
 }

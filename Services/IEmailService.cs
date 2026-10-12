@@ -9,6 +9,7 @@ public sealed class EmailAttachment
 
 public interface IEmailService
 {
-    Task SendEmailAsync(string email, string subject, string message, IReadOnlyList<EmailAttachment>? attachments = null);
+    /// <summary>Sends an email. Returns false when Brevo refused it, which is logged.</summary>
+    Task<bool> SendEmailAsync(string email, string subject, string message, IReadOnlyList<EmailAttachment>? attachments = null);
     Task<EmailStatsDto> GetEmailStatsAsync(int days = 30);
 }

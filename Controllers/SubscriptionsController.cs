@@ -3,6 +3,7 @@ using garge_api.Constants;
 using garge_api.Dtos.Subscription;
 using garge_api.Helpers;
 using garge_api.Models;
+using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -74,7 +75,7 @@ namespace garge_api.Controllers
                     UserName = s.User != null ? (s.User.FirstName + " " + s.User.LastName).Trim() : string.Empty,
                     ProductName = s.Product != null ? s.Product.Name : string.Empty,
                     ProductType = s.Product != null ? s.Product.Type.ToString() : string.Empty,
-                    PriceInOre = s.Product != null ? s.Product.PriceInOre : 0,
+                    PriceInOre = s.UnitPriceInOre,
                     Quantity = s.Quantity,
                     Interval = s.Product != null ? s.Product.Interval.ToString() : string.Empty,
                     Status = s.Status.ToString(),
@@ -110,11 +111,55 @@ namespace garge_api.Controllers
                     i.Id,
                     i.IssuedAt,
                     i.AmountInOre,
+                    i.RefundedInOre,
                     i.VippsChargeId,
                 })
                 .ToListAsync();
 
             return Ok(invoices);
+        }
+
+        /// <summary>
+        /// Refunds part or all of a captured subscription charge through Vipps, records it and sends the
+        /// customer a credit note. Without an amount, what is left of the charge is refunded. Admin only.
+        /// </summary>
+        [HttpPost("invoices/{invoiceId:int}/refund")]
+        [Authorize(Policy = "Admin")]
+        public async Task<IActionResult> RefundCharge(int invoiceId, [FromBody] RefundChargeDto dto)
+        {
+            var invoice = await _context.Invoices
+                .Include(i => i.Subscription).ThenInclude(s => s!.Product)
+                .FirstOrDefaultAsync(i => i.Id == invoiceId && i.SubscriptionId != null);
+            if (invoice?.Subscription == null) return NotFound("Subscription charge not found.");
+            if (string.IsNullOrEmpty(invoice.VippsChargeId)) return BadRequest("The charge has no Vipps charge id.");
+
+            var left = invoice.AmountInOre - invoice.RefundedInOre;
+            var amount = dto.AmountInOre ?? left;
+            if (left <= 0) return BadRequest("The charge is already refunded in full.");
+            if (amount <= 0 || amount > left) return BadRequest($"The refund must be between 1 and {left} øre.");
+
+            // Each refund of the charge has its own key, so a retried request never refunds twice.
+            var key = $"refund-inv-{invoice.Id}-{invoice.RefundedInOre}";
+            try
+            {
+                await _vipps.RefundChargeAsync(invoice.Subscription.VippsAgreementId, invoice.VippsChargeId, amount,
+                    $"Refund, {invoice.Subscription.Product?.Name ?? "subscription"}", key, invoice.Subscription.IsTest);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Refund of {Amount} øre on subscription invoice {InvoiceId} failed at Vipps", amount, invoice.Id);
+                return StatusCode(502, "Vipps did not accept the refund.");
+            }
+
+            invoice.RefundedInOre += amount;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Refunded {Amount} øre on subscription invoice {InvoiceId}", amount, invoice.Id);
+
+            int? creditNoteId = null;
+            try { creditNoteId = await _invoice.CreditRefundsAsync(invoice.Id); }
+            catch (Exception ex) { _logger.LogError(ex, "The credit note for the refund on invoice {InvoiceId} is made later", invoice.Id); }
+
+            return Ok(new { invoice.Id, invoice.AmountInOre, invoice.RefundedInOre, CreditNoteId = creditNoteId });
         }
 
         /// <summary>Downloads a single subscription invoice PDF. Owner or admin only.</summary>
@@ -143,6 +188,8 @@ namespace garge_api.Controllers
 
             var subscriptions = await _context.Subscriptions
                 .Include(s => s.Product)
+                .Include(s => s.PriceChangeNotices.Where(n => n.AppliedAt == null && n.NotifiedAt != null))
+                    .ThenInclude(n => n.PriceChange)
                 .Where(s => s.UserId == userId &&
                             (s.Status == SubscriptionStatus.Active ||
                              s.Status == SubscriptionStatus.Pending ||
@@ -222,6 +269,7 @@ namespace garge_api.Controllers
                 UserId = userId,
                 ProductId = dto.ProductId,
                 Quantity = dto.Quantity,
+                UnitPriceInOre = unitPriceInOre,
                 VippsAgreementId = string.Empty,
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
@@ -350,7 +398,12 @@ namespace garge_api.Controllers
 
             if (isIncrease)
             {
-                var unitPriceInOre = subscription.Product.PriceInOre;
+                // The ceiling covers a notified price increase too, so its first charge can go through.
+                var notices = await _context.PriceChangeNotices
+                    .Include(n => n.PriceChange)
+                    .Where(n => n.SubscriptionId == subscription.Id && n.AppliedAt == null)
+                    .ToListAsync();
+                var unitPriceInOre = SubscriptionPricing.CeilingUnitPrice(subscription, notices);
                 if ((long)unitPriceInOre * dto.Quantity > SubscriptionCharges.MaxAgreementAmountInOre)
                     return BadRequest("The total is above the 20 000 kr a Vipps agreement allows.");
                 var newCeiling = unitPriceInOre * dto.Quantity;
@@ -554,15 +607,22 @@ namespace garge_api.Controllers
                 if (product != null)
                 {
                     // The invoice shows what Vipps captured. Without an amount in the event it falls
-                    // back to what the scheduler charges for this subscription.
-                    var amountInOre = payload.AmountCaptured ?? payload.Amount
-                        ?? product.PriceInOre * subscription.Quantity;
+                    // back to what the scheduler charges for this subscription on the capture date.
+                    var amountInOre = payload.AmountCaptured ?? payload.Amount;
+                    if (amountInOre == null)
+                    {
+                        var notices = await _context.PriceChangeNotices
+                            .Include(n => n.PriceChange)
+                            .Where(n => n.SubscriptionId == subscription.Id && n.AppliedAt == null)
+                            .ToListAsync();
+                        amountInOre = SubscriptionPricing.UnitPriceFor(subscription, notices, payload.Occurred ?? DateTime.UtcNow) * subscription.Quantity;
+                    }
                     try
                     {
                         await _invoice.GenerateForSubscriptionChargeAsync(
                             subscription.Id,
                             payload.ChargeId,
-                            amountInOre,
+                            amountInOre.Value,
                             payload.Occurred ?? DateTime.UtcNow);
                     }
                     catch (Exception ex)

@@ -48,6 +48,15 @@ namespace garge_api.Models.Shop
         /// <summary>On an invoice that replaces another, the invoice it replaces.</summary>
         public int? ReplacesInvoiceId { get; set; }
 
+        /// <summary>A credit note for money paid back, as opposed to one made by a VAT correction.</summary>
+        public bool ForRefund { get; set; }
+
+        /// <summary>
+        /// On a subscription charge invoice, how much of the charge has been paid back, in øre. A shop
+        /// order keeps its refunds on the order.
+        /// </summary>
+        public int RefundedInOre { get; set; }
+
         /// <summary>
         /// For a sale made after the VAT threshold was passed, before registration: when the credit
         /// note and the new invoice with VAT were made, once VAT was on.
@@ -56,6 +65,9 @@ namespace garge_api.Models.Shop
 
         /// <summary>When the credit note and the new invoice were emailed to the customer.</summary>
         public DateTime? VatCorrectionEmailedAt { get; set; }
+
+        /// <summary>When Brevo accepted the invoice email. Null until it does, and the retry job sends it again.</summary>
+        public DateTime? EmailedAt { get; set; }
 
         /// <summary>
         /// When the PDF was last tried. A row with no PDF is a sale whose PDF failed or is being made,

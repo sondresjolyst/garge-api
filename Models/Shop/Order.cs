@@ -34,6 +34,9 @@ namespace garge_api.Models.Shop
         [Required]
         public int TotalInOre { get; set; }
 
+        /// <summary>How much of the order Vipps has captured, in øre. Below the total while a capture is partial.</summary>
+        public int CapturedInOre { get; set; }
+
         /// <summary>How much of the order Vipps has refunded, in øre.</summary>
         public int RefundedInOre { get; set; }
 

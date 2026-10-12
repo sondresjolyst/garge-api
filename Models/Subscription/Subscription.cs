@@ -40,6 +40,12 @@ namespace garge_api.Models.Subscription
         [Range(1, 50)]
         public int Quantity { get; set; } = 1;
 
+        /// <summary>
+        /// The unit price the subscriber agreed to, at signup or at the last price change they were
+        /// told of. Charges use it, not the product's current price.
+        /// </summary>
+        public int UnitPriceInOre { get; set; }
+
         [Required]
         public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Pending;
 
@@ -71,5 +77,7 @@ namespace garge_api.Models.Subscription
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        public List<PriceChangeNotice> PriceChangeNotices { get; set; } = [];
     }
 }

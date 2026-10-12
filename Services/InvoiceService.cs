@@ -66,28 +66,7 @@ namespace garge_api.Services
             var html = BuildInvoiceHtml(order, settings, invoice.Id, invoice.IssuedAt);
             await RenderAsync(db, invoice, html);
 
-            try
-            {
-                var buyerEmail = order.User?.Email;
-                if (!string.IsNullOrEmpty(buyerEmail))
-                {
-                    var attachment = new EmailAttachment
-                    {
-                        FileName = $"invoice-{invoice.Id:D4}.pdf",
-                        Content = invoice.PdfData,
-                        ContentType = "application/pdf"
-                    };
-                    await _emailService.SendEmailAsync(
-                        buyerEmail,
-                        $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html,
-                        [attachment]);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to email invoice {InvoiceId} for order {OrderId}", invoice.Id, orderId);
-            }
+            await EmailInvoiceAsync(db, invoice, order.User?.Email, settings, html);
 
             _logger.LogInformation("Invoice {InvoiceId} generated for order {OrderId}", invoice.Id, orderId);
             return invoice.Id;
@@ -154,7 +133,8 @@ namespace garge_api.Services
                     AmountInOre = amountInOre,
                     IssuedAt = occurredAt,
                     PdfData = [],
-                    VatPercentage = Pricing.VatPercentFor(settings.VatEnabled)
+                    // The capture is the sale, so its date decides the rate however late the webhook is handled.
+                    VatPercentage = Pricing.VatPercentFor(settings, occurredAt)
                 };
                 db.Invoices.Add(invoice);
                 await db.SaveChangesAsync();
@@ -164,33 +144,62 @@ namespace garge_api.Services
             var html = BuildSubscriptionInvoiceHtml(subscription, settings, invoice.Id, invoice.IssuedAt, invoice.AmountInOre, invoice.VatPercentage);
             await RenderAsync(db, invoice, html);
 
-            try
-            {
-                var buyerEmail = subscription.User?.Email;
-                if (!string.IsNullOrEmpty(buyerEmail))
-                {
-                    var attachment = new EmailAttachment
-                    {
-                        FileName = $"invoice-{invoice.Id:D4}.pdf",
-                        Content = invoice.PdfData,
-                        ContentType = "application/pdf"
-                    };
-                    await _emailService.SendEmailAsync(
-                        buyerEmail,
-                        $"Invoice #{invoice.Id:D4} — {settings.CompanyName}",
-                        html,
-                        [attachment]);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to email invoice {InvoiceId} for subscription {SubscriptionId} charge {ChargeId}",
-                    invoice.Id, subscriptionId, vippsChargeId);
-            }
+            await EmailInvoiceAsync(db, invoice, subscription.User?.Email, settings, html);
 
             _logger.LogInformation("Invoice {InvoiceId} generated for subscription {SubscriptionId} charge {ChargeId}",
                 invoice.Id, subscriptionId, vippsChargeId);
             return invoice.Id;
+        }
+
+        /// <summary>How long the retry job keeps sending an invoice email that Brevo did not accept.</summary>
+        internal static readonly TimeSpan EmailRetryFor = TimeSpan.FromDays(7);
+
+        // Emails an invoice with its PDF, and records it once Brevo accepts it. A failed email never fails the invoice.
+        private async Task EmailInvoiceAsync(ApplicationDbContext db, Invoice invoice, string? buyerEmail, AppSettings settings, string html)
+        {
+            if (string.IsNullOrEmpty(buyerEmail)) return;
+            try
+            {
+                var attachment = new EmailAttachment
+                {
+                    FileName = $"invoice-{invoice.Id:D4}.pdf",
+                    Content = invoice.PdfData,
+                    ContentType = "application/pdf"
+                };
+                if (await _emailService.SendEmailAsync(buyerEmail, $"Invoice #{invoice.Id:D4} — {settings.CompanyName}", html, [attachment]))
+                {
+                    invoice.EmailedAt = DateTime.UtcNow;
+                    await db.SaveChangesAsync();
+                }
+                else
+                {
+                    _logger.LogWarning("Invoice {InvoiceId} email was not accepted, it is retried later", invoice.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to email invoice {InvoiceId}, it is retried later", invoice.Id);
+            }
+        }
+
+        // Sends an invoice email again from the stored PDF.
+        private async Task ResendInvoiceEmailAsync(int invoiceId, CancellationToken ct)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var invoice = await db.Invoices
+                .Include(i => i.Order).ThenInclude(o => o!.User)
+                .Include(i => i.Order).ThenInclude(o => o!.OrderItems).ThenInclude(oi => oi.ShopItem)
+                .Include(i => i.Subscription).ThenInclude(s => s!.User)
+                .Include(i => i.Subscription).ThenInclude(s => s!.Product)
+                .FirstAsync(i => i.Id == invoiceId, ct);
+            var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+            if (invoice.Order != null)
+                await EmailInvoiceAsync(db, invoice, invoice.Order.User?.Email, settings,
+                    BuildInvoiceHtml(invoice.Order, settings, invoice.Id, invoice.IssuedAt));
+            else if (invoice.Subscription != null)
+                await EmailInvoiceAsync(db, invoice, invoice.Subscription.User?.Email, settings,
+                    BuildSubscriptionInvoiceHtml(invoice.Subscription, settings, invoice.Id, invoice.IssuedAt, invoice.AmountInOre, invoice.VatPercentage));
         }
 
         /// <summary>How long a PDF counts as being made before the retry job tries it again.</summary>
@@ -221,6 +230,9 @@ namespace garge_api.Services
         {
             List<(int Id, int? OrderId, int? SubscriptionId, string? ChargeId, int Amount, DateTime IssuedAt)> pending;
             List<int> corrections;
+            List<int> unsent;
+            List<int> refundNotes;
+            List<int> uncredited;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -235,6 +247,20 @@ namespace garge_api.Services
                 // VAT corrections whose PDFs or email did not go through.
                 corrections = await db.Invoices.AsNoTracking()
                     .Where(i => i.VatCorrectedAt != null && i.VatCorrectionEmailedAt == null && i.VatCorrectedAt <= cutoff)
+                    .Select(i => i.Id)
+                    .ToListAsync(ct);
+                // Refund credit notes whose PDF or email did not go through.
+                var since = DateTime.UtcNow - EmailRetryFor;
+                refundNotes = await db.Invoices.AsNoTracking()
+                    .Where(i => i.ForRefund && (i.PdfData.Length == 0 || i.EmailedAt == null) && i.IssuedAt >= since && i.IssuedAt <= cutoff)
+                    .Select(i => i.Id)
+                    .ToListAsync(ct);
+                // Sales with refunds that have no credit note yet, such as when making it failed.
+                uncredited = await UncreditedRefundsAsync(db, ct);
+                // Invoices with a PDF whose email Brevo did not accept.
+                unsent = await db.Invoices.AsNoTracking()
+                    .Where(i => i.PdfData.Length > 0 && i.EmailedAt == null && i.CreditsInvoiceId == null && i.ReplacesInvoiceId == null
+                                && i.IssuedAt >= since && i.IssuedAt <= cutoff)
                     .Select(i => i.Id)
                     .ToListAsync(ct);
             }
@@ -257,6 +283,29 @@ namespace garge_api.Services
                     _logger.LogError(ex, "Retrying the PDF for invoice {InvoiceId} failed", p.Id);
                 }
             }
+            foreach (var noteId in refundNotes)
+            {
+                try
+                {
+                    await FinishRefundCreditNoteAsync(noteId, ct);
+                    made++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Retrying the refund credit note {InvoiceId} failed", noteId);
+                }
+            }
+            foreach (var saleId in uncredited)
+            {
+                try
+                {
+                    if (await CreditRefundsAsync(saleId, ct) != null) made++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Crediting the refunds of invoice {InvoiceId} failed", saleId);
+                }
+            }
             foreach (var originalId in corrections)
             {
                 try
@@ -267,6 +316,17 @@ namespace garge_api.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Retrying the VAT correction for invoice {InvoiceId} failed", originalId);
+                }
+            }
+            foreach (var invoiceId in unsent)
+            {
+                try
+                {
+                    await ResendInvoiceEmailAsync(invoiceId, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Resending the email for invoice {InvoiceId} failed", invoiceId);
                 }
             }
             return made;
@@ -302,16 +362,22 @@ namespace garge_api.Services
                     if (original.VatCorrectedAt != null) continue;
 
                     // The credit note, the new invoice and the mark on the original are saved together.
+                    // Both cover what is left of the original after its refund credit notes. Refunds not
+                    // credited yet are credited against the new invoice afterwards.
+                    var refundCredited = -await db.Invoices
+                        .Where(i => i.ForRefund && i.CreditsInvoiceId == original.Id)
+                        .SumAsync(i => i.AmountInOre, ct);
+                    var remaining = original.AmountInOre - refundCredited;
                     var now = DateTime.UtcNow;
                     var creditNote = new Invoice
                     {
                         Kind = InvoiceKind.CreditNote, CreditsInvoiceId = original.Id,
-                        AmountInOre = -original.AmountInOre, VatPercentage = 0, IssuedAt = now, PdfData = []
+                        AmountInOre = -remaining, VatPercentage = 0, IssuedAt = now, PdfData = []
                     };
                     var replacement = new Invoice
                     {
                         Kind = InvoiceKind.Invoice, ReplacesInvoiceId = original.Id,
-                        AmountInOre = sale.AmountInOre, VatPercentage = Pricing.VatPercent, IssuedAt = now, PdfData = []
+                        AmountInOre = remaining, VatPercentage = Pricing.VatPercent, IssuedAt = now, PdfData = []
                     };
                     db.Invoices.AddRange(creditNote, replacement);
                     original.VatCorrectedAt = now;
@@ -320,6 +386,8 @@ namespace garge_api.Services
 
                     try { await FinishVatCorrectionAsync(original.Id, ct); }
                     catch (Exception ex) { _logger.LogError(ex, "VAT correction for invoice {InvoiceId} is retried later", original.Id); }
+                    try { await CreditRefundsAsync(original.Id, ct); }
+                    catch (Exception ex) { _logger.LogError(ex, "The refunds of corrected invoice {InvoiceId} are credited later", original.Id); }
                 }
                 _logger.LogInformation("Made {Count} VAT corrections", made);
                 return made;
@@ -328,6 +396,124 @@ namespace garge_api.Services
             {
                 CorrectionGate.Release();
             }
+        }
+
+        // Refunds are credited one at a time, so the same amount is never credited twice.
+        private static readonly SemaphoreSlim RefundGate = new(1, 1);
+
+        public async Task<int?> CreditOrderRefundsAsync(int orderId, CancellationToken ct = default)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var saleId = await db.Invoices.AsNoTracking()
+                .Where(i => i.OrderId == orderId && i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null)
+                .Select(i => (int?)i.Id)
+                .FirstOrDefaultAsync(ct);
+            return saleId is { } id ? await CreditRefundsAsync(id, ct) : null;
+        }
+
+        public async Task<int?> CreditRefundsAsync(int saleInvoiceId, CancellationToken ct = default)
+        {
+            int noteId;
+            await RefundGate.WaitAsync(ct);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var original = await db.Invoices.Include(i => i.Order)
+                    .FirstAsync(i => i.Id == saleInvoiceId && i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null, ct);
+                var refunded = original.Order?.RefundedInOre ?? original.RefundedInOre;
+                var replacement = await db.Invoices.FirstOrDefaultAsync(i => i.ReplacesInvoiceId == original.Id, ct);
+                var current = replacement ?? original;
+                var credited = -await db.Invoices
+                    .Where(i => i.ForRefund && (i.CreditsInvoiceId == original.Id || (replacement != null && i.CreditsInvoiceId == replacement.Id)))
+                    .SumAsync(i => i.AmountInOre, ct);
+                var toCredit = refunded - credited;
+                if (toCredit <= 0) return null;
+
+                var note = new Invoice
+                {
+                    Kind = InvoiceKind.CreditNote, ForRefund = true, CreditsInvoiceId = current.Id,
+                    AmountInOre = -toCredit, VatPercentage = current.VatPercentage, IssuedAt = DateTime.UtcNow, PdfData = []
+                };
+                db.Invoices.Add(note);
+                await db.SaveChangesAsync(ct);
+                noteId = note.Id;
+                _logger.LogInformation("Credit note {CreditNoteId} credits {Amount} øre refunded on invoice {InvoiceId}", note.Id, toCredit, current.Id);
+            }
+            finally
+            {
+                RefundGate.Release();
+            }
+
+            try { await FinishRefundCreditNoteAsync(noteId, ct); }
+            catch (Exception ex) { _logger.LogError(ex, "The refund credit note {CreditNoteId} is finished later", noteId); }
+            return noteId;
+        }
+
+        // Originals in the last two years with more refunded than credited.
+        private static async Task<List<int>> UncreditedRefundsAsync(ApplicationDbContext db, CancellationToken ct)
+        {
+            var since = DateTime.UtcNow.AddMonths(-24);
+            var refundedSales = await db.Invoices.AsNoTracking()
+                .Where(i => i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null && i.IssuedAt >= since
+                            && ((i.Order != null && i.Order.RefundedInOre > 0) || i.RefundedInOre > 0))
+                .Select(i => new { i.Id, Refunded = i.Order != null ? i.Order.RefundedInOre : i.RefundedInOre })
+                .ToListAsync(ct);
+            if (refundedSales.Count == 0) return [];
+            var ids = refundedSales.Select(s => s.Id).ToList();
+            var replacements = await db.Invoices.AsNoTracking()
+                .Where(i => i.ReplacesInvoiceId != null && ids.Contains(i.ReplacesInvoiceId.Value))
+                .Select(i => new { i.Id, Of = i.ReplacesInvoiceId!.Value })
+                .ToListAsync(ct);
+            var credits = await db.Invoices.AsNoTracking()
+                .Where(i => i.ForRefund && i.CreditsInvoiceId != null)
+                .Select(i => new { Of = i.CreditsInvoiceId!.Value, i.AmountInOre })
+                .ToListAsync(ct);
+            return refundedSales
+                .Where(s =>
+                {
+                    var docs = replacements.Where(r => r.Of == s.Id).Select(r => r.Id).Append(s.Id).ToHashSet();
+                    return s.Refunded > -credits.Where(c => docs.Contains(c.Of)).Sum(c => c.AmountInOre);
+                })
+                .Select(s => s.Id)
+                .ToList();
+        }
+
+        /// <summary>Makes a refund credit note's missing PDF and emails it to the customer once.</summary>
+        private async Task FinishRefundCreditNoteAsync(int noteId, CancellationToken ct)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+            var note = await db.Invoices.FirstAsync(i => i.Id == noteId && i.ForRefund, ct);
+            if (note.PdfData.Length > 0 && note.EmailedAt != null) return;
+            var credited = await db.Invoices.FirstAsync(i => i.Id == note.CreditsInvoiceId, ct);
+            var originalId = credited.ReplacesInvoiceId ?? credited.Id;
+            var original = await db.Invoices
+                .Include(i => i.Order).ThenInclude(o => o!.User)
+                .Include(i => i.Order).ThenInclude(o => o!.OrderItems).ThenInclude(oi => oi.ShopItem)
+                .Include(i => i.Subscription).ThenInclude(s => s!.User)
+                .Include(i => i.Subscription).ThenInclude(s => s!.Product)
+                .FirstAsync(i => i.Id == originalId, ct);
+
+            var html = BuildRefundCreditNoteHtml(original, credited, note, settings);
+            if (note.PdfData.Length == 0) await RenderAsync(db, note, html);
+            if (note.EmailedAt != null) return;
+
+            var buyerEmail = (original.Order?.User ?? original.Subscription?.User)?.Email;
+            if (!string.IsNullOrEmpty(buyerEmail))
+            {
+                var accepted = await _emailService.SendEmailAsync(
+                    buyerEmail,
+                    $"{settings.CompanyName}: credit note #{note.Id:D4} for your refund",
+                    html,
+                    [new EmailAttachment { FileName = $"credit-note-{note.Id:D4}.pdf", Content = note.PdfData, ContentType = "application/pdf" }]);
+                if (!accepted)
+                    throw new InvalidOperationException($"The email for refund credit note {noteId} was not accepted.");
+            }
+            note.EmailedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
         }
 
         // Corrections are made one run at a time, so no sale is corrected twice.
@@ -350,7 +536,7 @@ namespace garge_api.Services
                 .Include(i => i.Subscription).ThenInclude(s => s!.Product)
                 .FirstAsync(i => i.Id == originalId, ct);
             if (original.VatCorrectionEmailedAt != null) return;
-            var creditNote = await db.Invoices.FirstAsync(i => i.CreditsInvoiceId == originalId, ct);
+            var creditNote = await db.Invoices.FirstAsync(i => i.CreditsInvoiceId == originalId && !i.ForRefund, ct);
             var replacement = await db.Invoices.FirstAsync(i => i.ReplacesInvoiceId == originalId, ct);
 
             var creditHtml = BuildCreditNoteHtml(original, creditNote, replacement, settings);
@@ -361,7 +547,7 @@ namespace garge_api.Services
             var buyerEmail = (original.Order?.User ?? original.Subscription?.User)?.Email;
             if (!string.IsNullOrEmpty(buyerEmail))
             {
-                await _emailService.SendEmailAsync(
+                var accepted = await _emailService.SendEmailAsync(
                     buyerEmail,
                     $"{settings.CompanyName}: invoice #{replacement.Id:D4} with VAT replaces invoice #{original.Id:D4}, nothing more to pay",
                     invoiceHtml,
@@ -369,6 +555,8 @@ namespace garge_api.Services
                         new EmailAttachment { FileName = $"credit-note-{creditNote.Id:D4}.pdf", Content = creditNote.PdfData, ContentType = "application/pdf" },
                         new EmailAttachment { FileName = $"invoice-{replacement.Id:D4}.pdf", Content = replacement.PdfData, ContentType = "application/pdf" }
                     ]);
+                if (!accepted)
+                    throw new InvalidOperationException($"The VAT correction email for invoice {originalId} was not accepted.");
             }
             original.VatCorrectionEmailedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
@@ -445,6 +633,58 @@ namespace garge_api.Services
                 Subtitle = $"CREDIT NOTE  ·  {LocalTime.Date(creditNote.IssuedAt):yyyy-MM-dd}",
                 FootNote = $"Credits invoice #{original.Id:D4}"
             }, body, vatRegistered: true);
+        }
+
+        private static string BuildRefundCreditNoteHtml(Invoice original, Invoice credited, Invoice note, AppSettings s)
+        {
+            static string Nok(int ore) => MoneyFormat.Nok(ore);
+            static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
+            var saleDate = LocalTime.Date(credited.IssuedAt).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var goods = string.Join(", ", Goods(original).Select(g => $"{g.Quantity} x {g.Description}"));
+            var (exclVat, vatAmount) = Pricing.Split(note.AmountInOre, note.VatPercentage);
+            var creditedNumber = credited.Id.ToString("D4", CultureInfo.InvariantCulture);
+
+            var body = $$"""
+                {{Parties(s, original)}}
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th class="r">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Refund on invoice #{{creditedNumber}} of {{saleDate}}: {{H(goods)}}</td>
+                      <td class="r">NOK {{Nok(note.AmountInOre)}}</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <div class="totals-section">
+                  <table>
+                    <tbody>{{BuildVatSubRows(note.VatPercentage, exclVat, vatAmount)}}</tbody>
+                    <tbody>
+                      <tr class="grand">
+                        <td>Total credited</td>
+                        <td class="r">NOK {{Nok(note.AmountInOre)}}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="footer">
+                  <p>This credit note covers money paid back on invoice #{{creditedNumber}}. It goes back to the card or account the purchase was paid with.</p>
+                </div>
+                """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = $"#{note.Id:D4}",
+                Subtitle = $"CREDIT NOTE  ·  {LocalTime.Date(note.IssuedAt):yyyy-MM-dd}",
+                FootNote = $"Credits invoice #{credited.Id:D4}"
+            }, body, vatRegistered: note.VatPercentage > 0);
         }
 
         private static string BuildReplacementInvoiceHtml(Invoice original, Invoice replacement, Invoice creditNote, AppSettings s)

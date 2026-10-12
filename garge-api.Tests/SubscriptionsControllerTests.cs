@@ -4,6 +4,7 @@ using garge_api.Dtos.Subscription;
 using Microsoft.AspNetCore.Http;
 using garge_api.Models;
 using garge_api.Models.Admin;
+using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -124,6 +125,137 @@ public class SubscriptionsControllerTests : ControllerTestBase
         Assert.IsType<OkResult>(result);
         var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(expected, updated.Status);
+    }
+
+    private static async Task<Invoice> SeedChargeInvoiceAsync(ApplicationDbContext db, int amount = 29900, int refunded = 0, string? chargeId = "chr-77")
+    {
+        db.Products.Add(new Product { Id = 41, Name = "Garge Basic", PriceInOre = 29900, Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true });
+        var sub = new Subscription { UserId = "user-1", ProductId = 41, VippsAgreementId = "agr_refund", Status = SubscriptionStatus.Active, IsTest = true };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync();
+        var invoice = new Invoice { SubscriptionId = sub.Id, VippsChargeId = chargeId, AmountInOre = amount, RefundedInOre = refunded, IssuedAt = DateTime.UtcNow, PdfData = [1] };
+        db.Invoices.Add(invoice);
+        await db.SaveChangesAsync();
+        return invoice;
+    }
+
+    [Fact]
+    public async Task RefundCharge_WithoutAnAmount_RefundsWhatIsLeft_AndCreditsIt()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 9900);
+        var vipps = MockVipps();
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.CreditRefundsAsync(charge.Id, It.IsAny<CancellationToken>())).ReturnsAsync(99);
+
+        var result = await CreateController(db, vipps: vipps, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.IsType<OkObjectResult>(result);
+        vipps.Verify(v => v.RefundChargeAsync("agr_refund", "chr-77", 20000, "Refund, Garge Basic", $"refund-inv-{charge.Id}-9900", true), Times.Once);
+        Assert.Equal(29900, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+        invoice.Verify(i => i.CreditRefundsAsync(charge.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RefundCharge_PartOfTheCharge_RecordsJustThat()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+
+        await CreateController(db, vipps: vipps).RefundCharge(charge.Id, new RefundChargeDto { AmountInOre = 5000 });
+
+        vipps.Verify(v => v.RefundChargeAsync("agr_refund", "chr-77", 5000, It.IsAny<string>(), $"refund-inv-{charge.Id}-0", true), Times.Once);
+        Assert.Equal(5000, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(29901)]
+    public async Task RefundCharge_AnAmountOutsideWhatIsLeft_IsRefused(int amount)
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+
+        var result = await CreateController(db, vipps: vipps).RefundCharge(charge.Id, new RefundChargeDto { AmountInOre = amount });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        vipps.Verify(v => v.RefundChargeAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefundCharge_AlreadyRefundedInFull_IsRefused()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 29900);
+
+        var result = Assert.IsType<BadRequestObjectResult>(await CreateController(db).RefundCharge(charge.Id, new RefundChargeDto()));
+        Assert.Equal("The charge is already refunded in full.", result.Value);
+    }
+
+    [Fact]
+    public async Task RefundCharge_WithoutAVippsCharge_IsRefused()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, chargeId: null);
+
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db).RefundCharge(charge.Id, new RefundChargeDto()));
+    }
+
+    [Fact]
+    public async Task RefundCharge_OfAnOrderInvoiceOrUnknown_IsNotFound()
+    {
+        using var db = CreateDbContext();
+        db.Orders.Add(new Order { Id = 5, UserId = "user-1", TotalInOre = 100, Status = OrderStatus.Paid });
+        db.Invoices.Add(new Invoice { Id = 70, OrderId = 5, AmountInOre = 100, IssuedAt = DateTime.UtcNow, PdfData = [1] });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db).RefundCharge(70, new RefundChargeDto()));
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db).RefundCharge(999, new RefundChargeDto()));
+    }
+
+    [Fact]
+    public async Task RefundCharge_ThatVippsRefuses_RecordsNothing()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.RefundChargeAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("400"));
+        var invoice = new Mock<IInvoiceService>();
+
+        var result = await CreateController(db, vipps: vipps, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.Equal(502, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(0, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+        invoice.Verify(i => i.CreditRefundsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefundCharge_ACreditNoteThatFails_StillRecordsTheRefund()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db);
+        var invoice = new Mock<IInvoiceService>();
+        invoice.Setup(i => i.CreditRefundsAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("pdf down"));
+
+        var result = await CreateController(db, invoice: invoice.Object).RefundCharge(charge.Id, new RefundChargeDto());
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(29900, (await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).RefundedInOre);
+    }
+
+    [Fact]
+    public async Task SubscriptionInvoices_ShowWhatWasRefunded()
+    {
+        using var db = CreateDbContext();
+        var charge = await SeedChargeInvoiceAsync(db, refunded: 5000);
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateController(db).GetSubscriptionInvoices(charge.SubscriptionId!.Value));
+
+        Assert.Contains("\"RefundedInOre\":5000", JsonSerializer.Serialize(ok.Value));
     }
 
     [Fact]
@@ -818,7 +950,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
         var sub = new Subscription
         {
-            UserId = "user-1", ProductId = 2,
+            UserId = "user-1", ProductId = 2, UnitPriceInOre = 4900,
             VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 3
         };
         await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
@@ -924,7 +1056,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
     private static Subscription MoneySub(string agreementId, int quantity = 1, bool isTest = false, SubscriptionStatus status = SubscriptionStatus.Active) => new()
     {
-        UserId = "user-1", ProductId = 1, VippsAgreementId = agreementId,
+        UserId = "user-1", ProductId = 1, UnitPriceInOre = 29900, VippsAgreementId = agreementId,
         Status = status, Quantity = quantity, IsTest = isTest
     };
 
@@ -1534,7 +1666,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
         {
             Id = 2, Name = "Big add-on", PriceInOre = 40_001, Interval = BillingInterval.Monthly, Type = ProductType.AddOn, IsActive = true
         });
-        var sub = new Subscription { UserId = "user-1", ProductId = 2, VippsAgreementId = "agr_big", Status = SubscriptionStatus.Active, Quantity = 1 };
+        var sub = new Subscription { UserId = "user-1", ProductId = 2, UnitPriceInOre = 40_001, VippsAgreementId = "agr_big", Status = SubscriptionStatus.Active, Quantity = 1 };
         await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = MockVipps();
@@ -1544,5 +1676,80 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         vipps.Verify(v => v.UpdateAgreementMaxAmountAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
         Assert.Equal(1, (await db.Subscriptions.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).Quantity);
+    }
+
+    [Fact]
+    public async Task Initiate_SavesTheProductsPriceAsTheAgreedPrice()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.CreateAgreementAsync(It.IsAny<Product>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
+            .ReturnsAsync(new VippsCreateAgreementResponse { AgreementId = "agr_new", VippsConfirmationUrl = "https://vipps.no/c" });
+
+        await CreateController(db, vipps: vipps).InitiateSubscription(
+            new InitiateSubscriptionDto { ProductId = 1, PhoneNumber = "4791234567", ConsentToWaiveWithdrawal = true });
+
+        Assert.Equal(29900, (await db.Subscriptions.SingleAsync(TestContext.Current.CancellationToken)).UnitPriceInOre);
+    }
+
+    [Fact]
+    public async Task UpdateQuantity_Increase_DuringANotifiedPriceIncrease_SetsTheCeilingAtTheNewPrice()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddRangeAsync(MakePrimaryProduct(), MakeAddOnProduct());
+        var sub = new Subscription { UserId = "user-1", ProductId = 2, UnitPriceInOre = 4900, VippsAgreementId = "addon_agr", Status = SubscriptionStatus.Active, Quantity = 1 };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        var change = new PriceChange { ProductId = 2, OldPriceInOre = 4900, NewPriceInOre = 5900, EffectiveFrom = DateTime.UtcNow.AddDays(20) };
+        db.PriceChangeNotices.Add(new PriceChangeNotice { PriceChange = change, Subscription = sub, NotifiedAt = DateTime.UtcNow.AddDays(-10), EffectiveFrom = change.EffectiveFrom });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var vipps = MockVipps();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, vipps: vipps).UpdateSubscriptionQuantity(sub.Id, new UpdateSubscriptionQuantityDto { Quantity = 2 }));
+
+        vipps.Verify(v => v.UpdateAgreementMaxAmountAsync("addon_agr", 5900 * 2, It.IsAny<string>(), It.IsAny<bool?>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(-1, 3 * 39900)]
+    [InlineData(1, 3 * 29900)]
+    public async Task Webhook_ChargeCapturedWithoutAmount_InvoicesTheNotifiedPriceOnceInEffect(int effectiveInDays, int expected)
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var sub = MoneySub("agr_fallback", quantity: 3);
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        var change = new PriceChange { ProductId = 1, OldPriceInOre = 29900, NewPriceInOre = 39900, EffectiveFrom = DateTime.UtcNow.Date.AddDays(effectiveInDays) };
+        db.PriceChangeNotices.Add(new PriceChangeNotice { PriceChange = change, Subscription = sub, NotifiedAt = DateTime.UtcNow.AddDays(-30), EffectiveFrom = change.EffectiveFrom });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var invoice = new Mock<IInvoiceService>();
+        var payload = new
+        {
+            agreementId = "agr_fallback", msn = "msn-prod", eventId = "evt-fallback-notice",
+            eventType = "recurring.charge-captured.v1", chargeId = "chg_fallback", occurred = DateTime.UtcNow
+        };
+        var ctrl = CreateController(db, settings: WebhookSettings(vat: true), invoice: invoice.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(payload));
+
+        await ctrl.Webhook();
+
+        invoice.Verify(i => i.GenerateForSubscriptionChargeAsync(sub.Id, "chg_fallback", expected, It.IsAny<DateTime>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetAll_ShowsEachSubscriptionsAgreedPrice_NotTheProductsCurrentOne()
+    {
+        using var db = CreateDbContext();
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        await db.Users.AddAsync(new User { Id = "user-1", UserName = "u1", Email = "u1@example.com", FirstName = "U", LastName = "One" }, TestContext.Current.CancellationToken);
+        await db.Subscriptions.AddAsync(new Subscription { UserId = "user-1", ProductId = 1, UnitPriceInOre = 19900, VippsAgreementId = "agr_old", Status = SubscriptionStatus.Active }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var ok = Assert.IsType<OkObjectResult>(await CreateController(db).GetAllSubscriptions());
+
+        Assert.Equal(19900, Assert.Single(Assert.IsType<List<AdminSubscriptionResponseDto>>(ok.Value)).PriceInOre);
     }
 }

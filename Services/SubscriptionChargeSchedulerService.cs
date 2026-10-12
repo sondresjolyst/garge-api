@@ -1,3 +1,4 @@
+using garge_api.Helpers;
 using garge_api.Models;
 using garge_api.Models.Subscription;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +40,7 @@ namespace garge_api.Services
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var vipps = scope.ServiceProvider.GetRequiredService<IVippsService>();
+                var notifier = scope.ServiceProvider.GetRequiredService<ISecurityNotifier>();
 
                 var cutoff = DateTime.UtcNow + Lookahead;
 
@@ -55,6 +57,12 @@ namespace garge_api.Services
                                 && s.Product != null)
                     .ToListAsync(stoppingToken);
 
+                var dueIds = due.Select(s => s.Id).ToList();
+                var notices = await db.PriceChangeNotices
+                    .Include(n => n.PriceChange)
+                    .Where(n => dueIds.Contains(n.SubscriptionId) && n.AppliedAt == null && n.EffectiveFrom != null)
+                    .ToListAsync(stoppingToken);
+
                 foreach (var sub in due)
                 {
                     if (sub.Product == null || !sub.NextChargeDate.HasValue) continue;
@@ -69,7 +77,7 @@ namespace garge_api.Services
                     // A failed attempt needs a new charge with its own key. Reusing a key returns the failed charge.
                     var key = SubscriptionCharges.Key(sub.Id, dueDate, sub.FailedChargeAttempts);
                     if (sub.LastChargeKey == key) continue;
-                    var amountInOre = sub.Product.PriceInOre * sub.Quantity;
+                    var amountInOre = SubscriptionPricing.UnitPriceFor(sub, notices, dueDate) * sub.Quantity;
                     try
                     {
                         await vipps.CreateChargeAsync(
@@ -89,6 +97,7 @@ namespace garge_api.Services
                     {
                         _logger.LogError(ex, "ChargeScheduler: failed to post charge for subscription {SubId} due {DueDate}",
                             sub.Id, dueDate);
+                        await AlertAdminsAsync(notifier, db, sub, amountInOre, dueDate, stoppingToken);
                     }
                 }
             }
@@ -96,6 +105,25 @@ namespace garge_api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "ChargeScheduler: unexpected error during sweep.");
+            }
+        }
+
+        // Tells the admins, so a charge Vipps keeps refusing is not only in the log. The next sweep tries
+        // again, and tells them again while it keeps failing.
+        private async Task AlertAdminsAsync(ISecurityNotifier notifier, ApplicationDbContext db, Subscription sub,
+            int amountInOre, DateTime dueDate, CancellationToken ct)
+        {
+            try
+            {
+                var reached = await notifier.NotifyAdminsAsync(db, "Vipps refused a charge",
+                    $"Vipps did not take the charge of {MoneyFormat.Nok(amountInOre)} kr due {LocalTime.Format(dueDate, "yyyy-MM-dd")} for subscription #{sub.Id} ({sub.Product?.Name}). It is tried again with the next daily run. Check the agreement in the Vipps portal if it keeps failing.",
+                    $"garge-charge-refused-{sub.Id}", ct);
+                if (!reached)
+                    _logger.LogError("ChargeScheduler: the refused charge for subscription {SubId} reached no admin", sub.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ChargeScheduler: could not tell the admins about the refused charge for subscription {SubId}", sub.Id);
             }
         }
 

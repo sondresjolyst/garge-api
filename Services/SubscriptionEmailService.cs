@@ -23,7 +23,7 @@ namespace garge_api.Services
             _logger = logger;
         }
 
-        public Task SendActivatedAsync(int subscriptionId) =>
+        public Task<bool> SendActivatedAsync(int subscriptionId) =>
             SendAsync(subscriptionId, kind: "activated",
                 subjectFormat: "Subscription confirmed — {0}",
                 buildBody: (sub, s) => BuildSubscriptionEmailBody(
@@ -32,27 +32,37 @@ namespace garge_api.Services
                     intro: "Your subscription is now active.",
                     footerNote: BuildActivatedFooter(sub)));
 
-        public Task SendChargeFailedAsync(int subscriptionId) =>
+        public Task<bool> SendChargeFailedAsync(int subscriptionId) =>
             SendAsync(subscriptionId, kind: "charge-failed",
                 subjectFormat: "Action needed: subscription payment failed — {0}",
                 buildBody: (sub, s) => BuildSubscriptionEmailBody(
                     sub, s,
                     headline: "We couldn't charge your subscription",
                     intro: sub.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
-                        ? $"Hi {H(sub.User?.FirstName)}, the latest charge is above the maximum amount you approved for this agreement in Vipps. Open the Vipps app and approve the new amount. We'll try the charge again."
-                        : $"Hi {H(sub.User?.FirstName)}, the latest charge failed. We'll retry automatically — update your payment method in the Vipps app to avoid the agreement being stopped.",
+                        ? $"Hi {sub.User?.FirstName}, the latest charge is above the maximum amount you approved for this agreement in Vipps. Open the Vipps app and approve the new amount. We'll try the charge again."
+                        : $"Hi {sub.User?.FirstName}, the latest charge failed. We'll retry automatically — update your payment method in the Vipps app to avoid the agreement being stopped.",
                     footerNote: "If you've already fixed it, you can ignore this email."));
 
-        public Task SendStoppedForNonPaymentAsync(int subscriptionId) =>
+        public Task<bool> SendStoppedForNonPaymentAsync(int subscriptionId) =>
             SendAsync(subscriptionId, kind: "stopped-non-payment",
                 subjectFormat: "Subscription stopped, payment failed: {0}",
                 buildBody: (sub, s) => BuildSubscriptionEmailBody(
                     sub, s,
                     headline: "Your subscription has been stopped",
                     intro: sub.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
-                        ? $"Hi {H(sub.User?.FirstName)}, the charge for your subscription stayed above the maximum amount approved in your Vipps agreement, even after retrying over several days, so the agreement has been stopped."
-                        : $"Hi {H(sub.User?.FirstName)}, we could not charge your subscription, even after retrying over several days, so the Vipps agreement has been stopped.",
+                        ? $"Hi {sub.User?.FirstName}, the charge for your subscription stayed above the maximum amount approved in your Vipps agreement, even after retrying over several days, so the agreement has been stopped."
+                        : $"Hi {sub.User?.FirstName}, we could not charge your subscription, even after retrying over several days, so the Vipps agreement has been stopped.",
                     footerNote: "You can subscribe again under Billing at any time."));
+
+        public Task<bool> SendPriceChangeNoticeAsync(int subscriptionId, int oldUnitPriceInOre, int newUnitPriceInOre, DateTime effectiveFrom) =>
+            SendAsync(subscriptionId, kind: "price-change",
+                subjectFormat: "Price change for your subscription: {0}",
+                buildBody: (sub, s) => BuildSubscriptionEmailBody(
+                    sub, s,
+                    headline: "Your subscription price is changing",
+                    intro: $"Hi {sub.User?.FirstName}, the price of {sub.Product?.Name ?? "your subscription"} goes up from NOK {MoneyFormat.Nok(oldUnitPriceInOre * sub.Quantity)} to NOK {MoneyFormat.Nok(newUnitPriceInOre * sub.Quantity)} per {Period(sub)}. The new price applies to charges due on or after {effectiveFrom:yyyy-MM-dd}. Charges due before then keep the current price.",
+                    footerNote: $"You may cancel at no cost under Billing, also on or after {effectiveFrom:yyyy-MM-dd}. If the new amount is above the maximum you approved in Vipps, the Vipps app asks you to approve it at the first charge. If you do not approve it, the charge fails.",
+                    unitPriceInOre: newUnitPriceInOre));
 
         private static string BuildActivatedFooter(Subscription sub)
         {
@@ -66,13 +76,13 @@ namespace garge_api.Services
         }
 
         private static string BuildSubscriptionEmailBody(
-            Subscription sub, AppSettings s, string headline, string intro, string footerNote)
+            Subscription sub, AppSettings s, string headline, string intro, string footerNote, int? unitPriceInOre = null)
         {
             var productName = sub.Product?.Name ?? "Garge subscription";
-            var period = sub.Product?.Interval == BillingInterval.Yearly ? "year" : "month";
-            var price = sub.Product != null ? MoneyFormat.Nok(sub.Product.PriceInOre * sub.Quantity) : null;
+            var period = Period(sub);
+            var price = MoneyFormat.Nok((unitPriceInOre ?? sub.UnitPriceInOre) * sub.Quantity);
             var buyerName = ((sub.User?.FirstName ?? string.Empty) + " " + (sub.User?.LastName ?? string.Empty)).Trim();
-            var amountCell = price != null ? $"NOK {price} / {period}" : "—";
+            var amountCell = $"NOK {price} / {period}";
 
             var partiesHtml = EmailLayout.RenderParties(
                 from: new EmailLayout.Party
@@ -115,7 +125,9 @@ namespace garge_api.Services
                 """;
         }
 
-        private async Task SendAsync(
+        private static string Period(Subscription sub) => sub.Product?.Interval == BillingInterval.Yearly ? "year" : "month";
+
+        private async Task<bool> SendAsync(
             int subscriptionId,
             string kind,
             string subjectFormat,
@@ -133,7 +145,7 @@ namespace garge_api.Services
             {
                 _logger.LogWarning("Subscription {SubscriptionId} missing user/email — {Kind} email skipped",
                     subscriptionId, kind);
-                return;
+                return false;
             }
 
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
@@ -147,17 +159,20 @@ namespace garge_api.Services
 
             try
             {
-                await _emailService.SendEmailAsync(
+                if (!await _emailService.SendEmailAsync(
                     subscription.User.Email,
                     string.Format(subjectFormat, settings.CompanyName),
-                    html);
+                    html))
+                    return false;
                 _logger.LogInformation("Subscription {Kind} email sent for subscription {SubscriptionId}",
                     kind, subscriptionId);
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to send subscription {Kind} email for subscription {SubscriptionId}",
                     kind, subscriptionId);
+                return false;
             }
         }
 

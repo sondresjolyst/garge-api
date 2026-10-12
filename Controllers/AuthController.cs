@@ -10,12 +10,8 @@ using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
+using SjolystInnovation.AppKit.Auth;
 using Swashbuckle.AspNetCore.Annotations;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using System.Security.Cryptography;
 
 namespace garge_api.Controllers
 {
@@ -30,7 +26,8 @@ namespace garge_api.Controllers
     {
         private readonly UserManager<User> _userManager;
         private readonly SignInManager<User> _signInManager;
-        private readonly IConfiguration _configuration;
+        private readonly IJwtTokenService _jwt;
+        private readonly IRefreshTokenService _refreshTokens;
         private readonly ApplicationDbContext _context;
         private readonly IEmailService _emailService;
         private readonly IMapper _mapper;
@@ -39,7 +36,8 @@ namespace garge_api.Controllers
         public AuthController(
             UserManager<User> userManager,
             SignInManager<User> signInManager,
-            IConfiguration configuration,
+            IJwtTokenService jwt,
+            IRefreshTokenService refreshTokens,
             ApplicationDbContext context,
             IEmailService emailService,
             IMapper mapper,
@@ -47,7 +45,8 @@ namespace garge_api.Controllers
         {
             _userManager = userManager;
             _signInManager = signInManager;
-            _configuration = configuration;
+            _jwt = jwt;
+            _refreshTokens = refreshTokens;
             _context = context;
             _emailService = emailService;
             _mapper = mapper;
@@ -115,9 +114,7 @@ namespace garge_api.Controllers
                 _context.UserProfiles.Add(userProfile);
                 await _context.SaveChangesAsync();
 
-                var verificationCode = GenerateVerificationCode();
-                user.EmailVerificationCodeHash = HashText(verificationCode);
-                user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
+                var verificationCode = EmailVerificationCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
 
                 var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
@@ -188,8 +185,8 @@ namespace garge_api.Controllers
             }
 
             var userRoles = await _userManager.GetRolesAsync(user);
-            var tokenString = BuildJwt(user, userRoles);
-            var rawToken = await IssueRefreshTokenAsync(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
+            var tokenString = _jwt.Build(user, userRoles);
+            var rawToken = await _refreshTokens.IssueAsync(user.Id);
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("User logged in successfully {UserId}", user.Id);
@@ -213,9 +210,7 @@ namespace garge_api.Controllers
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user != null && !user.EmailConfirmed)
             {
-                var verificationCode = GenerateVerificationCode();
-                user.EmailVerificationCodeHash = HashText(verificationCode);
-                user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddHours(1);
+                var verificationCode = EmailVerificationCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
                 var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
                 await _emailService.SendEmailAsync(user.Email!, "Verify your email",
@@ -237,6 +232,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Email verified successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
         [SwaggerResponse(404, "User not found.")]
+        [SwaggerResponse(429, "Too many wrong codes. A new code is needed.")]
         public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto model)
         {
             _logger.LogInformation("VerifyEmail called");
@@ -250,25 +246,42 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = genericInvalid });
             }
 
-            if (user.EmailConfirmed)
+            switch (EmailVerificationCodes.Check(user, model.Code))
             {
-                _logger.LogWarning("VerifyEmail: already verified");
-                return BadRequest(new { message = genericInvalid });
+                case CodeCheck.AlreadyVerified:
+                    _logger.LogWarning("VerifyEmail: already verified");
+                    return BadRequest(new { message = genericInvalid });
+                case CodeCheck.TooManyAttempts:
+                    _logger.LogWarning("VerifyEmail failed: Too many attempts {UserId}", user.Id);
+                    return StatusCode(429, new { message = "Too many attempts. Request a new verification code." });
+                case CodeCheck.Invalid:
+                    await _userManager.UpdateAsync(user);
+                    _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
+                    return BadRequest(new { message = genericInvalid });
             }
 
-            if (user.EmailVerificationCodeHash != HashText(model.Code) || user.EmailVerificationCodeExpiration < DateTime.UtcNow)
-            {
-                _logger.LogWarning("VerifyEmail failed: Invalid or expired code");
-                return BadRequest(new { message = genericInvalid });
-            }
-
-            user.EmailConfirmed = true;
-            user.EmailVerificationCodeHash = null;
-            user.EmailVerificationCodeExpiration = null;
+            EmailVerificationCodes.Complete(user);
             await _userManager.UpdateAsync(user);
 
             _logger.LogInformation("Email verified successfully {UserId}", user.Id);
             return Ok(new { message = "Email verified successfully!" });
+        }
+
+        /// <summary>
+        /// Signs out by deleting the refresh token. It answers the same whether or not the token was live.
+        /// </summary>
+        /// <param name="request">The refresh token to delete.</param>
+        /// <returns>An IActionResult.</returns>
+        [HttpPost("logout")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Signs out by deleting the refresh token.")]
+        [SwaggerResponse(204, "Signed out.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        public async Task<IActionResult> Logout([FromBody] LogoutRequestDto request)
+        {
+            var revoked = await _refreshTokens.RevokeAsync(request.RefreshToken);
+            _logger.LogInformation("Logout called {@LogData}", new { revoked });
+            return NoContent();
         }
 
         /// <summary>
@@ -286,20 +299,10 @@ namespace garge_api.Controllers
         {
             _logger.LogInformation("RefreshToken called");
 
-            var principal = GetPrincipalFromExpiredToken(request.Token);
-            if (principal == null)
-            {
-                _logger.LogWarning("RefreshToken failed: Invalid token provided");
-                return BadRequest(new { message = "Invalid token" });
-            }
-
-            var userId = principal.Claims.FirstOrDefault(x =>
-                x.Type == JwtRegisteredClaimNames.Sub ||
-                x.Type == ClaimTypes.NameIdentifier
-            )?.Value;
+            var userId = _jwt.ReadUserIdFromExpired(request.Token);
             if (userId == null)
             {
-                _logger.LogWarning("RefreshToken failed: User ID not found in token");
+                _logger.LogWarning("RefreshToken failed: Invalid token provided");
                 return BadRequest(new { message = "Invalid token" });
             }
 
@@ -310,107 +313,20 @@ namespace garge_api.Controllers
                 return Unauthorized(new { message = "User not found" });
             }
 
-            var hashedInput = HashText(request.RefreshToken);
-
-            using var tx = await _context.Database.BeginTransactionAsync();
-
-            // Reuse detection: if the presented token matches a row we have
-            // already revoked, treat it as a stolen-token replay and revoke
-            // every refresh token in the family.
-            var anyMatch = await _context.RefreshTokens
-                .FirstOrDefaultAsync(t => t.Token == hashedInput && t.UserId == user.Id);
-
-            if (anyMatch != null && anyMatch.Revoked != null)
+            var rotation = await _refreshTokens.RotateAsync(user.Id, request.RefreshToken);
+            if (rotation.Status != RotationStatus.Rotated)
             {
-                var now = DateTime.UtcNow;
-                var familyLive = await _context.RefreshTokens
-                    .Where(t => t.UserId == user.Id && t.Revoked == null)
-                    .ToListAsync();
-                foreach (var t in familyLive) t.Revoked = now;
-                await _context.SaveChangesAsync();
-                await tx.CommitAsync();
-                _logger.LogWarning("RefreshToken reuse detected; family revoked {@LogData}", new { user.Id });
+                _logger.LogWarning("RefreshToken failed: {Status} {@LogData}", rotation.Status, new { user.Id });
                 return Unauthorized(new { message = "Invalid or expired refresh token" });
             }
-
-            var storedToken = anyMatch != null && anyMatch.Revoked == null && anyMatch.Expires > DateTime.UtcNow
-                ? anyMatch
-                : null;
-
-            if (storedToken == null)
-            {
-                await tx.RollbackAsync();
-                _logger.LogWarning("RefreshToken failed: Invalid or expired refresh token {@LogData}", new { user.Id });
-                return Unauthorized(new { message = "Invalid or expired refresh token" });
-            }
-
-            // Revoke old refresh token, issue a fresh JWT + refresh token
-            storedToken.Revoked = DateTime.UtcNow;
 
             var userRoles = await _userManager.GetRolesAsync(user);
-            var newTokenString = BuildJwt(user, userRoles);
-            var newRawToken = await IssueRefreshTokenAsync(user.Id ?? throw new InvalidOperationException("Authenticated user has no ID."));
-
-            await _context.SaveChangesAsync();
-            await tx.CommitAsync();
+            var newTokenString = _jwt.Build(user, userRoles);
+            var newRawToken = rotation.RefreshToken!;
 
             _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
             return Ok(new { token = newTokenString, refreshToken = newRawToken });
         }
-
-        private string BuildJwt(User user, IList<string> roles)
-        {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty);
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName ?? string.Empty),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty)
-            };
-            claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-
-            var tokenDescriptor = new SecurityTokenDescriptor
-            {
-                Subject = new ClaimsIdentity(claims),
-                Expires = DateTime.UtcNow.AddHours(1),
-                NotBefore = DateTime.UtcNow.AddSeconds(-5),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
-                Issuer = _configuration["Jwt:Issuer"],
-                Audience = _configuration["Jwt:Issuer"]
-            };
-            return tokenHandler.WriteToken(tokenHandler.CreateToken(tokenDescriptor));
-        }
-
-        /// <summary>
-        /// Adds a new refresh token row for the user (capped at 5 active per user).
-        /// Caller must SaveChangesAsync. Returns the raw (un-hashed) token to send to the client.
-        /// </summary>
-        private async Task<string> IssueRefreshTokenAsync(string userId)
-        {
-            var rawToken = GenerateRefreshToken();
-            var hashedToken = HashText(rawToken);
-
-            var userTokens = await _context.RefreshTokens
-                .Where(t => t.UserId == userId && t.Revoked == null && t.Expires > DateTime.UtcNow)
-                .OrderBy(t => t.Created)
-                .ToListAsync();
-            if (userTokens.Count >= 5)
-            {
-                _context.RefreshTokens.Remove(userTokens.First());
-                _logger.LogInformation("Oldest refresh token evicted (cap=5) {@LogData}", new { UserId = userId });
-            }
-
-            _context.RefreshTokens.Add(new RefreshToken
-            {
-                Token = hashedToken,
-                UserId = userId,
-                Expires = DateTime.UtcNow.AddMonths(6),
-                Created = DateTime.UtcNow
-            });
-            return rawToken;
-        }
-
         /// <summary>
         /// Request a password reset code via email.
         /// </summary>
@@ -427,10 +343,7 @@ namespace garge_api.Controllers
             var user = await _userManager.FindByEmailAsync(model.Email);
             if (user != null)
             {
-                var code = GenerateVerificationCode();
-                user.PasswordResetCodeHash = HashText(code);
-                user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(30);
-                user.PasswordResetAttempts = 0;
+                var code = PasswordResetCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
                 var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
                 await _emailService.SendEmailAsync(user.Email!, "Password Reset Code",
@@ -465,18 +378,15 @@ namespace garge_api.Controllers
                 return BadRequest(new { message = genericInvalid });
             }
 
-            if (user.PasswordResetAttempts >= 5)
+            switch (PasswordResetCodes.Check(user, model.Code))
             {
-                _logger.LogWarning("ResetPassword failed: Too many attempts {UserId}", user.Id);
-                return StatusCode(429, new { message = "Too many attempts. Request a new reset code." });
-            }
-
-            if (user.PasswordResetCodeHash != HashText(model.Code) || user.PasswordResetCodeExpiration < DateTime.UtcNow)
-            {
-                user.PasswordResetAttempts++;
-                await _userManager.UpdateAsync(user);
-                _logger.LogWarning("ResetPassword failed: Invalid or expired code");
-                return BadRequest(new { message = genericInvalid });
+                case CodeCheck.TooManyAttempts:
+                    _logger.LogWarning("ResetPassword failed: Too many attempts {UserId}", user.Id);
+                    return StatusCode(429, new { message = "Too many attempts. Request a new reset code." });
+                case CodeCheck.Invalid:
+                    await _userManager.UpdateAsync(user);
+                    _logger.LogWarning("ResetPassword failed: Invalid or expired code");
+                    return BadRequest(new { message = genericInvalid });
             }
 
             var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
@@ -488,71 +398,14 @@ namespace garge_api.Controllers
                 return BadRequest(result.Errors);
             }
 
-            user.PasswordResetCodeHash = null;
-            user.PasswordResetCodeExpiration = null;
-            user.PasswordResetAttempts = 0;
-            // A successful reset proves the user controls the account, so clear any login lockout —
-            // otherwise a user who locked themselves out with the old password still gets 401 with the
-            // new one until the lockout window expires.
-            user.LockoutEnd = null;
-            user.AccessFailedCount = 0;
+            PasswordResetCodes.Complete(user);
             await _userManager.UpdateAsync(user);
+            // A new password ends every session, so one that was taken over cannot carry on.
+            var signedOut = await _refreshTokens.RevokeAllForUserAsync(user.Id);
+            _logger.LogInformation("Password reset signed out {Sessions} session(s) {UserId}", signedOut, user.Id);
 
             _logger.LogInformation("Password reset successfully {UserId}", user.Id);
             return Ok(new { message = "Password reset successfully." });
-        }
-
-        private static string GenerateVerificationCode()
-        {
-            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            var result = new char[6];
-            for (int i = 0; i < result.Length; i++)
-                result[i] = chars[RandomNumberGenerator.GetInt32(chars.Length)];
-            return new string(result);
-        }
-
-        private string HashText(string text)
-        {
-            using var sha256 = SHA256.Create();
-            var bytes = Encoding.UTF8.GetBytes(text);
-            var hash = sha256.ComputeHash(bytes);
-            return Convert.ToBase64String(hash);
-        }
-
-        private string GenerateRefreshToken()
-        {
-            var randomNumber = new byte[32];
-            using var rng = RandomNumberGenerator.Create();
-            rng.GetBytes(randomNumber);
-            return Convert.ToBase64String(randomNumber);
-        }
-
-        private ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
-        {
-            var tokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateAudience = false,
-                ValidateIssuer = false,
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? string.Empty)),
-                ValidateLifetime = false
-            };
-
-            var tokenHandler = new JwtSecurityTokenHandler();
-            try
-            {
-                var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out var securityToken);
-                if (securityToken is JwtSecurityToken jwtSecurityToken &&
-                    jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.InvariantCultureIgnoreCase))
-                {
-                    return principal;
-                }
-            }
-            catch
-            {
-                return null;
-            }
-            return null;
         }
     }
 }

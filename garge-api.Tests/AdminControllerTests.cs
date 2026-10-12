@@ -37,6 +37,7 @@ public class AdminControllerTests : ControllerTestBase
             .Returns<UpdateAppSettingsDto, AppSettings>((src, dst) =>
             {
                 if (src.CookieBannerEnabled.HasValue) dst.CookieBannerEnabled = src.CookieBannerEnabled.Value;
+                if (src.VatEnabled.HasValue) dst.VatEnabled = src.VatEnabled.Value;
                 return dst;
             });
 
@@ -113,6 +114,72 @@ public class AdminControllerTests : ControllerTestBase
         var ok = Assert.IsType<OkObjectResult>(result);
         var dto = Assert.IsType<AppSettingsDto>(ok.Value);
         Assert.False(dto.CookieBannerEnabled);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_TurningVatOn_StartsItNow()
+    {
+        var db = CreateDbContext();
+        var before = DateTime.UtcNow;
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = true });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.True(settings.VatEnabled);
+        Assert.InRange(settings.VatRegisteredFrom!.Value, before, DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_ARegistrationDate_TurnsVatOnFromThatDate()
+    {
+        var db = CreateDbContext();
+        var registered = new DateTime(2026, 9, 1, 12, 30, 0, DateTimeKind.Utc);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatRegisteredFrom = registered });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.True(settings.VatEnabled);
+        Assert.Equal(registered, settings.VatRegisteredFrom);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_APlainDate_MeansMidnightInNorway()
+    {
+        var db = CreateDbContext();
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatRegisteredFrom = new DateTime(2026, 9, 1) });
+
+        // 1 September is summer time in Norway, two hours ahead of UTC.
+        var from = (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatRegisteredFrom!.Value;
+        Assert.Equal(new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), from);
+        Assert.Equal(DateTimeKind.Utc, from.Kind);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_ChangingSomethingElse_KeepsTheRegistrationDate()
+    {
+        var db = CreateDbContext();
+        var registered = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        db.AppSettings.Add(new AppSettings { Id = 1, VatEnabled = true, VatRegisteredFrom = registered });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = true, CookieBannerEnabled = false });
+
+        Assert.Equal(registered, (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).VatRegisteredFrom);
+    }
+
+    [Fact]
+    public async Task UpdateAppSettings_TurningVatOff_ClearsTheRegistrationDate()
+    {
+        var db = CreateDbContext();
+        db.AppSettings.Add(new AppSettings { Id = 1, VatEnabled = true, VatRegisteredFrom = DateTime.UtcNow.AddDays(-3) });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await CreateAdminController(db).UpdateAppSettings(new UpdateAppSettingsDto { VatEnabled = false });
+
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        Assert.False(settings.VatEnabled);
+        Assert.Null(settings.VatRegisteredFrom);
     }
 
     [Fact]
@@ -223,9 +290,9 @@ public class AdminControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         db.Subscriptions.AddRange(
-            new Subscription { UserId = "u1", ProductId = monthly.Id, VippsAgreementId = "agr-1", Status = SubscriptionStatus.Active },
-            new Subscription { UserId = "u2", ProductId = monthly.Id, VippsAgreementId = "agr-2", Status = SubscriptionStatus.Active },
-            new Subscription { UserId = "u3", ProductId = yearly.Id, VippsAgreementId = "agr-3", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u1", ProductId = monthly.Id, UnitPriceInOre = 29900, VippsAgreementId = "agr-1", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u2", ProductId = monthly.Id, UnitPriceInOre = 29900, Quantity = 2, VippsAgreementId = "agr-2", Status = SubscriptionStatus.Active },
+            new Subscription { UserId = "u3", ProductId = yearly.Id, UnitPriceInOre = 299000, VippsAgreementId = "agr-3", Status = SubscriptionStatus.Active },
             new Subscription { UserId = "u4", ProductId = monthly.Id, VippsAgreementId = "agr-4", Status = SubscriptionStatus.Pending });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
@@ -236,7 +303,7 @@ public class AdminControllerTests : ControllerTestBase
         Assert.Equal(3, dto.Subscriptions.Active);
         Assert.Equal(1, dto.Subscriptions.PendingConfirm);
         // 2 * 29900 (monthly) + 299000 / 12 (yearly normalized) = 59800 + 24916 = 84716
-        Assert.Equal(29900L * 2 + 299000L / 12, dto.Subscriptions.MonthlyRecurringInOre);
+        Assert.Equal(29900L * 3 + 299000L / 12, dto.Subscriptions.MonthlyRecurringInOre);
     }
 
     [Fact]
@@ -273,8 +340,8 @@ public class AdminControllerTests : ControllerTestBase
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         db.Subscriptions.AddRange(
-            new Subscription { UserId = "u1", ProductId = 1, VippsAgreementId = "live", Status = SubscriptionStatus.Active, IsTest = false },
-            new Subscription { UserId = "u2", ProductId = 1, VippsAgreementId = "test", Status = SubscriptionStatus.Active, IsTest = true });
+            new Subscription { UserId = "u1", ProductId = 1, UnitPriceInOre = 5000, VippsAgreementId = "live", Status = SubscriptionStatus.Active, IsTest = false },
+            new Subscription { UserId = "u2", ProductId = 1, UnitPriceInOre = 5000, VippsAgreementId = "test", Status = SubscriptionStatus.Active, IsTest = true });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await CreateAdminController(db).GetStats(test: true);

@@ -1,5 +1,6 @@
 using garge_api.Dtos.Auth;
 using garge_api.Models.Auth;
+using SjolystInnovation.AppKit.Auth;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using SignInResult = Microsoft.AspNetCore.Identity.SignInResult;
@@ -290,6 +291,83 @@ public class AuthControllerTests : ControllerTestBase
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    private User UnverifiedUser(string code)
+    {
+        var user = MakeUser();
+        user.EmailConfirmed = false;
+        user.EmailVerificationCodeHash = Sha256B64(code);
+        user.EmailVerificationCodeExpiration = DateTime.UtcNow.AddMinutes(30);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        return user;
+    }
+
+    [Fact]
+    public async Task VerifyEmail_RightCode_ConfirmsTheEmail()
+    {
+        var user = UnverifiedUser("ABC123");
+
+        var result = await CreateAuthController().VerifyEmail(new VerifyEmailDto { Email = user.Email!, Code = "ABC123" });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.True(user.EmailConfirmed);
+        Assert.Null(user.EmailVerificationCodeHash);
+        MockUserManager.Verify(m => m.UpdateAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyEmail_WrongCode_CountsTheAttempt()
+    {
+        var user = UnverifiedUser("ABC123");
+
+        var result = await CreateAuthController().VerifyEmail(new VerifyEmailDto { Email = user.Email!, Code = "WRONG1" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.False(user.EmailConfirmed);
+        Assert.Equal(1, user.EmailVerificationAttempts);
+        MockUserManager.Verify(m => m.UpdateAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyEmail_AfterFiveWrongCodes_RefusesEvenTheRightOne()
+    {
+        var user = UnverifiedUser("ABC123");
+        var controller = CreateAuthController();
+        for (var i = 0; i < 5; i++)
+            await controller.VerifyEmail(new VerifyEmailDto { Email = user.Email!, Code = "WRONG1" });
+
+        var result = await controller.VerifyEmail(new VerifyEmailDto { Email = user.Email!, Code = "ABC123" });
+
+        var status = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(429, status.StatusCode);
+        Assert.False(user.EmailConfirmed);
+    }
+
+    [Fact]
+    public async Task VerifyEmail_AlreadyVerified_ReturnsGenericBadRequest()
+    {
+        var user = UnverifiedUser("ABC123");
+        user.EmailConfirmed = true;
+
+        var result = await CreateAuthController().VerifyEmail(new VerifyEmailDto { Email = user.Email!, Code = "ABC123" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        MockUserManager.Verify(m => m.UpdateAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendEmailConfirmation_StartsTheAttemptsOver()
+    {
+        var user = UnverifiedUser("ABC123");
+        user.EmailVerificationAttempts = 5;
+
+        await CreateAuthController().ResendEmailConfirmation(new ResendEmailConfirmationDto { Email = user.Email! });
+
+        Assert.Equal(0, user.EmailVerificationAttempts);
+        Assert.NotEqual(Sha256B64("ABC123"), user.EmailVerificationCodeHash);
+        Assert.True(user.EmailVerificationCodeExpiration > DateTime.UtcNow.AddMinutes(59));
+    }
+
     [Fact]
     public async Task ResetPassword_UnknownEmail_ReturnsGenericBadRequest()
     {
@@ -305,6 +383,109 @@ public class AuthControllerTests : ControllerTestBase
     {
         using var sha = System.Security.Cryptography.SHA256.Create();
         return Convert.ToBase64String(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(t)));
+    }
+
+    [Fact]
+    public async Task ResetPassword_WrongCode_SavesTheAttempt()
+    {
+        var user = MakeUser();
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        var result = await CreateAuthController().ResetPassword(
+            new ResetPasswordDto { Email = user.Email!, Code = "WRONG1", NewPassword = "Password1!" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(1, user.PasswordResetAttempts);
+        MockUserManager.Verify(m => m.UpdateAsync(user), Times.Once);
+    }
+
+    [Fact]
+    public async Task Logout_DeletesTheLiveTokenAndKeepsTheOthers()
+    {
+        await using var db = CreateDbContext();
+        var refreshTokens = AuthServices(db).RefreshTokens;
+        var raw = await refreshTokens.IssueAsync("user-1");
+        var other = await refreshTokens.IssueAsync("user-1");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).Logout(new LogoutRequestDto { RefreshToken = raw });
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Equal(Sha256B64(other), Assert.Single(db.RefreshTokens).Token);
+    }
+
+    [Fact]
+    public async Task Logout_UnknownToken_AnswersTheSame()
+    {
+        await using var db = CreateDbContext();
+        await AuthServices(db).RefreshTokens.IssueAsync("user-1");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).Logout(new LogoutRequestDto { RefreshToken = "made-up" });
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Single(db.RefreshTokens);
+    }
+
+    [Fact]
+    public async Task RefreshToken_DeletedUser_ReturnsUnauthorized()
+    {
+        await using var db = CreateDbContext();
+        var user = MakeUser();
+        user.IsDeleted = true;
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        var (jwt, refreshTokens) = AuthServices(db);
+        var raw = await refreshTokens.IssueAsync(user.Id);
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).RefreshToken(new RefreshTokenRequestDto { Token = jwt.Build(user, []), RefreshToken = raw });
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+        Assert.Null(db.RefreshTokens.Single().Revoked);
+    }
+
+    [Fact]
+    public async Task ResetPassword_Success_SignsOutEveryDevice()
+    {
+        await using var db = CreateDbContext();
+        var user = MakeUser();
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.GeneratePasswordResetTokenAsync(user)).ReturnsAsync("token");
+        MockUserManager.Setup(m => m.ResetPasswordAsync(user, "token", It.IsAny<string>())).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        var refreshTokens = AuthServices(db).RefreshTokens;
+        await refreshTokens.IssueAsync(user.Id);
+        await refreshTokens.IssueAsync(user.Id);
+        await refreshTokens.IssueAsync("someone-else");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).ResetPassword(
+            new ResetPasswordDto { Email = user.Email!, Code = "ABCDEF", NewPassword = "Password1!" });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal("someone-else", Assert.Single(db.RefreshTokens).UserId);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WrongCode_KeepsTheSessions()
+    {
+        await using var db = CreateDbContext();
+        var user = MakeUser();
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        await AuthServices(db).RefreshTokens.IssueAsync(user.Id);
+        await db.SaveChangesAsync();
+
+        await CreateAuthController(db).ResetPassword(new ResetPasswordDto { Email = user.Email!, Code = "WRONG1", NewPassword = "Password1!" });
+
+        Assert.Single(db.RefreshTokens);
     }
 
     [Fact]

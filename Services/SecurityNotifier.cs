@@ -1,3 +1,4 @@
+using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,27 @@ namespace garge_api.Services
     public interface ISecurityNotifier
     {
         Task<bool> NotifyUserAsync(string userId, string title, string message, string? tag = null, CancellationToken ct = default);
+    }
+
+    public static class SecurityNotifierExtensions
+    {
+        /// <summary>Sends the message to every admin. True when at least one admin was reached.</summary>
+        public static async Task<bool> NotifyAdminsAsync(this ISecurityNotifier notifier, ApplicationDbContext db,
+            string title, string message, string? tag = null, CancellationToken ct = default)
+        {
+            var adminIds = await (
+                from ur in db.UserRoles
+                join r in db.Roles on ur.RoleId equals r.Id
+                where r.Name == RoleNames.Admin
+                select ur.UserId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            var reached = false;
+            foreach (var adminId in adminIds)
+                reached |= await notifier.NotifyUserAsync(adminId, title, message, tag, ct);
+            return reached;
+        }
     }
 
     public class SecurityNotifier(
@@ -53,8 +75,7 @@ namespace garge_api.Services
                 {
                     var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
                     var html = SecurityEmailTemplates.Alert(settings, profile.User.FirstName, title, message);
-                    await email.SendEmailAsync(profile.User.Email, title, html);
-                    emailDelivered = true;
+                    emailDelivered = await email.SendEmailAsync(profile.User.Email, title, html);
                 }
                 catch (Exception ex)
                 {
