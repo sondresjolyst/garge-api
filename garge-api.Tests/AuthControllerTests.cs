@@ -448,6 +448,47 @@ public class AuthControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task ResetPassword_Success_SignsOutEveryDevice()
+    {
+        await using var db = CreateDbContext();
+        var user = MakeUser();
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.GeneratePasswordResetTokenAsync(user)).ReturnsAsync("token");
+        MockUserManager.Setup(m => m.ResetPasswordAsync(user, "token", It.IsAny<string>())).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        var refreshTokens = AuthServices(db).RefreshTokens;
+        await refreshTokens.IssueAsync(user.Id);
+        await refreshTokens.IssueAsync(user.Id);
+        await refreshTokens.IssueAsync("someone-else");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).ResetPassword(
+            new ResetPasswordDto { Email = user.Email!, Code = "ABCDEF", NewPassword = "Password1!" });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal("someone-else", Assert.Single(db.RefreshTokens).UserId);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WrongCode_KeepsTheSessions()
+    {
+        await using var db = CreateDbContext();
+        var user = MakeUser();
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        await AuthServices(db).RefreshTokens.IssueAsync(user.Id);
+        await db.SaveChangesAsync();
+
+        await CreateAuthController(db).ResetPassword(new ResetPasswordDto { Email = user.Email!, Code = "WRONG1", NewPassword = "Password1!" });
+
+        Assert.Single(db.RefreshTokens);
+    }
+
+    [Fact]
     public async Task ResetPassword_Success_ClearsLockout()
     {
         // A user who locked themselves out with the old password must be able to sign in with the new

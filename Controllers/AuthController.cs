@@ -400,6 +400,9 @@ namespace garge_api.Controllers
 
             PasswordResetCodes.Complete(user);
             await _userManager.UpdateAsync(user);
+            // A new password ends every session, so one that was taken over cannot carry on.
+            var signedOut = await _refreshTokens.RevokeAllForUserAsync(user.Id);
+            _logger.LogInformation("Password reset signed out {Sessions} session(s) {UserId}", signedOut, user.Id);
 
             _logger.LogInformation("Password reset successfully {UserId}", user.Id);
             return Ok(new { message = "Password reset successfully." });
