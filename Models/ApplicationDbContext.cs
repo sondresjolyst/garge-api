@@ -1,5 +1,4 @@
 ﻿using garge_api.Models.Admin;
-using garge_api.Models.Auth;
 using garge_api.Models.Automation;
 using garge_api.Models.Electricity;
 using garge_api.Models.Group;
@@ -15,11 +14,12 @@ using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using SjolystInnovation.AppKit.Auth;
 
 namespace garge_api.Models
 {
     public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext
+        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext, IAuthDbContext
     {
         public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
         public DbSet<UserProfile> UserProfiles { get; set; }
@@ -75,6 +75,7 @@ namespace garge_api.Models
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+            modelBuilder.AddAppKitRefreshTokens<User>();
 
             modelBuilder.Entity<UserProfile>()
                 .HasOne(up => up.User)

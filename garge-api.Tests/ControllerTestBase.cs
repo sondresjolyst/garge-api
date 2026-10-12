@@ -9,10 +9,12 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Moq;
+using SjolystInnovation.AppKit.Auth;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -65,10 +67,24 @@ public abstract class ControllerTestBase
             .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
-    protected AuthController CreateAuthController(ApplicationDbContext? db = null) =>
-        new(MockUserManager.Object, MockSignInManager.Object, Configuration,
-            db ?? CreateDbContext(), MockEmailService.Object, MockMapper.Object,
-            NullLogger<AuthController>.Instance);
+    /// <summary>The token services as the app registers them, on the given database.</summary>
+    protected (IJwtTokenService Jwt, IRefreshTokenService RefreshTokens) AuthServices(ApplicationDbContext db)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(db);
+        services.AddAppKitAuth<ApplicationDbContext>(Configuration.GetSection("Jwt"));
+        var provider = services.BuildServiceProvider();
+        return (provider.GetRequiredService<IJwtTokenService>(), provider.GetRequiredService<IRefreshTokenService>());
+    }
+
+    protected AuthController CreateAuthController(ApplicationDbContext? db = null)
+    {
+        db ??= CreateDbContext();
+        var (jwt, refreshTokens) = AuthServices(db);
+        return new(MockUserManager.Object, MockSignInManager.Object, jwt, refreshTokens,
+            db, MockEmailService.Object, MockMapper.Object, NullLogger<AuthController>.Instance);
+    }
 
     protected static AutomationController CreateAutomationController(
         ApplicationDbContext db, string userId = "user-1", bool isAdmin = false, ISecurityModeService? security = null)

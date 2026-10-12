@@ -4,7 +4,7 @@ using garge_api.Dtos.User;
 using garge_api.Helpers;
 using garge_api.Hubs;
 using garge_api.Models;
-using garge_api.Models.Auth;
+using SjolystInnovation.AppKit.Auth;
 using garge_api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
