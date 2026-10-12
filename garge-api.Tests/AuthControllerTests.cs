@@ -403,6 +403,34 @@ public class AuthControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Logout_DeletesTheLiveTokenAndKeepsTheOthers()
+    {
+        await using var db = CreateDbContext();
+        var refreshTokens = AuthServices(db).RefreshTokens;
+        var raw = await refreshTokens.IssueAsync("user-1");
+        var other = await refreshTokens.IssueAsync("user-1");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).Logout(new LogoutRequestDto { RefreshToken = raw });
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Equal(Sha256B64(other), Assert.Single(db.RefreshTokens).Token);
+    }
+
+    [Fact]
+    public async Task Logout_UnknownToken_AnswersTheSame()
+    {
+        await using var db = CreateDbContext();
+        await AuthServices(db).RefreshTokens.IssueAsync("user-1");
+        await db.SaveChangesAsync();
+
+        var result = await CreateAuthController(db).Logout(new LogoutRequestDto { RefreshToken = "made-up" });
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Single(db.RefreshTokens);
+    }
+
+    [Fact]
     public async Task RefreshToken_DeletedUser_ReturnsUnauthorized()
     {
         await using var db = CreateDbContext();

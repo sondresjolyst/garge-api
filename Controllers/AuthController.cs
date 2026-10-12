@@ -268,6 +268,23 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Signs out by deleting the refresh token. It answers the same whether or not the token was live.
+        /// </summary>
+        /// <param name="request">The refresh token to delete.</param>
+        /// <returns>An IActionResult.</returns>
+        [HttpPost("logout")]
+        [AllowAnonymous]
+        [SwaggerOperation(Summary = "Signs out by deleting the refresh token.")]
+        [SwaggerResponse(204, "Signed out.")]
+        [SwaggerResponse(400, "Invalid request.")]
+        public async Task<IActionResult> Logout([FromBody] LogoutRequestDto request)
+        {
+            var revoked = await _refreshTokens.RevokeAsync(request.RefreshToken);
+            _logger.LogInformation("Logout called {@LogData}", new { revoked });
+            return NoContent();
+        }
+
+        /// <summary>
         /// Refresh JWT using a valid refresh token.
         /// </summary>
         /// <param name="request">The refresh token request.</param>
