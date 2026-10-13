@@ -3,9 +3,7 @@ using garge_api.Constants;
 using Mapster;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi;
@@ -40,8 +38,6 @@ namespace garge_api
             builder.Host.UseSerilog();
 
             builder.Configuration.AddEnvironmentVariables();
-            var jwtIssuer = builder.Configuration.GetSection("Jwt:Issuer").Get<string>();
-            var jwtKey = builder.Configuration.GetSection("Jwt:Key").Get<string>() ?? string.Empty;
 
             builder.Services.AddResponseCompression(options =>
             {
@@ -66,22 +62,7 @@ namespace garge_api
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-            builder.Services.AddIdentity<User, IdentityRole>(options =>
-                {
-                    options.Lockout.MaxFailedAccessAttempts = 5;
-                    options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
-                    options.Lockout.AllowedForNewUsers = true;
-
-                    options.Password.RequiredLength = 8;
-                    options.Password.RequireDigit = true;
-                    options.Password.RequireLowercase = true;
-                    options.Password.RequireUppercase = true;
-                    options.Password.RequireNonAlphanumeric = false;
-
-                    options.User.RequireUniqueEmail = true;
-                })
-                .AddEntityFrameworkStores<ApplicationDbContext>()
-                .AddDefaultTokenProviders();
+            builder.Services.AddAppKitIdentity<User, ApplicationDbContext>();
 
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
@@ -100,7 +81,6 @@ namespace garge_api
             builder.Services.AddHostedService(sp => sp.GetRequiredService<BatteryHealthAnalyzerService>());
             builder.Services.AddHostedService<PostgresNotificationService>();
             builder.Services.AddSingleton<PostgresNotificationService>();
-            builder.Services.AddHostedService<garge_api.Services.RefreshTokenCleanupService>();
             builder.Services.AddHttpClient("webpush");
             builder.Services.AddSingleton<IWebPushService, WebPushService>();
             builder.Services.AddHostedService<SensorOfflineCheckService>();
@@ -108,66 +88,7 @@ namespace garge_api
             builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
             builder.Services.AddEndpointsApiExplorer();
 
-            builder.Services.AddAuthentication(options =>
-            {
-                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-            }).AddJwtBearer(options =>
-            {
-                options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidateAudience = true,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    ValidIssuer = jwtIssuer,
-                    ValidAudience = jwtIssuer,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                    ClockSkew = TimeSpan.FromSeconds(30)
-                };
-                options.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
-                {
-                    // SignalR cannot send Authorization headers during the WebSocket
-                    // upgrade, so the standard convention is ?access_token=<jwt> in the
-                    // negotiate URL. RequestLoggingMiddleware logs Path only (no query),
-                    // so the token does not reach app logs. Operational note: configure
-                    // any reverse proxy / CDN / Kestrel access log to scrub
-                    // ?access_token= for /hubs/* paths before logs are written or shipped.
-                    OnMessageReceived = ctx =>
-                    {
-                        var accessToken = ctx.Request.Query["access_token"];
-                        var path = ctx.HttpContext.Request.Path;
-                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
-                        {
-                            ctx.Token = accessToken;
-                        }
-                        return Task.CompletedTask;
-                    },
-                    OnTokenValidated = async ctx =>
-                    {
-                        var userId = ctx.Principal?.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
-                        if (string.IsNullOrEmpty(userId))
-                        {
-                            ctx.Fail("Missing user id claim.");
-                            return;
-                        }
-
-                        var cache = ctx.HttpContext.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
-                        var cacheKey = $"user_exists:{userId}";
-                        if (cache.TryGetValue(cacheKey, out bool exists))
-                        {
-                            if (!exists) ctx.Fail("User no longer exists.");
-                            return;
-                        }
-
-                        var db = ctx.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
-                        exists = await db.Users.AsNoTracking().AnyAsync(u => u.Id == userId);
-                        cache.Set(cacheKey, exists, TimeSpan.FromSeconds(60));
-                        if (!exists) ctx.Fail("User no longer exists.");
-                    }
-                };
-            });
+            builder.Services.AddAppKitJwtBearer<User>(u => !u.IsDeleted, o => o.QueryTokenPaths.Add("/hubs"));
 
             builder.Services.AddAppKitHealthChecks<ApplicationDbContext>();
 
