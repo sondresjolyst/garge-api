@@ -11,17 +11,15 @@ using System.Text.Json.Serialization;
 using Microsoft.OpenApi;
 using System.Reflection;
 using garge_api.Services;
-using AspNetCoreRateLimit;
 using garge_api.Models.Admin;
 using Serilog;
 using SjolystInnovation.AppKit.Auth;
+using SjolystInnovation.AppKit.Hosting;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Caching.Memory;
 using System.Security.Claims;
 
@@ -171,8 +169,7 @@ namespace garge_api
                 };
             });
 
-            builder.Services.AddHealthChecks()
-                .AddDbContextCheck<ApplicationDbContext>("db", tags: ["ready"]);
+            builder.Services.AddAppKitHealthChecks<ApplicationDbContext>();
 
             builder.Services.AddAuthorization(options =>
             {
@@ -256,9 +253,7 @@ namespace garge_api
             });
 
             builder.Services.AddMemoryCache();
-            builder.Services.Configure<IpRateLimitOptions>(builder.Configuration.GetSection("IpRateLimiting"));
-            builder.Services.AddSingleton<IRateLimitConfiguration, RateLimitConfiguration>();
-            builder.Services.AddInMemoryRateLimiting();
+            builder.Services.AddAppKitRateLimiting(builder.Configuration.GetSection("RateLimiting"));
 
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
@@ -352,28 +347,11 @@ namespace garge_api
                 }
             }
 
-            var fwd = new ForwardedHeadersOptions
-            {
-                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-                ForwardLimit = 1
-            };
-            fwd.KnownIPNetworks.Clear();
-            fwd.KnownProxies.Clear();
-            // Only the ingress may set the client IP. Without a trusted proxy, X-Forwarded-For is
-            // dropped and RemoteIpAddress stays at the in-cluster pod IP.
-            foreach (var cidr in app.Configuration.GetSection("TrustedProxies").Get<string[]>() ?? [])
-                fwd.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
-            app.UseForwardedHeaders(fwd);
+            app.UseAppKitForwardedHeaders();
 
-            if (!app.Environment.IsDevelopment())
-            {
-                app.UseHsts();
-                // Probes reach the pod over plain HTTP and send no X-Forwarded-Proto, so a
-                // redirect would fail them if an HTTPS port is ever configured.
-                app.UseWhen(
-                    context => !context.Request.Path.StartsWithSegments("/health"),
-                    branch => branch.UseHttpsRedirection());
-            }
+            app.UseAppKitSecurityHeaders();
+
+            app.UseAppKitHttps();
 
             app.UseResponseCompression();
             app.UseSwagger();
@@ -387,20 +365,10 @@ namespace garge_api
             app.UseCors("AllowAllOrigins");
             app.UseAuthentication();
             app.UseAuthorization();
-            app.UseIpRateLimiting();
+            app.UseAppKitRateLimiting();
             app.MapControllers();
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
-            // Liveness and startup. Reports that the process is up, with no dependency checks,
-            // so a database outage does not restart the pod.
-            app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false })
-                .AllowAnonymous();
-
-            // Readiness. Fails while the database is unreachable, which takes the pod out of
-            // the Service instead of letting it serve errors.
-            app.MapHealthChecks("/health/ready", new HealthCheckOptions
-            {
-                Predicate = check => check.Tags.Contains("ready")
-            }).AllowAnonymous();
+            app.MapAppKitHealthChecks();
             app.Run();
         }
     }
