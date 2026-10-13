@@ -379,6 +379,36 @@ public class AuthControllerTests : ControllerTestBase
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    [Fact]
+    public async Task ResetPassword_SoftDeletedUser_ReturnsGenericBadRequest()
+    {
+        var user = MakeUser();
+        user.IsDeleted = true;
+        user.PasswordResetCodeHash = Sha256B64("ABCDEF");
+        user.PasswordResetCodeExpiration = DateTime.UtcNow.AddMinutes(10);
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+
+        var result = await CreateAuthController().ResetPassword(
+            new ResetPasswordDto { Email = user.Email!, Code = "ABCDEF", NewPassword = "Password1!" });
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        MockUserManager.Verify(m => m.ResetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPasswordReset_SoftDeletedUser_SendsNothing()
+    {
+        var user = MakeUser();
+        user.IsDeleted = true;
+        MockUserManager.Setup(m => m.FindByEmailAsync(user.Email!)).ReturnsAsync(user);
+
+        var result = await CreateAuthController().RequestPasswordReset(new RequestPasswordResetDto { Email = user.Email! });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Null(user.PasswordResetCodeHash);
+        MockUserManager.Verify(m => m.UpdateAsync(It.IsAny<User>()), Times.Never);
+    }
+
     private static string Sha256B64(string t)
     {
         using var sha = System.Security.Cryptography.SHA256.Create();

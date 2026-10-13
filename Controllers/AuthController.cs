@@ -341,7 +341,7 @@ namespace garge_api.Controllers
             _logger.LogInformation("RequestPasswordReset called");
 
             var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user != null)
+            if (user != null && !user.IsDeleted)
             {
                 var code = PasswordResetCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
@@ -372,7 +372,7 @@ namespace garge_api.Controllers
             const string genericInvalid = "Invalid or expired reset code!";
 
             var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("ResetPassword: unknown email");
                 return BadRequest(new { message = genericInvalid });
