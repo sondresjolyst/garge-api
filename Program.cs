@@ -355,15 +355,14 @@ namespace garge_api
             var fwd = new ForwardedHeadersOptions
             {
                 ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-                ForwardLimit = 2
+                ForwardLimit = 1
             };
             fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
-            // Trust any caller. In our k8s deployment the only path to the pod is
-            // through the ingress controller, so the immediate caller is always a
-            // trusted reverse proxy. Without this, X-Forwarded-For is dropped and
-            // RemoteIpAddress stays at the in-cluster pod IP.
-            fwd.KnownIPNetworks.Add(new System.Net.IPNetwork(System.Net.IPAddress.Any, 0));
+            // Only the ingress may set the client IP. Without a trusted proxy, X-Forwarded-For is
+            // dropped and RemoteIpAddress stays at the in-cluster pod IP.
+            foreach (var cidr in app.Configuration.GetSection("TrustedProxies").Get<string[]>() ?? [])
+                fwd.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(cidr));
             app.UseForwardedHeaders(fwd);
 
             if (!app.Environment.IsDevelopment())

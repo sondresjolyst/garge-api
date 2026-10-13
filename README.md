@@ -33,6 +33,7 @@ Production reads these from the cluster secret.
 | `Vapid__PublicKey`, `Vapid__PrivateKey` | Web push |
 | `Vipps__*` | Payment, including the test merchant credentials |
 | `PUPPETEER_NO_SANDBOX` | Set to `1` in the cluster. Chrome's own sandbox cannot start in the pod |
+| `TrustedProxies` | CIDRs allowed to set `X-Forwarded-For`. Defaults to the private ranges. A wildcard would let any caller forge the client IP the rate limiter reads |
 
 ## What it serves
 
