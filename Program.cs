@@ -1,4 +1,4 @@
-﻿using garge_api.Models;
+using garge_api.Models;
 using garge_api.Constants;
 using Mapster;
 using MapsterMapper;
@@ -13,6 +13,7 @@ using garge_api.Models.Admin;
 using Serilog;
 using SjolystInnovation.AppKit.Auth;
 using SjolystInnovation.AppKit.Hosting;
+using SjolystInnovation.AppKit.Email;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
@@ -84,6 +85,7 @@ namespace garge_api
             builder.Services.AddHttpClient("webpush");
             builder.Services.AddSingleton<IWebPushService, WebPushService>();
             builder.Services.AddHostedService<SensorOfflineCheckService>();
+            builder.Services.AddAppKitBrevo(builder.Configuration.GetSection("BrevoSettings"));
             builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
             builder.Services.AddEndpointsApiExplorer();
