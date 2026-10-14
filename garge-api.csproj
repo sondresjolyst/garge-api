@@ -39,7 +39,7 @@
     <PackageReference Include="PuppeteerSharp" Version="25.12.0" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
-    <PackageReference Include="SjolystInnovation.AppKit.Auth" Version="0.4.0" />
+    <PackageReference Include="SjolystInnovation.AppKit.Auth" Version="0.5.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Email" Version="0.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Hosting" Version="0.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Vipps" Version="0.2.0" />

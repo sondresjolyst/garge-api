@@ -34,6 +34,18 @@ namespace garge_api.Services
                 expiry: "30 minutes",
                 ignoreNote: "If you didn't request a password reset, you can ignore this email — your password won't change.");
 
+        public static string Invite(AppSettings s, string? firstName, string code) =>
+            Build(s,
+                metaWord: "INVITE",
+                subtitleLabel: "ACCOUNT INVITE",
+                codeLabel: "Invite code",
+                heading: "Set your password",
+                intro: $"an account has been created for you at {H(s.CompanyName)}. Enter the code below on the reset password page to choose your password.",
+                firstName: firstName,
+                code: code,
+                expiry: "7 days",
+                ignoreNote: "If you weren't expecting this invite, you can ignore this email.");
+
         private static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
         private static string Build(
