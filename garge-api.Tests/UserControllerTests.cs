@@ -22,21 +22,8 @@ public class UserControllerTests : ControllerTestBase
 {
     private UserController CreateUserController(ApplicationDbContext db, string callerId = "user-1")
     {
-        var ownership = new Mock<IDeviceOwnershipService>().Object;
-        var tracker = new Mock<IHubConnectionTracker>();
-        tracker.Setup(t => t.GetConnectionIds(It.IsAny<string>())).Returns(Array.Empty<string>());
-
-        var clients = new Mock<IHubClients>();
-        clients.Setup(c => c.Clients(It.IsAny<IReadOnlyList<string>>())).Returns(Mock.Of<IClientProxy>());
-        var hub = new Mock<IHubContext<DeviceHub>>();
-        hub.SetupGet(h => h.Clients).Returns(clients.Object);
-
-        var anonymizer = new AnonymizationService(db, NullLogger<AnonymizationService>.Instance);
-
-        var controller = new UserController(
-            db, MockUserManager.Object, MockMapper.Object,
-            NullLogger<UserController>.Instance,
-            ownership, tracker.Object, hub.Object, anonymizer, new PermissionService(db));
+        var controller = new UserController(db, MockUserManager.Object, MockMapper.Object,
+            NullLogger<UserController>.Instance, new PermissionService(db));
         controller.ControllerContext = MakeControllerContext(callerId);
         return controller;
     }
@@ -49,128 +36,31 @@ public class UserControllerTests : ControllerTestBase
     };
 
     [Fact]
-    public async Task DeleteOwnAccount_SoftDeletes_ScrubsPiiAndKeepsOrders()
+    public async Task DeleteOwnAccount_DeletesThroughTheSharedDeleter()
     {
         using var db = CreateDbContext();
         var user = MakeDbUser();
         MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
-        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
-        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        var deleter = new Mock<IAccountDeleter<User>>();
 
-        db.Orders.Add(new Order
-        {
-            Id = 1, UserId = user.Id, VippsOrderId = "garge-order-000001",
-            TotalInOre = 9900, Status = OrderStatus.Paid
-        });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
+        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id, deleter.Object);
 
         Assert.IsType<NoContentResult>(result);
-        Assert.True(user.IsDeleted);
-        Assert.NotNull(user.DeletedAt);
-        Assert.Equal("Deleted", user.FirstName);
-        Assert.Equal("User", user.LastName);
-        // Email must remain a valid, unique, non-PII value — Identity's RequireUniqueEmail
-        // rejects null/empty (regression: account deletion used to 400 with InvalidEmail).
-        Assert.Equal($"deleted-{user.Id}@deleted.invalid", user.Email);
-        Assert.Equal(user.Email!.ToUpperInvariant(), user.NormalizedEmail);
-        Assert.DoesNotContain("user@test.com", user.Email!);
-        Assert.Null(user.PhoneNumber);
-        // Login credential and the terms-acceptance IP are personal data with no basis to outlive
-        // the account — both must be cleared so the soft-deleted row holds no recoverable PII.
-        Assert.Null(user.PasswordHash);
-        Assert.Null(user.TermsAcceptedIp);
-        Assert.False(user.EmailConfirmed);
-        Assert.Equal(DateTimeOffset.MaxValue, user.LockoutEnd);
-
-        Assert.Single(db.Orders);
-        Assert.Equal(OrderStatus.Paid, db.Orders.First().Status);
+        deleter.Verify(d => d.DeleteAsync(user, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task DeleteOwnAccount_RemovesUserOwnedTables()
+    public async Task DeleteOwnAccount_LastAdmin_ReturnsConflict()
     {
         using var db = CreateDbContext();
         var user = MakeDbUser();
         MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
-        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
-        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        var deleter = new Mock<IAccountDeleter<User>>();
+        deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(new LastAdminException());
 
-        db.RefreshTokens.Add(new RefreshToken
-        {
-            Token = "t", UserId = user.Id,
-            Expires = DateTime.UtcNow.AddMonths(1), Created = DateTime.UtcNow
-        });
-        db.PushSubscriptions.Add(new PushSubscription
-        {
-            Id = 1, UserId = user.Id, Endpoint = "https://push", P256dh = "k", Auth = "a"
-        });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id, deleter.Object);
 
-        await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
-
-        Assert.Empty(db.RefreshTokens);
-        Assert.Empty(db.PushSubscriptions);
-    }
-
-    [Fact]
-    public async Task DeleteOwnAccount_MovesTelemetryToMlStore_AndLeavesNoOrphans()
-    {
-        using var db = CreateDbContext();
-        var user = MakeDbUser();
-        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
-        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
-        MockUserManager.Setup(m => m.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
-
-        db.Sensors.Add(new Sensor { Id = 1, Name = "garge_volt", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" });
-        db.UserSensors.Add(new UserSensor { UserId = user.Id, SensorId = 1, IsOwner = true });
-        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = user.Id, SensorId = 1, StartedAt = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), EndedAt = null });
-        db.SensorData.AddRange(
-            new SensorData { SensorId = 1, Value = "12.5", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new SensorData { SensorId = 1, Value = "12.6", Timestamp = new DateTime(2020, 3, 1, 0, 0, 0, DateTimeKind.Utc) });
-        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Status = "ok", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) });
-        db.SensorPhotos.Add(new SensorPhoto { UserId = user.Id, SensorId = 1, ContentType = "image/jpeg", Data = "AQID" });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
-
-        // Telemetry moved to the anonymized ML store...
-        Assert.Equal(2, db.AnonymizedReadings.Count());
-        Assert.Equal("voltage", db.AnonymizedSeries.Single().SourceType);
-        // ...and no personal telemetry / photos / ownership rows left behind (orphan-bug fix).
-        Assert.Empty(db.SensorData);
-        Assert.Empty(db.BatteryHealthData);
-        Assert.Empty(db.SensorPhotos);
-        Assert.Empty(db.SensorOwnershipPeriods);
-        Assert.Empty(db.UserSensors);
-    }
-
-    [Fact]
-    public async Task DeleteOwnAccount_ScrubbedUser_PassesRealIdentityValidation()
-    {
-        // Regression: ScrubUserPiiAsync used to null out the email, which Identity's
-        // RequireUniqueEmail validator rejects — DeleteOwnAccount then 400'd, and because
-        // anonymization had already committed it left the account half-deleted. Here the mock
-        // UpdateAsync delegates to the real UserValidator so the scrubbed user is genuinely
-        // validated: this fails (BadRequest) on a null email and passes on the placeholder.
-        using var db = CreateDbContext();
-        var user = MakeDbUser();
-        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
-        MockUserManager.Setup(m => m.UpdateSecurityStampAsync(user)).ReturnsAsync(IdentityResult.Success);
-        MockUserManager.Object.Options = new IdentityOptions { User = { RequireUniqueEmail = true } };
-        MockUserManager.Setup(m => m.GetUserNameAsync(user)).ReturnsAsync(() => user.UserName);
-        MockUserManager.Setup(m => m.GetEmailAsync(user)).ReturnsAsync(() => user.Email);
-        MockUserManager.Setup(m => m.FindByNameAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
-        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
-        MockUserManager.Setup(m => m.UpdateAsync(user))
-            .Returns(() => new UserValidator<User>().ValidateAsync(MockUserManager.Object, user));
-
-        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
-
-        Assert.IsType<NoContentResult>(result);
-        Assert.True(user.IsDeleted);
-        Assert.EndsWith("@deleted.invalid", user.Email);
+        Assert.Equal(409, Assert.IsType<ConflictObjectResult>(result).StatusCode);
     }
 
     [Fact]
@@ -180,18 +70,24 @@ public class UserControllerTests : ControllerTestBase
         var user = MakeDbUser();
         user.IsDeleted = true;
         MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        var deleter = new Mock<IAccountDeleter<User>>();
 
-        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id);
+        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id, deleter.Object);
 
         Assert.IsType<NotFoundObjectResult>(result);
+        deleter.VerifyNoOtherCalls();
     }
 
     [Fact]
     public async Task DeleteOwnAccount_OtherUser_ReturnsForbidden()
     {
         using var db = CreateDbContext();
-        var result = await CreateUserController(db, callerId: "user-1").DeleteOwnAccount("user-2");
+        var deleter = new Mock<IAccountDeleter<User>>();
+
+        var result = await CreateUserController(db, callerId: "user-1").DeleteOwnAccount("user-2", deleter.Object);
+
         Assert.IsType<ForbidResult>(result);
+        deleter.VerifyNoOtherCalls();
     }
 
     [Fact]

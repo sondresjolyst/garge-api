@@ -30,10 +30,6 @@ namespace garge_api.Controllers
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
         private readonly ILogger<UserController> _logger;
-        private readonly IDeviceOwnershipService _ownership;
-        private readonly IHubConnectionTracker _hubConnections;
-        private readonly IHubContext<DeviceHub> _hub;
-        private readonly IAnonymizationService _anonymizer;
         private readonly IPermissionService _permissions;
 
         public UserController(
@@ -41,20 +37,12 @@ namespace garge_api.Controllers
             UserManager<User> userManager,
             IMapper mapper,
             ILogger<UserController> logger,
-            IDeviceOwnershipService ownership,
-            IHubConnectionTracker hubConnections,
-            IHubContext<DeviceHub> hub,
-            IAnonymizationService anonymizer,
             IPermissionService permissions)
         {
             _context = context;
             _userManager = userManager;
             _mapper = mapper;
             _logger = logger;
-            _ownership = ownership;
-            _hubConnections = hubConnections;
-            _hub = hub;
-            _anonymizer = anonymizer;
             _permissions = permissions;
         }
 
@@ -113,7 +101,8 @@ namespace garge_api.Controllers
         [SwaggerResponse(204, "Account deleted.")]
         [SwaggerResponse(403, "Forbidden.")]
         [SwaggerResponse(404, "User not found.")]
-        public async Task<IActionResult> DeleteOwnAccount(string id)
+        [SwaggerResponse(409, "The last admin cannot be deleted.")]
+        public async Task<IActionResult> DeleteOwnAccount(string id, [FromServices] IAccountDeleter<User> deleter)
         {
             if (!User.IsCallerOf(id)) return Forbid();
 
@@ -121,135 +110,19 @@ namespace garge_api.Controllers
             if (user == null || user.IsDeleted)
                 return NotFound(new { message = "User not found!" });
 
-            // Soft-delete: scrub PII but keep the User row so Orders + Invoices retain
-            // a valid FK for the 5-year retention window required by the Norwegian
-            // Bookkeeping Act (bokføringsloven §13). Anonymizing telemetry is irreversible
-            // and AnonymizeUserTelemetryAsync commits as it goes, so the whole sequence runs
-            // in one transaction: if the Identity update fails (e.g. validation), the
-            // anonymization and row removals roll back rather than leaving a half-deleted user.
-            await using var tx = await _context.Database.BeginTransactionAsync();
-
-            await AnonymizeUserTelemetryAsync(id);
-            await ClearUserOwnedRowsAsync(id);
-            await ScrubUserPiiAsync(user);
-
-            var result = await _userManager.UpdateAsync(user);
-            if (!result.Succeeded)
+            // Soft delete through the shared deleter: the row stays so Orders and Invoices keep a valid FK for
+            // the 5-year retention window of the Norwegian Bookkeeping Act (bokføringsloven §13).
+            try
             {
-                _logger.LogError("DeleteOwnAccount failed for {UserId}: {Errors}", LogSanitizer.Sanitize(id), result.Errors);
-                return BadRequest(result.Errors);
+                await deleter.DeleteAsync(user);
             }
-
-            await _context.SaveChangesAsync();
-            await tx.CommitAsync();
-
-            await ForceDisconnectHubAsync(id);
+            catch (Exception e) when (e is LastAdminException or AccountChangeConflictException)
+            {
+                return Conflict(new { message = e.Message });
+            }
 
             _logger.LogInformation("Account soft-deleted by user {UserId}", LogSanitizer.Sanitize(id));
             return NoContent();
-        }
-
-        /// <summary>
-        /// Removes all per-user rows that should not survive soft-delete (custom
-        /// names, refresh tokens, push subs, etc.). Add new user-owned tables
-        /// here when introduced.
-        /// </summary>
-        private async Task ClearUserOwnedRowsAsync(string userId)
-        {
-            // Capture associated device ids before removing the rows so we
-            // can invalidate the ownership cache once the changes commit.
-            var sensorIds = await _context.UserSensors.Where(us => us.UserId == userId).Select(us => us.SensorId).ToListAsync();
-            var switchIds = await _context.UserSwitches.Where(us => us.UserId == userId).Select(us => us.SwitchId).ToListAsync();
-
-            _context.RefreshTokens.RemoveRange(_context.RefreshTokens.Where(t => t.UserId == userId));
-            _context.UserSensorCustomNames.RemoveRange(_context.UserSensorCustomNames.Where(x => x.UserId == userId));
-            _context.UserSensorVoltageThresholds.RemoveRange(_context.UserSensorVoltageThresholds.Where(x => x.UserId == userId));
-            _context.UserSensorSecurities.RemoveRange(_context.UserSensorSecurities.Where(x => x.UserId == userId));
-            _context.UserSwitchCustomNames.RemoveRange(_context.UserSwitchCustomNames.Where(x => x.UserId == userId));
-            _context.SensorActivities.RemoveRange(_context.SensorActivities.Where(a => a.UserId == userId));
-            _context.SensorPhotos.RemoveRange(_context.SensorPhotos.Where(p => p.UserId == userId));
-            _context.PushSubscriptions.RemoveRange(_context.PushSubscriptions.Where(s => s.UserId == userId));
-            _context.SensorOfflineNotifications.RemoveRange(_context.SensorOfflineNotifications.Where(n => n.UserId == userId));
-            _context.UserSensors.RemoveRange(_context.UserSensors.Where(us => us.UserId == userId));
-            _context.UserSwitches.RemoveRange(_context.UserSwitches.Where(us => us.UserId == userId));
-
-            foreach (var sid in sensorIds) _ownership.InvalidateSensor(sid);
-            foreach (var sid in switchIds) _ownership.InvalidateSwitch(sid);
-        }
-
-        /// <summary>
-        /// Moves the user's exclusive telemetry into the anonymized ML store before their ownership
-        /// rows are removed. This is the GDPR-erasure path: the readings leave personal scope (no link
-        /// back to the user/device) while co-owned ranges are preserved for the other owner. Each call
-        /// consumes (deletes) the ownership period it processes. Run before <see cref="ClearUserOwnedRowsAsync"/>.
-        /// </summary>
-        private async Task AnonymizeUserTelemetryAsync(string userId)
-        {
-            var sensorPeriodIds = await _context.SensorOwnershipPeriods
-                .Where(p => p.UserId == userId).Select(p => p.Id).ToListAsync();
-            foreach (var periodId in sensorPeriodIds)
-                await _anonymizer.AnonymizeSensorPeriodAsync(periodId);
-
-            var switchPeriodIds = await _context.SwitchOwnershipPeriods
-                .Where(p => p.UserId == userId).Select(p => p.Id).ToListAsync();
-            foreach (var periodId in switchPeriodIds)
-                await _anonymizer.AnonymizeSwitchPeriodAsync(periodId);
-        }
-
-        /// <summary>
-        /// Tells any open SignalR connections for this user to disconnect, then
-        /// closes the server-side handles so further events do not fan out.
-        /// Called from soft-delete after PII scrub commits.
-        /// </summary>
-        private async Task ForceDisconnectHubAsync(string userId)
-        {
-            var connectionIds = _hubConnections.GetConnectionIds(userId);
-            if (connectionIds.Count == 0) return;
-
-            try
-            {
-                // Signal the client to stop the connection and sign out.
-                await _hub.Clients.Clients(connectionIds).SendAsync("forceLogout");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ForceDisconnectHubAsync: send forceLogout failed for user {UserId}", LogSanitizer.Sanitize(userId));
-            }
-        }
-
-        /// <summary>
-        /// Sets the User row's PII fields to safe defaults and locks the account.
-        /// Caller is responsible for committing the row via UpdateAsync + SaveChanges.
-        /// </summary>
-        private async Task ScrubUserPiiAsync(User user)
-        {
-            user.FirstName = "Deleted";
-            user.LastName = "User";
-            // A valid, unique placeholder — not null. Identity is configured with
-            // RequireUniqueEmail, so UpdateAsync rejects a null/empty email (this previously
-            // made account deletion fail with InvalidEmail). The .invalid TLD (RFC 2606) is
-            // reserved and never routable, so this address carries no recoverable PII.
-            user.Email = $"deleted-{user.Id}@deleted.invalid";
-            user.NormalizedEmail = user.Email.ToUpperInvariant();
-            user.PhoneNumber = null;
-            user.UserName = $"deleted-{user.Id}";
-            user.NormalizedUserName = $"DELETED-{user.Id}".ToUpperInvariant();
-            user.EmailConfirmed = false;
-            user.EmailVerificationCodeHash = null;
-            user.EmailVerificationCodeExpiration = null;
-            user.PasswordResetCodeHash = null;
-            user.PasswordResetCodeExpiration = null;
-            user.PasswordResetAttempts = 0;
-            // Drop the login credential and the IP captured at terms-acceptance. The IP is personal
-            // data with no basis to outlive the account (it is not part of the bokføringsloven
-            // invoice record), so clearing it keeps the row free of recoverable PII.
-            user.PasswordHash = null;
-            user.TermsAcceptedIp = null;
-            user.LockoutEnabled = true;
-            user.LockoutEnd = DateTimeOffset.MaxValue;
-            user.IsDeleted = true;
-            user.DeletedAt = DateTime.UtcNow;
-            await _userManager.UpdateSecurityStampAsync(user);
         }
 
         /// <summary>
