@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using System.ComponentModel.DataAnnotations;
 using SjolystInnovation.AppKit.Auth;
 
-public class User : IdentityUser, IPasswordResetUser, IEmailVerificationUser
+public class User : IdentityUser, IPasswordResetUser, IEmailVerificationUser, IAppKitAccount
 {
     [Required]
     [MaxLength(50)]

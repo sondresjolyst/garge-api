@@ -5,6 +5,7 @@ using garge_api.Dtos.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using SjolystInnovation.AppKit.Auth;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
 using garge_api.Models.Admin;
@@ -385,36 +386,40 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Deletes a user by their ID.
+        /// Deletes a user's account. The row stays, scrubbed, so their orders and invoices keep it for the
+        /// bookkeeping retention period.
         /// </summary>
         /// <param name="id">The ID of the user to delete.</param>
+        /// <param name="deleter">The shared account deleter.</param>
         /// <returns>No content.</returns>
         [HttpDelete("/api/users/{id}")]
-        [SwaggerOperation(Summary = "Deletes a user by their ID.")]
+        [SwaggerOperation(Summary = "Deletes a user's account.")]
         [SwaggerResponse(204, "No content.")]
         [SwaggerResponse(404, "User not found.")]
-        public async Task<IActionResult> DeleteUser(string id)
+        [SwaggerResponse(409, "The last admin cannot be deleted.")]
+        public async Task<IActionResult> DeleteUser(string id, [FromServices] IAccountDeleter<User> deleter)
         {
             _logger.LogInformation("DeleteUser called for {@LogData}", new { id, CallerUserId = User.UserId() });
 
             var user = await _userManager.FindByIdAsync(id);
-            if (user == null)
+            if (user == null || user.IsDeleted)
             {
                 _logger.LogWarning("DeleteUser failed: User not found {@LogData}", new { id });
                 return NotFound(new { message = "User not found!" });
             }
 
-            var result = await _userManager.DeleteAsync(user);
-            if (result.Succeeded)
+            try
             {
-                _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.UserId() });
-                return NoContent();
+                await deleter.DeleteAsync(user);
+            }
+            catch (LastAdminException e)
+            {
+                return Conflict(new { message = e.Message });
             }
 
-            _logger.LogError("DeleteUser failed for {@LogData}: {@Errors}", new { id }, result.Errors);
-            return BadRequest(result.Errors);
+            _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.UserId() });
+            return NoContent();
         }
-
         /// <summary>
         /// Assigns a permission to a role.
         /// </summary>

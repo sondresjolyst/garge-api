@@ -519,4 +519,43 @@ public class AdminControllerTests : ControllerTestBase
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(db.RolePermissions);
     }
+
+    [Fact]
+    public async Task DeleteUser_DeletesThroughTheSharedDeleter()
+    {
+        using var db = CreateDbContext();
+        var user = new User { Id = "u9", UserName = "u9", Email = "u9@test.com", FirstName = "F", LastName = "L" };
+        MockUserManager.Setup(m => m.FindByIdAsync("u9")).ReturnsAsync(user);
+        var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
+
+        var result = await CreateAdminController(db).DeleteUser("u9", deleter.Object);
+
+        Assert.IsType<NoContentResult>(result);
+        deleter.Verify(d => d.DeleteAsync(user, It.IsAny<CancellationToken>()), Times.Once);
+        MockUserManager.Verify(m => m.DeleteAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteUser_MissingOrDeleted_ReturnsNotFound()
+    {
+        using var db = CreateDbContext();
+        MockUserManager.Setup(m => m.FindByIdAsync("gone")).ReturnsAsync(new User { Id = "gone", FirstName = "F", LastName = "L", IsDeleted = true });
+        var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
+
+        Assert.IsType<NotFoundObjectResult>(await CreateAdminController(db).DeleteUser("ghost", deleter.Object));
+        Assert.IsType<NotFoundObjectResult>(await CreateAdminController(db).DeleteUser("gone", deleter.Object));
+        deleter.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DeleteUser_LastAdmin_ReturnsConflict()
+    {
+        using var db = CreateDbContext();
+        var user = new User { Id = "u9", FirstName = "F", LastName = "L" };
+        MockUserManager.Setup(m => m.FindByIdAsync("u9")).ReturnsAsync(user);
+        var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
+        deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(new SjolystInnovation.AppKit.Auth.LastAdminException());
+
+        Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+    }
 }
