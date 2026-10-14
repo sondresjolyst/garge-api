@@ -67,22 +67,10 @@ public abstract class ControllerTestBase
             .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
             .Options);
 
-    /// <summary>The token services as the app registers them, on the given database.</summary>
-    protected (IJwtTokenService Jwt, IRefreshTokenService RefreshTokens) AuthServices(ApplicationDbContext db)
-    {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddSingleton(db);
-        services.AddAppKitAuth<ApplicationDbContext>(Configuration.GetSection("Jwt"));
-        var provider = services.BuildServiceProvider();
-        return (provider.GetRequiredService<IJwtTokenService>(), provider.GetRequiredService<IRefreshTokenService>());
-    }
-
     protected AuthController CreateAuthController(ApplicationDbContext? db = null)
     {
         db ??= CreateDbContext();
-        var (jwt, refreshTokens) = AuthServices(db);
-        return new(MockUserManager.Object, MockSignInManager.Object, jwt, refreshTokens,
+        return new(MockUserManager.Object,
             db, MockEmailService.Object, MockMapper.Object, NullLogger<AuthController>.Instance);
     }
 

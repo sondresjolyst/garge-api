@@ -87,6 +87,7 @@ namespace garge_api
             builder.Services.AddHostedService<SensorOfflineCheckService>();
             builder.Services.AddAppKitBrevo(builder.Configuration.GetSection("BrevoSettings"));
             builder.Services.AddScoped<IEmailService, EmailService>();
+            builder.Services.AddScoped<IAuthEmails<User>, garge_api.Services.AuthEmails>();
             builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
             builder.Services.AddEndpointsApiExplorer();
 
@@ -290,6 +291,7 @@ namespace garge_api
             app.UseAuthorization();
             app.UseAppKitRateLimiting();
             app.MapControllers();
+            app.MapAppKitAuthEndpoints<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.MapAppKitHealthChecks();
             app.Run();
