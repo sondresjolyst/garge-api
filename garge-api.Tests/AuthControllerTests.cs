@@ -137,6 +137,7 @@ public class AuthControllerTests : ControllerTestBase
         Assert.Equal(0, user.EmailVerificationAttempts);
         Assert.NotEqual(Sha256B64("ABC123"), user.EmailVerificationCodeHash);
         Assert.True(user.EmailVerificationCodeExpiration > DateTime.UtcNow.AddMinutes(59));
+        MockVerificationEmails.Verify(m => m.SendEmailVerificationAsync(user, It.Is<string>(c => c.Length == 6), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static string Sha256B64(string t)
@@ -176,6 +177,7 @@ public class AuthControllerTests : ControllerTestBase
         Assert.Equal("v1-2026-05", captured.TermsVersion);
         // RemoteIpAddress is null in the test ControllerContext, so the truncator returns "" -- still set, just empty.
         Assert.NotNull(captured.TermsAcceptedIp);
+        MockVerificationEmails.Verify(m => m.SendEmailVerificationAsync(captured, It.Is<string>(c => c.Length == 6), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

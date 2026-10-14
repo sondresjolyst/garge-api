@@ -26,20 +26,20 @@ namespace garge_api.Controllers
     {
         private readonly UserManager<User> _userManager;
         private readonly ApplicationDbContext _context;
-        private readonly IEmailService _emailService;
+        private readonly IVerificationEmails<User> _verificationEmails;
         private readonly IMapper _mapper;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             UserManager<User> userManager,
             ApplicationDbContext context,
-            IEmailService emailService,
+            IVerificationEmails<User> verificationEmails,
             IMapper mapper,
             ILogger<AuthController> logger)
         {
             _userManager = userManager;
             _context = context;
-            _emailService = emailService;
+            _verificationEmails = verificationEmails;
             _mapper = mapper;
             _logger = logger;
         }
@@ -48,6 +48,7 @@ namespace garge_api.Controllers
         /// Registers a new user.
         /// </summary>
         /// <param name="registerUserDto">The registration data.</param>
+        /// <param name="cancellationToken">Cancels sending the verification email.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("register")]
         [AllowAnonymous]
@@ -55,7 +56,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "User registered successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
         [SwaggerResponse(409, "Email is already registered.")]
-        public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto)
+        public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Register called");
 
@@ -108,9 +109,7 @@ namespace garge_api.Controllers
                 var verificationCode = EmailVerificationCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
 
-                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
-                await _emailService.SendEmailAsync(user.Email!, "Confirm your email",
-                    AuthEmailTemplates.VerificationCode(settings, user.FirstName, verificationCode));
+                await _verificationEmails.SendEmailVerificationAsync(user, verificationCode, cancellationToken);
 
                 _logger.LogInformation("User registered successfully {UserId}", user.Id);
                 return Ok(new { message = genericResponse });
@@ -138,13 +137,14 @@ namespace garge_api.Controllers
         /// Resends the email verification email.
         /// </summary>
         /// <param name="model">The user's email.</param>
+        /// <param name="cancellationToken">Cancels sending the verification email.</param>
         /// <returns>An IActionResult.</returns>
         [HttpPost("resend-email-verification")]
         [AllowAnonymous]
         [SwaggerOperation(Summary = "Resends the email verification code.")]
         [SwaggerResponse(200, "Email verification sent successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
-        public async Task<IActionResult> ResendEmailConfirmation([FromBody] ResendEmailConfirmationDto model)
+        public async Task<IActionResult> ResendEmailConfirmation([FromBody] ResendEmailConfirmationDto model, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("ResendEmailConfirmation called");
 
@@ -153,9 +153,7 @@ namespace garge_api.Controllers
             {
                 var verificationCode = EmailVerificationCodes.Issue(user);
                 await _userManager.UpdateAsync(user);
-                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
-                await _emailService.SendEmailAsync(user.Email!, "Verify your email",
-                    AuthEmailTemplates.VerificationCode(settings, user.FirstName, verificationCode));
+                await _verificationEmails.SendEmailVerificationAsync(user, verificationCode, cancellationToken);
                 _logger.LogInformation("Verification code resent for user {UserId}", user.Id);
             }
 
