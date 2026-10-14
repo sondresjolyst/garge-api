@@ -44,6 +44,19 @@ public class AuthEmailTemplatesTests
     }
 
     [Fact]
+    public void Invite_RendersBrandedHtml_WithCodeAndExpiry()
+    {
+        var html = AuthEmailTemplates.Invite(Settings(), "Sondre", "INV123");
+
+        Assert.Contains("<!DOCTYPE html>", html);
+        Assert.Contains("Set your password", html);
+        Assert.Contains("ACCOUNT INVITE", html);
+        Assert.Contains("INV123", html);
+        Assert.Contains("7 days", html);
+        Assert.Contains("Hi Sondre,", html);
+    }
+
+    [Fact]
     public void VerificationCode_MissingFirstName_FallsBackToGenericGreeting()
     {
         var html = AuthEmailTemplates.VerificationCode(Settings(), null, "ABC123");
