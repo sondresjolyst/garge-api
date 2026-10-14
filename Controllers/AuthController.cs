@@ -25,9 +25,6 @@ namespace garge_api.Controllers
     public class AuthController : ControllerBase
     {
         private readonly UserManager<User> _userManager;
-        private readonly SignInManager<User> _signInManager;
-        private readonly IJwtTokenService _jwt;
-        private readonly IRefreshTokenService _refreshTokens;
         private readonly ApplicationDbContext _context;
         private readonly IEmailService _emailService;
         private readonly IMapper _mapper;
@@ -35,18 +32,12 @@ namespace garge_api.Controllers
 
         public AuthController(
             UserManager<User> userManager,
-            SignInManager<User> signInManager,
-            IJwtTokenService jwt,
-            IRefreshTokenService refreshTokens,
             ApplicationDbContext context,
             IEmailService emailService,
             IMapper mapper,
             ILogger<AuthController> logger)
         {
             _userManager = userManager;
-            _signInManager = signInManager;
-            _jwt = jwt;
-            _refreshTokens = refreshTokens;
             _context = context;
             _emailService = emailService;
             _mapper = mapper;
@@ -144,56 +135,6 @@ namespace garge_api.Controllers
             : "UserName";
 
         /// <summary>
-        /// Logs in a user.
-        /// </summary>
-        /// <param name="login">The login model.</param>
-        /// <returns>An IActionResult.</returns>
-        [HttpPost("login")]
-        [AllowAnonymous]
-        [SwaggerOperation(Summary = "Logs in a user.")]
-        [SwaggerResponse(200, "User logged in successfully.")]
-        [SwaggerResponse(400, "Invalid request.")]
-        [SwaggerResponse(401, "Invalid credentials.")]
-        public async Task<IActionResult> Login([FromBody] LoginModel login)
-        {
-            _logger.LogInformation("Login called");
-
-            if (string.IsNullOrEmpty(login.Email) || string.IsNullOrEmpty(login.Password))
-            {
-                _logger.LogWarning("Login failed: Email and Password are required");
-                return BadRequest(new { message = "Email and Password are required!" });
-            }
-
-            var email = login.Email ?? string.Empty;
-            var user = await _userManager.FindByEmailAsync(email);
-            if (user == null || user.IsDeleted)
-            {
-                _logger.LogWarning("Login failed: Invalid credentials");
-                return Unauthorized(new { message = "Invalid email or password." });
-            }
-
-            var result = await _signInManager.PasswordSignInAsync(user.UserName ?? string.Empty, login.Password, false, lockoutOnFailure: true);
-            if (!result.Succeeded)
-            {
-                if (result.IsLockedOut)
-                {
-                    _logger.LogWarning("Login blocked: account locked {UserId}", user.Id);
-                    return Unauthorized(new { message = "Too many failed attempts — this login is temporarily locked. Try again later, or reset your password." });
-                }
-                _logger.LogWarning("Login failed: Invalid credentials");
-                return Unauthorized(new { message = "Invalid email or password." });
-            }
-
-            var userRoles = await _userManager.GetRolesAsync(user);
-            var tokenString = _jwt.Build(user, userRoles);
-            var rawToken = await _refreshTokens.IssueAsync(user.Id);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("User logged in successfully {UserId}", user.Id);
-            return Ok(new { token = tokenString, refreshToken = rawToken });
-        }
-
-        /// <summary>
         /// Resends the email verification email.
         /// </summary>
         /// <param name="model">The user's email.</param>
@@ -265,147 +206,6 @@ namespace garge_api.Controllers
 
             _logger.LogInformation("Email verified successfully {UserId}", user.Id);
             return Ok(new { message = "Email verified successfully!" });
-        }
-
-        /// <summary>
-        /// Signs out by deleting the refresh token. It answers the same whether or not the token was live.
-        /// </summary>
-        /// <param name="request">The refresh token to delete.</param>
-        /// <returns>An IActionResult.</returns>
-        [HttpPost("logout")]
-        [AllowAnonymous]
-        [SwaggerOperation(Summary = "Signs out by deleting the refresh token.")]
-        [SwaggerResponse(204, "Signed out.")]
-        [SwaggerResponse(400, "Invalid request.")]
-        public async Task<IActionResult> Logout([FromBody] LogoutRequestDto request)
-        {
-            var revoked = await _refreshTokens.RevokeAsync(request.RefreshToken);
-            _logger.LogInformation("Logout called {@LogData}", new { revoked });
-            return NoContent();
-        }
-
-        /// <summary>
-        /// Refresh JWT using a valid refresh token.
-        /// </summary>
-        /// <param name="request">The refresh token request.</param>
-        /// <returns>An IActionResult.</returns>
-        [HttpPost("refresh-token")]
-        [AllowAnonymous]
-        [SwaggerOperation(Summary = "Refresh JWT using a valid refresh token.")]
-        [SwaggerResponse(200, "Token refreshed successfully.")]
-        [SwaggerResponse(400, "Invalid request.")]
-        [SwaggerResponse(401, "Invalid or expired refresh token.")]
-        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto request)
-        {
-            _logger.LogInformation("RefreshToken called");
-
-            var userId = _jwt.ReadUserIdFromExpired(request.Token);
-            if (userId == null)
-            {
-                _logger.LogWarning("RefreshToken failed: Invalid token provided");
-                return BadRequest(new { message = "Invalid token" });
-            }
-
-            var user = await _userManager.FindByIdAsync(userId);
-            if (user == null || user.IsDeleted)
-            {
-                _logger.LogWarning("RefreshToken failed: User not found {@LogData}", new { userId });
-                return Unauthorized(new { message = "User not found" });
-            }
-
-            var rotation = await _refreshTokens.RotateAsync(user.Id, request.RefreshToken);
-            if (rotation.Status != RotationStatus.Rotated)
-            {
-                _logger.LogWarning("RefreshToken failed: {Status} {@LogData}", rotation.Status, new { user.Id });
-                return Unauthorized(new { message = "Invalid or expired refresh token" });
-            }
-
-            var userRoles = await _userManager.GetRolesAsync(user);
-            var newTokenString = _jwt.Build(user, userRoles);
-            var newRawToken = rotation.RefreshToken!;
-
-            _logger.LogInformation("Token refreshed successfully {@LogData}", new { user.Id });
-            return Ok(new { token = newTokenString, refreshToken = newRawToken });
-        }
-        /// <summary>
-        /// Request a password reset code via email.
-        /// </summary>
-        /// <param name="model">The password reset request data.</param>
-        /// <returns>An IActionResult.</returns>
-        [HttpPost("request-password-reset")]
-        [AllowAnonymous]
-        [SwaggerOperation(Summary = "Request a password reset code via email.")]
-        [SwaggerResponse(200, "Always returns 200; a reset code is sent only if the email is registered.")]
-        public async Task<IActionResult> RequestPasswordReset([FromBody] RequestPasswordResetDto model)
-        {
-            _logger.LogInformation("RequestPasswordReset called");
-
-            var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user != null && !user.IsDeleted)
-            {
-                var code = PasswordResetCodes.Issue(user);
-                await _userManager.UpdateAsync(user);
-                var settings = await _context.AppSettings.FindAsync(1) ?? new AppSettings();
-                await _emailService.SendEmailAsync(user.Email!, "Password Reset Code",
-                    AuthEmailTemplates.PasswordReset(settings, user.FirstName, code));
-                _logger.LogInformation("Password reset code sent for user {UserId}", user.Id);
-            }
-
-            return Ok(new { message = "If this email is registered, a password reset code has been sent." });
-        }
-
-        /// <summary>
-        /// Reset password using the code sent via email.
-        /// </summary>
-        /// <param name="model">The reset password data.</param>
-        /// <returns>An IActionResult.</returns>
-        [HttpPost("reset-password")]
-        [AllowAnonymous]
-        [SwaggerOperation(Summary = "Reset password using the code sent via email.")]
-        [SwaggerResponse(200, "Password reset successfully.")]
-        [SwaggerResponse(400, "Invalid or expired code.")]
-        [SwaggerResponse(404, "User not found.")]
-        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto model)
-        {
-            _logger.LogInformation("ResetPassword called");
-
-            const string genericInvalid = "Invalid or expired reset code!";
-
-            var user = await _userManager.FindByEmailAsync(model.Email);
-            if (user == null || user.IsDeleted)
-            {
-                _logger.LogWarning("ResetPassword: unknown email");
-                return BadRequest(new { message = genericInvalid });
-            }
-
-            switch (PasswordResetCodes.Check(user, model.Code))
-            {
-                case CodeCheck.TooManyAttempts:
-                    _logger.LogWarning("ResetPassword failed: Too many attempts {UserId}", user.Id);
-                    return StatusCode(429, new { message = "Too many attempts. Request a new reset code." });
-                case CodeCheck.Invalid:
-                    await _userManager.UpdateAsync(user);
-                    _logger.LogWarning("ResetPassword failed: Invalid or expired code");
-                    return BadRequest(new { message = genericInvalid });
-            }
-
-            var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
-            var result = await _userManager.ResetPasswordAsync(user, resetToken, model.NewPassword);
-
-            if (!result.Succeeded)
-            {
-                _logger.LogError("ResetPassword failed: {@Errors}", result.Errors);
-                return BadRequest(result.Errors);
-            }
-
-            PasswordResetCodes.Complete(user);
-            await _userManager.UpdateAsync(user);
-            // A new password ends every session, so one that was taken over cannot carry on.
-            var signedOut = await _refreshTokens.RevokeAllForUserAsync(user.Id);
-            _logger.LogInformation("Password reset signed out {Sessions} session(s) {UserId}", signedOut, user.Id);
-
-            _logger.LogInformation("Password reset successfully {UserId}", user.Id);
-            return Ok(new { message = "Password reset successfully." });
         }
     }
 }
