@@ -116,7 +116,7 @@ namespace garge_api.Controllers
             {
                 await deleter.DeleteAsync(user);
             }
-            catch (LastAdminException e)
+            catch (Exception e) when (e is LastAdminException or AccountChangeConflictException)
             {
                 return Conflict(new { message = e.Message });
             }
