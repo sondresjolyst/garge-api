@@ -95,6 +95,7 @@ namespace garge_api
                 o.VerifyEmailUrl = $"{frontend}/profile";
             });
             builder.Services.AddAppKitVerificationEmails<User>();
+            builder.Services.AddScoped<IUserRolesChangedHandler<User>, SecurityRoleSync>();
             builder.Services.AddAppKitAccounts<User, ApplicationDbContext>(o => o.AdminRole = RoleNames.Admin);
             builder.Services.AddScoped<IAccountDataEraser<User>, AccountDataEraser>();
             builder.Services.AddScoped<IAccountDeletedHandler<User>, AccountHubDisconnect>();
@@ -302,6 +303,12 @@ namespace garge_api
             app.UseAppKitRateLimiting();
             app.MapControllers();
             app.MapAppKitAuthEndpoints<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
+            app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
+            {
+                o.Roles = RoleNames.AllRoles;
+                o.AdminRole = RoleNames.Admin;
+                o.NewUser = (email, first, last) => new User { FirstName = first, LastName = last };
+            });
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.MapAppKitHealthChecks();
             app.Run();

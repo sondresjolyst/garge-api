@@ -384,17 +384,6 @@ public class AdminControllerTests : ControllerTestBase
         CreatedAt = createdAt, IsDeleted = deleted, DeletedAt = deletedAt,
     };
 
-    private void SetupUserMapAndRoles()
-    {
-        MockMapper.Setup(m => m.Map<UserDto>(It.IsAny<User>()))
-            .Returns((User u) => new UserDto
-            {
-                Id = u.Id!, UserName = u.UserName ?? "", FirstName = u.FirstName, LastName = u.LastName,
-                Email = u.Email ?? "", IsDeleted = u.IsDeleted,
-            });
-        MockUserManager.Setup(m => m.GetRolesAsync(It.IsAny<User>())).ReturnsAsync(new List<string>());
-    }
-
     private static int TotalUsersOn(List<object> rows, DateTime date)
     {
         var key = date.ToString("yyyy-MM-dd");
@@ -442,43 +431,6 @@ public class AdminControllerTests : ControllerTestBase
         Assert.Equal(3, TotalUsersOn(rows, d1));
         Assert.Equal(2, TotalUsersOn(rows, d2));
         Assert.Equal(2, TotalUsersOn(rows, today));
-    }
-
-    [Fact]
-    public async Task GetUsers_HidesDeletedByDefault()
-    {
-        var db = CreateDbContext();
-        SetupUserMapAndRoles();
-        MockUserManager.Setup(m => m.Users).Returns(db.Users);
-        db.Users.AddRange(
-            MakeUser("u1", DateTime.UtcNow),
-            MakeUser("u2", DateTime.UtcNow, deleted: true, deletedAt: DateTime.UtcNow));
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var result = await CreateAdminController(db).GetUsers();
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var dtos = Assert.IsType<List<UserDto>>(ok.Value);
-        Assert.Equal("u1", Assert.Single(dtos).Id);
-    }
-
-    [Fact]
-    public async Task GetUsers_IncludeDeleted_ReturnsAllWithFlag()
-    {
-        var db = CreateDbContext();
-        SetupUserMapAndRoles();
-        MockUserManager.Setup(m => m.Users).Returns(db.Users);
-        db.Users.AddRange(
-            MakeUser("u1", DateTime.UtcNow),
-            MakeUser("u2", DateTime.UtcNow, deleted: true, deletedAt: DateTime.UtcNow));
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var result = await CreateAdminController(db).GetUsers(includeDeleted: true);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var dtos = Assert.IsType<List<UserDto>>(ok.Value);
-        Assert.Equal(2, dtos.Count);
-        Assert.Contains(dtos, d => d.Id == "u2" && d.IsDeleted);
     }
 
     [Fact]

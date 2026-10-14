@@ -26,7 +26,6 @@ public class MappingProfile : IRegister
         // Admin mappings
         config.NewConfig<IdentityRole, RoleDto>();
         config.NewConfig<RolePermission, RolePermissionDto>().TwoWays();
-        config.NewConfig<User, UserDto>();
         config.NewConfig<AppSettings, AppSettingsDto>();
         config.NewConfig<AppSettings, PublicSettingsDto>();
         config.NewConfig<UpdateAppSettingsDto, AppSettings>()
