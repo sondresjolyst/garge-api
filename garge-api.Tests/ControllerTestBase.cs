@@ -29,6 +29,7 @@ public abstract class ControllerTestBase
     protected Mock<UserManager<User>> MockUserManager { get; }
     protected Mock<SignInManager<User>> MockSignInManager { get; }
     protected Mock<IEmailService> MockEmailService { get; } = new();
+    protected Mock<IVerificationEmails<User>> MockVerificationEmails { get; } = new();
     protected Mock<IMapper> MockMapper { get; } = new();
 
     /// <summary>
@@ -71,7 +72,7 @@ public abstract class ControllerTestBase
     {
         db ??= CreateDbContext();
         return new(MockUserManager.Object,
-            db, MockEmailService.Object, MockMapper.Object, NullLogger<AuthController>.Instance);
+            db, MockVerificationEmails.Object, MockMapper.Object, NullLogger<AuthController>.Instance);
     }
 
     protected static AutomationController CreateAutomationController(

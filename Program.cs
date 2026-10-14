@@ -87,7 +87,14 @@ namespace garge_api
             builder.Services.AddHostedService<SensorOfflineCheckService>();
             builder.Services.AddAppKitBrevo(builder.Configuration.GetSection("BrevoSettings"));
             builder.Services.AddScoped<IEmailService, EmailService>();
-            builder.Services.AddScoped<IAuthEmails<User>, garge_api.Services.AuthEmails>();
+            builder.Services.AddScoped<IEmailBrand, AuthEmailBrand>();
+            var frontend = builder.Configuration["App:FrontendBaseUrl"]?.TrimEnd('/');
+            builder.Services.AddAppKitAuthEmails<User>(o =>
+            {
+                o.SetPasswordUrl = $"{frontend}/reset-password";
+                o.VerifyEmailUrl = $"{frontend}/profile";
+            });
+            builder.Services.AddAppKitVerificationEmails<User>();
             builder.Services.AddAppKitAccounts<User, ApplicationDbContext>(o => o.AdminRole = RoleNames.Admin);
             builder.Services.AddScoped<IAccountDataEraser<User>, AccountDataEraser>();
             builder.Services.AddScoped<IAccountDeletedHandler<User>, AccountHubDisconnect>();
