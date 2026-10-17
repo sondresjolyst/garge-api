@@ -78,7 +78,24 @@ public class SiteSettingsTests
 
         Assert.Equal(Address, brand.Address);
         Assert.Equal("post@garge.no", brand.Email);
-        Assert.Equal("Org. no. 938 517 789", brand.OrgNumber);
+        Assert.Equal("938 517 789", brand.OrgNumber);
+        Assert.False(brand.VatRegistered);
+    }
+
+    [Fact]
+    public async Task AuthEmailBrand_PassesTheRawNumberAndTheVatFlag()
+    {
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        db.AppSettings.Add(new AppSettings { CompanyName = "Garge", CompanyLegalName = "Garge AS", OrgNumber = "999888777", VatEnabled = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var brand = await new AuthEmailBrand(db).GetBrandAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("Garge", brand.Name);
+        Assert.Equal("Garge AS", brand.LegalName);
+        Assert.Equal("999888777", brand.OrgNumber);
+        Assert.True(brand.VatRegistered);
     }
 
     [Fact]
@@ -168,11 +185,11 @@ public class SiteSettingsTests
         await using var app = await HookApp.StartAsync();
         await app.SeedAsync(new AppSettings());
 
-        // Garge has no phone number yet, and the package requires one.
-        var response = await app.PutSettingsAsync(Body(vatRegistered: true) with { PublicPhone = "" });
+        // The package refuses an organization number that fails the checksum.
+        var response = await app.PutSettingsAsync(Body(vatRegistered: true) with { OrgNumber = "938 517 788" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("PublicPhone", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Contains("OrgNumber", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
         var row = await app.RowAsync();
         Assert.False(row.VatEnabled);
         Assert.Null(row.VatRegisteredFrom);
