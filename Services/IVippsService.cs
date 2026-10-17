@@ -44,6 +44,6 @@ namespace garge_api.Services
         Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest);
         Task<IReadOnlyList<VippsWebhook>> ListWebhooksAsync(bool isTest);
         Task DeleteWebhookAsync(string webhookId, bool isTest);
-        VippsWebhookResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
+        VippsWebhookSignatureResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret);
     }
 }

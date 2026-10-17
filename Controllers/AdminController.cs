@@ -5,6 +5,7 @@ using garge_api.Dtos.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using SjolystInnovation.AppKit.AdminStats;
 using SjolystInnovation.AppKit.Auth;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
@@ -60,7 +61,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Role already exists.")]
         public async Task<IActionResult> CreateRole([FromBody] RoleDto dto)
         {
-            _logger.LogInformation("CreateRole called with {@LogData}", new { dto.Name, CallerUserId = User.UserId() });
+            _logger.LogInformation("CreateRole called with {@LogData}", new { dto.Name, CallerUserId = User.GetUserId() });
 
             if (await _roleManager.RoleExistsAsync(dto.Name))
             {
@@ -71,7 +72,7 @@ namespace garge_api.Controllers
             var result = await _roleManager.CreateAsync(new IdentityRole(dto.Name));
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role created: {@LogData}", new { dto.Name, CallerUserId = User.UserId() });
+                _logger.LogInformation("Role created: {@LogData}", new { dto.Name, CallerUserId = User.GetUserId() });
                 return CreatedAtAction(nameof(GetRole), new { roleName = dto.Name }, dto);
             }
 
@@ -88,7 +89,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Roles retrieved successfully.", typeof(IEnumerable<RoleDto>))]
         public async Task<IActionResult> GetRoles()
         {
-            _logger.LogInformation("GetRoles called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetRoles called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
             var roles = await _roleManager.Roles.ToListAsync();
             var dtos = _mapper.Map<IEnumerable<RoleDto>>(roles);
@@ -106,7 +107,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> GetRole(string roleName)
         {
-            _logger.LogInformation("GetRole called for {@LogData}", new { roleName, CallerUserId = User.UserId() });
+            _logger.LogInformation("GetRole called for {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
 
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
@@ -130,7 +131,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> DeleteRole(string roleName)
         {
-            _logger.LogInformation("DeleteRole called for {@LogData}", new { roleName, CallerUserId = User.UserId() });
+            _logger.LogInformation("DeleteRole called for {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
 
             var role = await _roleManager.FindByNameAsync(roleName);
             if (role == null)
@@ -142,7 +143,7 @@ namespace garge_api.Controllers
             var result = await _roleManager.DeleteAsync(role);
             if (result.Succeeded)
             {
-                _logger.LogInformation("Role deleted: {@LogData}", new { roleName, CallerUserId = User.UserId() });
+                _logger.LogInformation("Role deleted: {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
                 return NoContent();
             }
 
@@ -158,7 +159,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Stats retrieved successfully.", typeof(AdminStatsDto))]
         public async Task<IActionResult> GetStats([FromQuery] bool test = false)
         {
-            _logger.LogInformation("GetStats called by {@LogData}", new { CallerUserId = User.UserId(), Test = test });
+            _logger.LogInformation("GetStats called by {@LogData}", new { CallerUserId = User.GetUserId(), Test = test });
 
             var now = DateTime.UtcNow;
             var today = now.Date;
@@ -229,7 +230,7 @@ namespace garge_api.Controllers
         [SwaggerOperation(Summary = "Gets all discovered MQTT devices.")]
         public async Task<IActionResult> GetDevices()
         {
-            _logger.LogInformation("GetDevices called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetDevices called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
             var devices = await _context.DiscoveredDevices
                 .OrderByDescending(d => d.Timestamp)
@@ -245,7 +246,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
         public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
         {
-            _logger.LogInformation("GetEmailStats called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetEmailStats called by {@LogData}", new { CallerUserId = User.GetUserId() });
             try
             {
                 var stats = await _emailService.GetEmailStatsAsync(days);
@@ -261,16 +262,18 @@ namespace garge_api.Controllers
         /// <summary>
         /// Gets cumulative daily stats over time for charting.
         /// </summary>
+        /// <param name="stats">The stored daily snapshots and today's live counts.</param>
         [HttpGet("/api/admin/stats/history")]
         [SwaggerOperation(Summary = "Gets cumulative daily stats over time.")]
-        public async Task<IActionResult> GetStatsHistory()
+        public async Task<IActionResult> GetStatsHistory(
+            [FromServices] AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot> stats)
         {
-            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
-            // Frozen completed-day snapshots are immutable, so they outlive the per-user data they
-            // were derived from and survive the 5-year purge. The daily job freezes completed days;
-            // today is always recomputed here so same-day churn is not lost.
-            var snapshots = await Services.StatsSnapshotService.GetHistoryAsync(_context);
+            // Stored completed-day snapshots are never rewritten, so they outlive the per-user data they
+            // were derived from and survive the 5-year purge. A hosted service stores completed days.
+            // Today is always sampled live, so same-day churn is not lost.
+            var snapshots = await stats.GetHistoryAsync(_context, cancellationToken: HttpContext.RequestAborted);
 
             var result = snapshots.Select(s => (object)new
             {
@@ -298,7 +301,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "The last admin cannot be deleted.")]
         public async Task<IActionResult> DeleteUser(string id, [FromServices] IAccountDeleter<User> deleter)
         {
-            _logger.LogInformation("DeleteUser called for {@LogData}", new { id, CallerUserId = User.UserId() });
+            _logger.LogInformation("DeleteUser called for {@LogData}", new { id, CallerUserId = User.GetUserId() });
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)
@@ -316,7 +319,7 @@ namespace garge_api.Controllers
                 return Conflict(new { message = e.Message });
             }
 
-            _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.UserId() });
+            _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.GetUserId() });
             return NoContent();
         }
         /// <summary>
@@ -331,7 +334,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Role not found.")]
         public async Task<IActionResult> AssignPermission([FromRoute] string roleName, [FromQuery] string permission)
         {
-            _logger.LogInformation("AssignPermission called: {@LogData}", new { roleName, permission, CallerUserId = User.UserId() });
+            _logger.LogInformation("AssignPermission called: {@LogData}", new { roleName, permission, CallerUserId = User.GetUserId() });
 
             if (!await _roleManager.RoleExistsAsync(roleName))
             {
@@ -360,7 +363,7 @@ namespace garge_api.Controllers
             _context.RolePermissions.Add(rolePermission);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.UserId() });
+            _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.GetUserId() });
             return Ok(new { message = "Permission assigned successfully!" });
         }
 
@@ -385,7 +388,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(400, "Threshold out of range.")]
         public async Task<IActionResult> UpdateSecuritySettings([FromBody] UpdateSecuritySettingsDto dto)
         {
-            _logger.LogInformation("UpdateSecuritySettings called by {@LogData}", new { CallerUserId = User.UserId(), dto.AlertThresholdMinutes });
+            _logger.LogInformation("UpdateSecuritySettings called by {@LogData}", new { CallerUserId = User.GetUserId(), dto.AlertThresholdMinutes });
 
             if (dto.AlertThresholdMinutes < Constants.SecurityMode.MinThresholdMinutes
                 || dto.AlertThresholdMinutes > Constants.SecurityMode.MaxThresholdMinutes)
@@ -432,7 +435,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "Settings updated.", typeof(AppSettingsDto))]
         public async Task<IActionResult> UpdateAppSettings([FromBody] UpdateAppSettingsDto dto)
         {
-            _logger.LogInformation("UpdateAppSettings called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("UpdateAppSettings called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
             var settings = await _context.AppSettings.FindAsync(1);
             if (settings == null)
@@ -457,7 +460,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
             _settingsCache?.Invalidate();
 
-            _logger.LogInformation("AppSettings updated: {@LogData}", new { dto.CookieBannerEnabled, CallerUserId = User.UserId() });
+            _logger.LogInformation("AppSettings updated: {@LogData}", new { dto.CookieBannerEnabled, CallerUserId = User.GetUserId() });
             return Ok(_mapper.Map<AppSettingsDto>(settings));
         }
     }

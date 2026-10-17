@@ -1,5 +1,7 @@
 using garge_api.Models;
+using garge_api.Models.Admin;
 using Microsoft.EntityFrameworkCore;
+using SjolystInnovation.AppKit.AdminStats;
 
 namespace garge_api.Services
 {
@@ -10,9 +12,9 @@ namespace garge_api.Services
     /// year of the last invoice. Once that window lapses (or the user never had an invoice), the user
     /// and that whole accounting trail are removed, satisfying GDPR storage limitation (Art 5(1)(e)).
     ///
-    /// The aggregate stats history is unaffected: <see cref="StatsSnapshotService"/> has already frozen
-    /// those users' days into anonymous per-day snapshots, which this job leaves untouched. Snapshots
-    /// are refreshed before purging as a safety net.
+    /// The aggregate stats history is unaffected: the daily stats service has already stored
+    /// those users' days as anonymous per-day snapshots, which this job leaves untouched. Missing days
+    /// are stored before purging as a safety net.
     /// </summary>
     public class DeletedUserPurgeService : BackgroundService
     {
@@ -37,7 +39,9 @@ namespace garge_api.Services
                     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
                     // Freeze stats first so a purged user's days are preserved as anonymous snapshots.
-                    await StatsSnapshotService.EnsureUpToDateAsync(db, stoppingToken);
+                    await scope.ServiceProvider
+                        .GetRequiredService<AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>>()
+                        .FreezeMissingDaysAsync(db, stoppingToken);
 
                     var purged = await PurgeAsync(db, stoppingToken);
                     if (purged > 0)

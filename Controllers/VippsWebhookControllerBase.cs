@@ -19,15 +19,15 @@ namespace garge_api.Controllers
         /// Verifies the signature against the secret of each registration. Returns the environment of
         /// the registration whose secret signed it.
         /// </summary>
-        protected static (VippsWebhookResult Result, bool IsTest) VerifySignature(
+        protected static (VippsWebhookSignatureResult Result, bool IsTest) VerifySignature(
             IVippsService vipps, IWebhookSecretProtector protector, HttpRequest request, string rawBody,
             params Registration[] registrations)
         {
-            var result = VippsWebhookResult.MissingSecret;
+            var result = VippsWebhookSignatureResult.MissingSecret;
             foreach (var registration in registrations.Where(r => !string.IsNullOrEmpty(r.ProtectedSecret)))
             {
                 result = vipps.VerifyWebhookSignature(request, rawBody, protector.Unprotect(registration.ProtectedSecret!));
-                if (result == VippsWebhookResult.Valid) return (result, registration.IsTest);
+                if (result == VippsWebhookSignatureResult.Valid) return (result, registration.IsTest);
             }
             return (result, false);
         }

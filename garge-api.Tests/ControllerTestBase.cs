@@ -1,5 +1,6 @@
 using Mapster;
 using MapsterMapper;
+using garge_api.Constants;
 using garge_api.Controllers;
 using garge_api.Models;
 using garge_api.Services;
@@ -88,7 +89,7 @@ public abstract class ControllerTestBase
     {
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId) };
         if (isAdmin)
-            claims.Add(new(ClaimTypes.Role, "admin"));
+            claims.Add(new(ClaimTypes.Role, RoleNames.Admin));
         return new ControllerContext
         {
             HttpContext = new DefaultHttpContext

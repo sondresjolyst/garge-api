@@ -45,9 +45,9 @@ namespace garge_api.Controllers
         [HttpGet("prices")]
         public async Task<IActionResult> GetPrices([FromQuery] string type, [FromQuery] string area, [FromQuery] DateTime? date, [FromQuery] string currency = "NOK")
         {
-            _logger.LogInformation("GetPrices called by {@LogData}", new { CallerUserId = User.UserId(), type = LogSanitizer.Sanitize(type), area = LogSanitizer.Sanitize(area), date, currency });
+            _logger.LogInformation("GetPrices called by {@LogData}", new { CallerUserId = User.GetUserId(), type = LogSanitizer.Sanitize(type), area = LogSanitizer.Sanitize(area), date, currency });
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             if (userId == null || !await _permissions.HasPermissionAsync(userId, PermissionNames.Electricity))
             {
                 var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value);

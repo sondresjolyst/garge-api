@@ -45,26 +45,26 @@ namespace garge_api.Controllers
         private async Task<bool> UserCanAccessSensorAsync(int sensorId)
         {
             if (IsAdmin()) return true;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
         // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
         // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
         private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
-            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
+            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
 
         private IQueryable<BatteryChargeEvent> WithinOwnershipWindow(IQueryable<BatteryChargeEvent> query)
-            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
+            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
 
         private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
-            => query.WithinSensorOwnership(_context, User.UserId(), IsAdmin());
+            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
 
         /// <summary>True when the caller has this owned sensor suspended (turned off / over quota). Admins are never suspended.</summary>
         private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
         {
             if (IsAdmin()) return false;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId && us.SuspendedAt != null);
         }
 
@@ -78,7 +78,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetLatestBatteryHealth(string sensorName)
         {
-            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
+            _logger.LogInformation("GetLatestBatteryHealth called by {@LogData}", new { CallerUserId = User.GetUserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
 
             var sensor = await _context.Sensors.FirstOrDefaultAsync(s => s.Name == sensorName);
             if (sensor == null)
@@ -89,7 +89,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensor.Id))
             {
-                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { CallerUserId = User.UserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
+                _logger.LogWarning("GetLatestBatteryHealth forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), SensorName = LogSanitizer.Sanitize(sensorName) });
                 return Forbid();
             }
 

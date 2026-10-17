@@ -27,11 +27,11 @@ public class ShopControllerTests : ControllerTestBase
                 It.IsAny<HttpRequest>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns((HttpRequest req, string body, string secret) =>
                 string.IsNullOrEmpty(secret)
-                    ? VippsWebhookResult.MissingSecret
+                    ? VippsWebhookSignatureResult.MissingSecret
                     : (req.Headers["X-Test-Valid"] == "1"
                        && (string.IsNullOrEmpty(req.Headers["X-Test-Secret"]) || req.Headers["X-Test-Secret"] == secret)
-                        ? VippsWebhookResult.Valid
-                        : VippsWebhookResult.BadSignature));
+                        ? VippsWebhookSignatureResult.Valid
+                        : VippsWebhookSignatureResult.BadSignature));
         // Vipps reports the whole amount done unless a test says otherwise.
         mock.Setup(v => v.CapturePaymentAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<bool?>()))
             .ReturnsAsync((string _, int amount, string _, bool? _) => new VippsPayment { CapturedAmountInOre = amount });

@@ -54,7 +54,7 @@ namespace garge_api.Controllers
                 return true;
             }
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
 
             // Sensors the user can act on: owned, or shared with Edit. A read-only share must not let
             // the recipient create or change automations on the owner's garage.
@@ -150,7 +150,7 @@ namespace garge_api.Controllers
             if (User.IsInAnyRole(RoleNames.Admin, RoleNames.AutomationAdmin))
                 return Ok(allRules.Select(r => _mapper.Map<AutomationRuleDto>(r)).ToList());
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
 
             // Sensors the caller can act on: owned, or shared with Edit. Computed once for the whole list
             // instead of per rule. A read-only share must not let the recipient see the owner's automations.

@@ -60,9 +60,9 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "The minted token and its expiry.", typeof(PairingTokenDto))]
         public async Task<IActionResult> CreatePairingToken()
         {
-            _logger.LogInformation("CreatePairingToken called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("CreatePairingToken called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             var user = await _context.Users.FindAsync(userId);
             if (user == null)
             {
@@ -110,11 +110,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(410, "Token expired or already consumed.")]
         public async Task<IActionResult> ClaimPairing([FromBody] ClaimPairingTokenDto dto)
         {
-            _logger.LogInformation("ClaimPairing called by {@LogData}", new { CallerUserId = User.UserId(), dto.ParentName });
+            _logger.LogInformation("ClaimPairing called by {@LogData}", new { CallerUserId = User.GetUserId(), dto.ParentName });
 
             if (string.IsNullOrWhiteSpace(dto.Token) || string.IsNullOrWhiteSpace(dto.ParentName))
             {
-                _logger.LogWarning("ClaimPairing bad request: Token and parent name are required {@LogData}", new { CallerUserId = User.UserId() });
+                _logger.LogWarning("ClaimPairing bad request: Token and parent name are required {@LogData}", new { CallerUserId = User.GetUserId() });
                 return BadRequest(new { message = "Token and parent name are required." });
             }
 
@@ -125,7 +125,7 @@ namespace garge_api.Controllers
             var token = await _context.PairingTokens.FirstOrDefaultAsync(t => t.Token == normalizedToken);
             if (token == null)
             {
-                _logger.LogWarning("ClaimPairing not found: Unknown pairing token {@LogData}", new { CallerUserId = User.UserId() });
+                _logger.LogWarning("ClaimPairing not found: Unknown pairing token {@LogData}", new { CallerUserId = User.GetUserId() });
                 return NotFound(new { message = "Unknown pairing token." });
             }
 

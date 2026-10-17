@@ -62,7 +62,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Not found.")]
         public async Task<IActionResult> GetSecurity(int sensorId, CancellationToken ct = default)
         {
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             var (visible, isOwner) = await ResolveCallerAsync(userId, sensorId, ct);
             if (!visible) return NotFound();
 
@@ -82,7 +82,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "No alert channel enabled.")]
         public async Task<IActionResult> UpdateSecurity(int sensorId, [FromBody] UpdateSensorSecurityDto dto, CancellationToken ct = default)
         {
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             _logger.LogInformation("UpdateSecurity called by {@LogData}", new { CallerUserId = userId, sensorId, dto.Enabled });
 
             var (visible, isOwner) = await ResolveCallerAsync(userId, sensorId, ct);
@@ -137,7 +137,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Not found.")]
         public async Task<IActionResult> RemoveSecurity(int sensorId, CancellationToken ct = default)
         {
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             _logger.LogInformation("RemoveSecurity called by {@LogData}", new { CallerUserId = userId, sensorId });
 
             var (visible, isOwner) = await ResolveCallerAsync(userId, sensorId, ct);

@@ -125,7 +125,7 @@ namespace garge_api.Controllers
         public async Task<IActionResult> SchedulePriceChange(int id, [FromBody] SchedulePriceChangeDto dto)
         {
             if (!await _context.Products.AnyAsync(p => p.Id == id)) return NotFound();
-            var (change, error) = await _priceChanges.ScheduleAsync(id, dto.NewPriceInOre, dto.EffectiveFrom, User.UserId());
+            var (change, error) = await _priceChanges.ScheduleAsync(id, dto.NewPriceInOre, dto.EffectiveFrom, User.GetUserId());
             if (change == null) return BadRequest(error);
             _sweep.Trigger();
             return Ok(_mapper.Map<PriceChangeResponseDto>(change));

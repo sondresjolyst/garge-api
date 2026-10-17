@@ -28,7 +28,7 @@ namespace garge_api.Controllers
             _mapper = mapper;
         }
 
-        private string GetUserId() => User.UserId()!;
+        private string GetUserId() => User.GetUserId()!;
 
         /// <summary>
         /// Returns all groups for the current user, including their sensor and switch IDs.

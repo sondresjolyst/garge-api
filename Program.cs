@@ -3,7 +3,6 @@ using garge_api.Constants;
 using Mapster;
 using MapsterMapper;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Identity;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.OpenApi;
@@ -14,6 +13,7 @@ using Serilog;
 using SjolystInnovation.AppKit.Auth;
 using SjolystInnovation.AppKit.Hosting;
 using SjolystInnovation.AppKit.Email;
+using SjolystInnovation.AppKit.AdminStats;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
@@ -135,7 +135,7 @@ namespace garge_api
             builder.Services.AddScoped<ISecurityAlertService, SecurityAlertService>();
             builder.Services.AddHostedService<QuotaReconciliationService>();
             builder.Services.AddHostedService<SuspendedSensorPurgeService>();
-            builder.Services.AddHostedService<StatsSnapshotService>();
+            builder.Services.AddAppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>(DailyStatsSamplers.Configure);
             builder.Services.AddHostedService<DeletedUserPurgeService>();
             builder.Services.AddScoped<IInvoiceService, InvoiceService>();
             builder.Services.AddScoped<IVatThresholdService, VatThresholdService>();
@@ -144,7 +144,7 @@ namespace garge_api
             builder.Services.AddScoped<IOrderEmailService, OrderEmailService>();
             builder.Services.AddScoped<ISubscriptionEmailService, SubscriptionEmailService>();
             builder.Services.AddSingleton<IVippsEnvironment, GargeVippsEnvironment>();
-            builder.Services.AddVipps(_ => { });
+            builder.Services.AddAppKitVipps(_ => { });
             builder.Services.AddOptions<VippsOptions>().Configure<Microsoft.Extensions.Options.IOptions<VippsSettings>>((vipps, settings) =>
             {
                 var s = settings.Value;
@@ -222,37 +222,19 @@ namespace garge_api
             {
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
                 logger.LogInformation("Starting API.");
-                var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
                 var postgresNotificationService = scope.ServiceProvider.GetRequiredService<PostgresNotificationService>();
                 logger.LogInformation("PostgresNotificationService started");
 
-                if (app.Configuration.GetValue("Database:AutoMigrate", true))
+                await app.Services.MigrateAppKitDatabaseAsync<ApplicationDbContext>(app.Configuration, o =>
                 {
-                    var pendingMigrations = (await context.Database.GetPendingMigrationsAsync()).ToList();
-                    if (pendingMigrations.Count > 0)
-                    {
-                        logger.LogInformation(
-                            "Applying {Count} pending migration(s): {Migrations}",
-                            pendingMigrations.Count,
-                            string.Join(", ", pendingMigrations));
-                        // An index build on a large table takes longer than the default command timeout.
-                        context.Database.SetCommandTimeout(TimeSpan.FromMinutes(15));
-                        await context.Database.MigrateAsync();
-                        context.Database.SetCommandTimeout(null);
-                    }
-                }
+                    // An index build on a large table takes longer than the default command timeout.
+                    o.CommandTimeout = TimeSpan.FromMinutes(15);
+                });
 
                 context.EnsureTriggers();
 
-                foreach (var roleName in RoleNames.AllRoles)
-                {
-                    var roleExist = await roleManager.RoleExistsAsync(roleName);
-                    if (!roleExist)
-                    {
-                        await roleManager.CreateAsync(new IdentityRole(roleName));
-                    }
-                }
+                await app.Services.SeedAppKitRolesAsync(RoleNames.AllRoles);
 
                 foreach (var rolePermission in RoleNames.RolePermissions)
                 {
@@ -302,12 +284,11 @@ namespace garge_api
             app.UseAuthorization();
             app.UseAppKitRateLimiting();
             app.MapControllers();
-            app.MapAppKitAuthEndpoints<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
+            app.MapAppKitAuth<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
             {
                 o.Roles = RoleNames.AllRoles;
-                o.AdminRole = RoleNames.Admin;
-                o.NewUser = (email, first, last) => new User { FirstName = first, LastName = last };
+                o.NewUser = u => new User { FirstName = u.FirstName, LastName = u.LastName };
             });
             app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
             app.MapAppKitHealthChecks();

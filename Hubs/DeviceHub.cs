@@ -34,7 +34,7 @@ namespace garge_api.Hubs
             }
             else
             {
-                var userId = Context.User?.UserId();
+                var userId = Context.User?.GetUserId();
                 if (string.IsNullOrEmpty(userId))
                 {
                     Context.Abort();
@@ -49,7 +49,7 @@ namespace garge_api.Hubs
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            var userId = Context.User?.UserId();
+            var userId = Context.User?.GetUserId();
             if (!string.IsNullOrEmpty(userId))
             {
                 _tracker.Remove(userId, Context.ConnectionId);

@@ -33,22 +33,24 @@ public class VippsServiceRequestTests
     private static (VippsService Service, CapturingHandler Handler) CreateService()
     {
         var handler = new CapturingHandler();
-        var opts = Options.Create(new VippsOptions
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAppKitVipps(o =>
         {
-            Live = new VippsCredentials
+            o.Live = new VippsCredentials
             {
                 ClientId = "id", ClientSecret = "secret", MerchantSerialNumber = "123456",
                 SubscriptionKey = "key", BaseUrl = "https://api.vipps.no"
-            },
-            SystemName = "garge-api",
-            SystemVersion = "1.4.2+0123456789abcdef",
-        });
+            };
+            o.SystemName = "garge-api";
+            o.SystemVersion = "1.4.2+0123456789abcdef";
+        }).ConfigurePrimaryHttpMessageHandler(() => handler);
         var appOpts = Options.Create(new AppOptions
         {
             FrontendBaseUrl = "https://www.garge.no",
             ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
         });
-        var client = new VippsClient(new HttpClient(handler), opts, new FixedVippsEnvironment(false), NullLogger<VippsClient>.Instance);
+        var client = services.BuildServiceProvider().GetRequiredService<IVippsClient>();
         var service = new VippsService(client, appOpts, TimeProvider.System, NullLogger<VippsService>.Instance);
         return (service, handler);
     }

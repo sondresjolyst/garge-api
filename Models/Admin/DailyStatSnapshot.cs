@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using SjolystInnovation.AppKit.AdminStats;
 
 namespace garge_api.Models.Admin
 {
@@ -9,7 +10,7 @@ namespace garge_api.Models.Admin
     /// derived from are purged (post-5y retention). Holds only aggregate counts — no identifiers — so
     /// it is anonymous and may be kept indefinitely.
     /// </summary>
-    public class DailyStatSnapshot
+    public class DailyStatSnapshot : IAppKitDailyStat
     {
         [Key]
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
