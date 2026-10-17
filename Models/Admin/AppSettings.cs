@@ -1,8 +1,10 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using SjolystInnovation.AppKit.SiteSettings;
 
 namespace garge_api.Models.Admin
 {
-    public class AppSettings
+    public class AppSettings : ICompanySettings, IBrandingSettings
     {
         public int Id { get; set; } = 1;
         public bool CookieBannerEnabled { get; set; } = true;
@@ -16,6 +18,18 @@ namespace garge_api.Models.Admin
 
         /// <summary>Whether a sale made at <paramref name="saleAt"/> carries VAT.</summary>
         public bool VatOnAt(DateTime saleAt) => VatEnabled && (VatRegisteredFrom is not { } from || saleAt >= from);
+
+        /// <summary>
+        /// Keeps the registration date in step with the switch when no date is given. Turning VAT on
+        /// starts it at <paramref name="now"/> unless a date is already set, and turning it off clears the date.
+        /// </summary>
+        public void SyncVatRegisteredFrom(DateTime now)
+        {
+            if (VatEnabled)
+                VatRegisteredFrom ??= now;
+            else
+                VatRegisteredFrom = null;
+        }
         public string? VippsShopWebhookId { get; set; }
         public string? VippsShopWebhookSecret { get; set; }
         public string? VippsSubscriptionWebhookId { get; set; }
@@ -29,16 +43,45 @@ namespace garge_api.Models.Admin
         [Range(Constants.SecurityMode.MinThresholdMinutes, Constants.SecurityMode.MaxThresholdMinutes)]
         public int SecurityAlertThresholdMinutes { get; set; } = Constants.SecurityMode.DefaultThresholdMinutes;
 
+        /// <summary>The address the contact form sends its messages to. Not shown publicly.</summary>
+        [MaxLength(200)]
+        public string ContactRecipientEmail { get; set; } = "sondresjoelyst@gmail.com";
         [MaxLength(100)]
         public string CompanyName { get; set; } = "Garge";
         [MaxLength(200)]
         public string CompanyLegalName { get; set; } = "Sjølyst Innovation AS";
         [MaxLength(20)]
-        public string CompanyOrgNumber { get; set; } = "938 517 789";
-        [MaxLength(500)]
-        public string CompanyAddress { get; set; } = "Mårvegen 21a, 4347 Lye";
+        public string OrgNumber { get; set; } = "938 517 789";
+
+        /// <summary>The package's name for <see cref="VatEnabled"/>, which stays the column garge reads.</summary>
+        bool ICompanySettings.VatRegistered { get => VatEnabled; set => VatEnabled = value; }
+
         [MaxLength(200)]
-        public string CompanyEmail { get; set; } = "sondresjoelyst@gmail.com";
+        public string StreetAddress { get; set; } = "Mårvegen 21a";
+        [MaxLength(20)]
+        public string PostalCode { get; set; } = "4347";
+        [MaxLength(100)]
+        public string AddressLocality { get; set; } = "Lye";
+        [MaxLength(100)]
+        public string AddressRegion { get; set; } = "";
+
+        /// <summary>The address as one line, as emails and invoices show it. Derived, never stored.</summary>
+        [NotMapped]
+        public string FormattedAddress => PostalAddress.Format(StreetAddress, PostalCode, AddressLocality);
+
+        [MaxLength(200)]
+        public string PublicEmail { get; set; } = "sondresjoelyst@gmail.com";
+
+        /// <summary>Empty until an admin enters one. The package requires it before its settings save goes through.</summary>
+        [MaxLength(40)]
+        public string PublicPhone { get; set; } = "";
+
+        public string? LogoData { get; set; }
+        [MaxLength(50)]
+        public string? LogoContentType { get; set; }
+        public string? IconData { get; set; }
+        [MaxLength(50)]
+        public string? IconContentType { get; set; }
 
         public bool VippsTestMode { get; set; }
 

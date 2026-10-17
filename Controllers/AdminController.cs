@@ -415,7 +415,8 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Gets app-wide settings. Public — called by the frontend without authentication.
+        /// Gets garge's own app-wide settings. Public, because the frontend reads it without signing in.
+        /// The company details are served by the site settings package at <c>/api/company</c>.
         /// </summary>
         [HttpGet("/api/admin/settings")]
         [AllowAnonymous]
@@ -428,7 +429,7 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Updates app-wide settings.
+        /// Updates garge's own app-wide settings. The company details are saved through <c>PUT /api/settings</c>.
         /// </summary>
         [HttpPut("/api/admin/settings")]
         [SwaggerOperation(Summary = "Updates app-wide settings.")]
@@ -453,10 +454,8 @@ namespace garge_api.Controllers
                 // A plain date, as the admin page sends it, means midnight in Norway.
                 settings.VatRegisteredFrom = from.Kind == DateTimeKind.Utc ? from : LocalTime.ToUtc(from);
             }
-            else if (settings.VatEnabled)
-                settings.VatRegisteredFrom ??= DateTime.UtcNow;
             else
-                settings.VatRegisteredFrom = null;
+                settings.SyncVatRegisteredFrom(DateTime.UtcNow);
             await _context.SaveChangesAsync();
             _settingsCache?.Invalidate();
 

@@ -14,6 +14,7 @@ using SjolystInnovation.AppKit.Auth;
 using SjolystInnovation.AppKit.Hosting;
 using SjolystInnovation.AppKit.Email;
 using SjolystInnovation.AppKit.AdminStats;
+using SjolystInnovation.AppKit.SiteSettings;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
 using garge_api.Authorization;
@@ -283,6 +284,7 @@ namespace garge_api
             app.UseAppKitRateLimiting();
             app.MapControllers();
             app.MapGargeVippsWebhooks();
+            app.MapAppKitSiteSettings<ApplicationDbContext, AppSettings>("/api", SiteSettingsHooks.Configure);
             app.MapAppKitAuth<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
             {

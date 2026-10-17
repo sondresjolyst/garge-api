@@ -223,8 +223,9 @@ public class AdminControllerTests : ControllerTestBase
             Id = 1,
             CookieBannerEnabled = true,
             CompanyName = "Garge AS",
-            CompanyOrgNumber = "934 531 035",
-            CompanyEmail = "hello@garge.no",
+            OrgNumber = "934 531 035",
+            PublicEmail = "hello@garge.no",
+            PostalCode = "0150",
             VippsShopWebhookSecret = "must-not-disappear"
         });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
@@ -236,9 +237,6 @@ public class AdminControllerTests : ControllerTestBase
                 if (src.CookieBannerEnabled.HasValue) dst.CookieBannerEnabled = src.CookieBannerEnabled.Value;
                 if (src.VatEnabled.HasValue) dst.VatEnabled = src.VatEnabled.Value;
                 if (src.VippsTestMode.HasValue) dst.VippsTestMode = src.VippsTestMode.Value;
-                if (src.CompanyName != null) dst.CompanyName = src.CompanyName;
-                if (src.CompanyOrgNumber != null) dst.CompanyOrgNumber = src.CompanyOrgNumber;
-                if (src.CompanyEmail != null) dst.CompanyEmail = src.CompanyEmail;
                 return dst;
             });
 
@@ -248,8 +246,9 @@ public class AdminControllerTests : ControllerTestBase
         var settings = await db.AppSettings.FindAsync([1], TestContext.Current.CancellationToken);
         Assert.False(settings!.CookieBannerEnabled);
         Assert.Equal("Garge AS", settings.CompanyName);
-        Assert.Equal("934 531 035", settings.CompanyOrgNumber);
-        Assert.Equal("hello@garge.no", settings.CompanyEmail);
+        Assert.Equal("934 531 035", settings.OrgNumber);
+        Assert.Equal("hello@garge.no", settings.PublicEmail);
+        Assert.Equal("0150", settings.PostalCode);
         Assert.Equal("must-not-disappear", settings.VippsShopWebhookSecret);
     }
 

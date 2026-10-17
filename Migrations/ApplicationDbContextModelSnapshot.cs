@@ -206,6 +206,29 @@ namespace garge_api.Migrations
                     b.ToTable("RefreshTokens", (string)null);
                 });
 
+            modelBuilder.Entity("SjolystInnovation.AppKit.Vipps.VippsProcessedWebhookEvent", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProcessedAt");
+
+                    b.HasIndex("Source", "Id");
+
+                    b.ToTable("ProcessedWebhookEvents", (string)null);
+                });
+
             modelBuilder.Entity("User", b =>
                 {
                     b.Property<string>("Id")
@@ -350,15 +373,15 @@ namespace garge_api.Migrations
                     b.Property<int>("Id")
                         .HasColumnType("integer");
 
-                    b.Property<string>("CompanyAddress")
+                    b.Property<string>("AddressLocality")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
-                    b.Property<string>("CompanyEmail")
+                    b.Property<string>("AddressRegion")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
 
                     b.Property<string>("CompanyLegalName")
                         .IsRequired()
@@ -370,19 +393,58 @@ namespace garge_api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<string>("CompanyOrgNumber")
+                    b.Property<string>("ContactRecipientEmail")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<bool>("CookieBannerEnabled")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("IconContentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("IconData")
+                        .HasColumnType("text");
+
+                    b.Property<string>("LogoContentType")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("LogoData")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OrgNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.Property<long>("OtherTurnoverInOre")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("PublicEmail")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PublicPhone")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<int>("SecurityAlertThresholdMinutes")
                         .HasColumnType("integer");
+
+                    b.Property<string>("StreetAddress")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
 
                     b.Property<DateTime?>("VatCrossedAt")
                         .HasColumnType("timestamp with time zone");
@@ -437,14 +499,19 @@ namespace garge_api.Migrations
                         new
                         {
                             Id = 1,
-                            CompanyAddress = "Mårvegen 21a, 4347 Lye",
-                            CompanyEmail = "sondresjoelyst@gmail.com",
+                            AddressLocality = "Lye",
+                            AddressRegion = "",
                             CompanyLegalName = "Sjølyst Innovation AS",
                             CompanyName = "Garge",
-                            CompanyOrgNumber = "938 517 789",
+                            ContactRecipientEmail = "sondresjoelyst@gmail.com",
                             CookieBannerEnabled = true,
+                            OrgNumber = "938 517 789",
                             OtherTurnoverInOre = 0L,
+                            PostalCode = "4347",
+                            PublicEmail = "sondresjoelyst@gmail.com",
+                            PublicPhone = "",
                             SecurityAlertThresholdMinutes = 25,
+                            StreetAddress = "Mårvegen 21a",
                             VatEnabled = false,
                             VatThresholdWarnedPercent = 0,
                             VippsTestMode = false
@@ -2068,29 +2135,6 @@ namespace garge_api.Migrations
                     b.HasIndex("SwitchId");
 
                     b.ToTable("UserSwitchCustomNames");
-                });
-
-            modelBuilder.Entity("garge_api.Models.Webhook.ProcessedWebhookEvent", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime>("ProcessedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProcessedAt");
-
-                    b.HasIndex("Source", "Id");
-
-                    b.ToTable("ProcessedWebhookEvents");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

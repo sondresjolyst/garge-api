@@ -62,7 +62,7 @@ namespace garge_api.Services
         {
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
 
-            var orgLine = vatRegistered ?? s.VatEnabled ? $"{s.CompanyOrgNumber} MVA" : s.CompanyOrgNumber;
+            var orgLine = vatRegistered ?? s.VatEnabled ? $"{s.OrgNumber} MVA" : s.OrgNumber;
 
             var metaBlock = string.Empty;
             if (meta != null)
@@ -180,8 +180,8 @@ namespace garge_api.Services
                         <div class="brand-sub">
                           {{H(s.CompanyLegalName)}}<br>
                           Org. no. {{H(orgLine)}}<br>
-                          {{H(s.CompanyAddress)}}<br>
-                          {{H(s.CompanyEmail)}}
+                          {{H(s.FormattedAddress)}}<br>
+                          {{H(s.PublicEmail)}}
                         </div>
                       </td>
                       <td class="r">
