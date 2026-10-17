@@ -67,7 +67,7 @@ _logger.LogInformation("User {UserId} logged in", user.Id);
 ```
 
 ### Security (Article 32)
-- BCrypt with cost factor ≥ 12 for passwords — already in use, maintain it.
+- Account passwords are hashed by ASP.NET Core Identity's PasswordHasher (PBKDF2), set up through SjolystInnovation.AppKit.Auth. Keep its defaults and never lower the iteration count. MQTT device passwords use PBKDF2 through `MqttPasswordHasher`.
 - Short-lived JWTs + rotating refresh tokens — already implemented, do not weaken.
 - Rate limiting on auth endpoints — already configured, maintain it.
 - Enforce HTTPS at the infrastructure level.

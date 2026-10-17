@@ -21,7 +21,7 @@ Given a description of the endpoint, you will:
 - Never return EF entities from controllers — always map to a DTO via AutoMapper
 - Use `[Authorize]` on protected endpoints
 - Inject `ILogger<T>` for logging; use structured logging with named placeholders
-- Use BCrypt for any password operations
+- Leave account passwords to ASP.NET Core Identity's `UserManager` from SjolystInnovation.AppKit.Auth. Never hash or compare them by hand. MQTT device passwords go through `MqttPasswordHasher`.
 - Nullable reference types are enabled — handle nulls explicitly
 
 ## Output
