@@ -119,7 +119,6 @@ namespace garge_api
             builder.Services.AddDataProtection()
                 .PersistKeysToDbContext<ApplicationDbContext>()
                 .SetApplicationName("garge-api");
-            builder.Services.AddSingleton<IWebhookSecretProtector, WebhookSecretProtector>();
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
@@ -164,8 +163,7 @@ namespace garge_api
                     ?? assembly.GetName().Version?.ToString() ?? "1.0.0";
             });
             builder.Services.AddTransient<IVippsService, VippsService>();
-            builder.Services.AddHostedService<VippsWebhookRegistrationService>();
-            builder.Services.AddHostedService<ProcessedWebhookEventCleanupService>();
+            builder.Services.AddGargeVippsWebhooks();
             builder.Services.AddHostedService<SubscriptionChargeSchedulerService>();
             builder.Services.AddScoped<IPriceChangeService, PriceChangeService>();
             builder.Services.AddSingleton<PriceChangeSweepService>();
@@ -284,6 +282,7 @@ namespace garge_api
             app.UseAuthorization();
             app.UseAppKitRateLimiting();
             app.MapControllers();
+            app.MapGargeVippsWebhooks();
             app.MapAppKitAuth<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
             {

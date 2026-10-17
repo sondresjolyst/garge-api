@@ -74,25 +74,4 @@ namespace garge_api.Dtos.Subscription
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
-
-    public class VippsAgreementWebhookDto
-    {
-        public string AgreementId { get; set; } = string.Empty;
-        public string EventId { get; set; } = string.Empty;
-        public string EventType { get; set; } = string.Empty;
-        public DateTime? Occurred { get; set; }
-        public string? Msn { get; set; }
-
-        // Set on recurring.charge-* events. Used as the idempotency key when
-        // generating subscription invoices so a redelivered webhook can't
-        // produce two invoices for the same charge.
-        public string? ChargeId { get; set; }
-
-        // The charge amount and the part of it that was captured, in øre, set on recurring.charge-* events.
-        public int? Amount { get; set; }
-        public int? AmountCaptured { get; set; }
-
-        // Why a charge failed, set on recurring.charge-failed.v1, for example "charge_amount_too_high".
-        public string? FailureReason { get; set; }
-    }
 }

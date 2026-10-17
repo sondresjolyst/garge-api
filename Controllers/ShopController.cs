@@ -12,22 +12,18 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
-using System.Text.Json;
 
 namespace garge_api.Controllers
 {
     [ApiController]
     [Route("api/shop")]
-    public class ShopController : VippsWebhookControllerBase
+    public class ShopController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
         private readonly IVippsService _vipps;
         private readonly IInvoiceService _invoice;
-        private readonly IOrderEmailService _orderEmail;
         private readonly IAppSettingsCache _settingsCache;
-        private readonly IWebhookSecretProtector _protector;
         private readonly IWebPushService _push;
-        private readonly VippsSettings _vippsOpts;
         private readonly AppOptions _appOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<ShopController> _logger;
@@ -36,11 +32,8 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             IVippsService vipps,
             IInvoiceService invoice,
-            IOrderEmailService orderEmail,
             IAppSettingsCache settingsCache,
-            IWebhookSecretProtector protector,
             IWebPushService push,
-            IOptions<VippsSettings> vippsOpts,
             IOptions<AppOptions> appOpts,
             IMapper mapper,
             ILogger<ShopController> logger)
@@ -48,11 +41,8 @@ namespace garge_api.Controllers
             _context = context;
             _vipps = vipps;
             _invoice = invoice;
-            _orderEmail = orderEmail;
             _settingsCache = settingsCache;
-            _protector = protector;
             _push = push;
-            _vippsOpts = vippsOpts.Value;
             _appOpts = appOpts.Value;
             _mapper = mapper;
             _logger = logger;
@@ -139,7 +129,7 @@ namespace garge_api.Controllers
         {
             var userId = User.GetUserId()!;
 
-            if (!PhoneNumber.TryNormalizeNo(dto.PhoneNumber, out var msisdn))
+            if (!VippsPhoneNumber.TryNormalize(dto.PhoneNumber, out var msisdn))
                 return BadRequest("Invalid Norwegian phone number.");
 
             var shopItemIds = dto.Items.Select(i => i.ShopItemId).Distinct().ToList();
@@ -380,7 +370,7 @@ namespace garge_api.Controllers
 
             await _vipps.CancelPaymentAsync(order.VippsOrderId, $"cancel-{order.Id}", order.IsTest);
 
-            await RestoreStockAsync(order);
+            await OrderStock.RestoreAsync(_context, order);
             order.Status = OrderStatus.Cancelled;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -411,206 +401,6 @@ namespace garge_api.Controllers
             }
         }
 
-        /// <summary>Webhook endpoint for Vipps ePayment events on shop orders.</summary>
-        [HttpPost("webhook")]
-        [AllowAnonymous]
-        public async Task<IActionResult> Webhook()
-        {
-            var rawBody = await ReadRawBodyAsync(Request);
-            var settings = await _settingsCache.GetAsync();
-            var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
-                new Registration(settings.VippsShopWebhookSecret, false),
-                new Registration(settings.VippsTestShopWebhookSecret, true));
-            if (verify != VippsWebhookSignatureResult.Valid)
-            {
-                _logger.LogWarning("Shop webhook verify failed: {Reason}", verify);
-                return Unauthorized();
-            }
-
-            VippsPaymentWebhookDto? payload;
-            try
-            {
-                payload = JsonSerializer.Deserialize<VippsPaymentWebhookDto>(rawBody, JsonOpts);
-            }
-            catch
-            {
-                return BadRequest();
-            }
-
-            if (payload == null) return BadRequest();
-
-            var eventId = EventKey(!string.IsNullOrEmpty(payload.PspReference)
-                ? payload.PspReference
-                : $"{payload.Reference}:{payload.Name}", sentFromTest);
-
-            if (await AlreadyProcessedAsync(_context, eventId))
-            {
-                _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
-                return Ok();
-            }
-
-            var order = await _context.Orders
-                .Include(o => o.OrderItems)
-                .FirstOrDefaultAsync(o => o.VippsOrderId == payload.Reference);
-            if (order == null)
-            {
-                _logger.LogWarning("Shop webhook: unknown reference {Reference}", payload.Reference);
-                await SaveProcessedAsync(_context, "shop", eventId);
-                return Ok();
-            }
-
-            if (sentFromTest != order.IsTest)
-            {
-                _logger.LogError("Shop webhook {EventId} rejected: sent from the {Sent} environment for a {Order} order {OrderId}",
-                    eventId, sentFromTest ? "test" : "production", order.IsTest ? "test" : "production", order.Id);
-                return await RejectAsync(_context, "shop", eventId);
-            }
-
-            var expectedMsn = order.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
-            if (!MerchantMatches(payload.Msn, expectedMsn))
-            {
-                _logger.LogError("Shop webhook {EventId} rejected: MSN mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    eventId, payload.Msn, expectedMsn, order.Id);
-                return await RejectAsync(_context, "shop", eventId);
-            }
-
-            // AUTHORIZED reserves the whole order. CAPTURED and REFUNDED can each be part of it.
-            var amount = payload.Amount?.Value;
-            var amountFits = payload.Name switch
-            {
-                "AUTHORIZED" => amount == order.TotalInOre,
-                "CAPTURED" or "REFUNDED" => amount > 0 && amount <= order.TotalInOre,
-                _ => true
-            };
-            if (!amountFits)
-            {
-                _logger.LogError("Shop webhook {EventId} rejected: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
-                    eventId, payload.Amount?.Value, order.TotalInOre, order.Id);
-                return await RejectAsync(_context, "shop", eventId);
-            }
-
-            if (!payload.Success)
-            {
-                _logger.LogWarning("Shop webhook {EventId}: {Name} did not succeed for order {OrderId}, order unchanged",
-                    eventId, payload.Name, order.Id);
-                return await RejectAsync(_context, "shop", eventId);
-            }
-
-            var prevStatus = order.Status;
-
-            switch (payload.Name)
-            {
-                case "AUTHORIZED":
-                    order.Status = OrderStatus.Reserved;
-                    await TryPopulateShippingFromVippsAsync(order);
-                    break;
-                case "CAPTURED":
-                    // A partial capture leaves the order Reserved until the whole amount is captured.
-                    var capturedSoFar = amount == order.TotalInOre ? order.TotalInOre : (await PaymentTotalsAsync(order)).CapturedAmountInOre;
-                    order.CapturedInOre = Math.Clamp(Math.Max(order.CapturedInOre, capturedSoFar), 0, order.TotalInOre);
-                    if (order.CapturedInOre >= order.TotalInOre)
-                    {
-                        order.Status = OrderStatus.Paid;
-                        if (order.ShippedAt == null) order.ShippedAt = DateTime.UtcNow;
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Shop webhook {EventId}: partial capture of {Amount} on order {OrderId}, order stays {Status}",
-                            eventId, amount, order.Id, order.Status);
-                    }
-                    break;
-                case "REFUNDED":
-                    // A partial refund leaves the order Paid. Only a refund of the whole amount refunds it.
-                    var refundedSoFar = amount == order.TotalInOre ? order.TotalInOre : (await PaymentTotalsAsync(order)).RefundedAmountInOre;
-                    order.RefundedInOre = Math.Clamp(Math.Max(order.RefundedInOre, refundedSoFar), 0, order.TotalInOre);
-                    if (order.RefundedInOre >= order.TotalInOre)
-                    {
-                        order.Status = OrderStatus.Refunded;
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Shop webhook {EventId}: partial refund of {Amount} on order {OrderId}, order stays {Status}",
-                            eventId, amount, order.Id, order.Status);
-                    }
-                    break;
-                case "ABORTED":
-                case "EXPIRED":
-                case "TERMINATED":
-                    order.Status = OrderStatus.Failed;
-                    break;
-                case "CANCELLED":
-                    // Cancelling after a partial capture only releases the rest, and the customer has paid.
-                    if (prevStatus == OrderStatus.Reserved && await PaymentTotalsAsync(order) is { CapturedAmountInOre: > 0 } partly)
-                    {
-                        order.CapturedInOre = Math.Clamp(Math.Max(order.CapturedInOre, partly.CapturedAmountInOre), 0, order.TotalInOre);
-                        // The customer paid part of the order and the rest was released. That needs a person.
-                        _logger.LogError("Shop webhook {EventId}: order {OrderId} was captured for {Captured} of {Total} øre and the rest cancelled, order stays {Status} and needs manual handling",
-                            eventId, order.Id, partly.CapturedAmountInOre, order.TotalInOre, order.Status);
-                    }
-                    else
-                    {
-                        order.Status = OrderStatus.Cancelled;
-                    }
-                    break;
-                case "CREATED":
-                    break;
-                default:
-                    _logger.LogWarning("Shop webhook: unknown event {Name} for order {OrderId}",
-                        payload.Name, order.Id);
-                    break;
-            }
-
-            order.UpdatedAt = DateTime.UtcNow;
-
-            // Checkout takes the items off stock, so an order that ends unpaid gives them back.
-            if (prevStatus is OrderStatus.Pending or OrderStatus.Reserved &&
-                order.Status is OrderStatus.Failed or OrderStatus.Cancelled)
-            {
-                await RestoreStockAsync(order);
-            }
-
-            if (!await SaveProcessedAsync(_context, "shop", eventId))
-            {
-                _logger.LogInformation("Shop webhook duplicate {EventId} skipped", eventId);
-                return Ok();
-            }
-
-            if (payload.Name == "REFUNDED")
-                await TryCreditRefundsAsync(order.Id);
-
-            if (prevStatus != OrderStatus.Paid && order.Status == OrderStatus.Paid)
-            {
-                await TryGenerateInvoiceAsync(order.Id, "webhook capture");
-
-                _ = SafePushAsync(order.UserId, "Payment captured",
-                    $"Order #{order.Id} is paid. Invoice on its way to your email.");
-            }
-            else if (payload.Name == "CAPTURED" && order.Status == OrderStatus.Paid)
-            {
-                // The order is already Paid, by an admin capture or an earlier capture event. The service is
-                // idempotent: it short-circuits when a complete invoice already exists and otherwise
-                // renders one. Empty placeholder rows left by a prior failed render are cleaned up
-                // inside the service.
-                _logger.LogInformation("Webhook recovery check for order {OrderId}", order.Id);
-                await TryGenerateInvoiceAsync(order.Id, "webhook recovery");
-            }
-            else if (prevStatus != OrderStatus.Reserved && order.Status == OrderStatus.Reserved)
-            {
-                try { await _orderEmail.SendOrderConfirmedAsync(order.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Order confirmation email failed for order {OrderId}", order.Id); }
-
-                _ = SafePushAsync(order.UserId, "Order confirmed",
-                    $"Order #{order.Id} confirmed. We'll get it ready to ship.");
-            }
-
-            _logger.LogInformation("Shop webhook: order {OrderId} -> {Status}", order.Id, payload.Name);
-            return Ok();
-        }
-
-        /// <summary>The payment's capture, refund and cancel totals, read in the environment the order was created in.</summary>
-        private Task<VippsPayment> PaymentTotalsAsync(Order order)
-            => _vipps.GetPaymentAsync(order.VippsOrderId ?? string.Empty, order.IsTest);
-
         private async Task SafePushAsync(string userId, string title, string body)
         {
             try { await _push.SendAsync(userId, title, body); }
@@ -624,37 +414,6 @@ namespace garge_api.Controllers
             {
                 _logger.LogError(ex, "Invoice generation failed ({Context}) for order {OrderId}", context, orderId);
                 return null;
-            }
-        }
-
-        private async Task TryPopulateShippingFromVippsAsync(Order order)
-        {
-            if (string.IsNullOrEmpty(order.VippsOrderId)) return;
-            try
-            {
-                var payment = await _vipps.GetPaymentAsync(order.VippsOrderId, order.IsTest);
-                if (string.IsNullOrEmpty(payment?.ProfileSub)) return;
-
-                var info = await _vipps.GetUserInfoAsync(payment.ProfileSub, order.IsTest);
-                var formatted = VippsAddressFormatter.Format(info?.Address);
-                if (!string.IsNullOrEmpty(formatted))
-                    order.ShippingAddress = formatted;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to fetch Vipps user info for order {OrderId}", order.Id);
-            }
-        }
-
-        private async Task RestoreStockAsync(Order order)
-        {
-            var ids = order.OrderItems.Select(oi => oi.ShopItemId).ToList();
-            var items = await _context.ShopItems.Where(i => ids.Contains(i.Id)).ToListAsync();
-            var byId = items.ToDictionary(i => i.Id);
-            foreach (var oi in order.OrderItems)
-            {
-                if (byId.TryGetValue(oi.ShopItemId, out var item) && item.StockCount != -1)
-                    item.StockCount += oi.Quantity;
             }
         }
 

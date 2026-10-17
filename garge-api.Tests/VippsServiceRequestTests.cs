@@ -51,7 +51,7 @@ public class VippsServiceRequestTests
             ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
         });
         var client = services.BuildServiceProvider().GetRequiredService<IVippsClient>();
-        var service = new VippsService(client, appOpts, TimeProvider.System, NullLogger<VippsService>.Instance);
+        var service = new VippsService(client, appOpts);
         return (service, handler);
     }
 
