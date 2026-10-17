@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using SjolystInnovation.AppKit.Auth;
+using SjolystInnovation.AppKit.SiteSettings;
 
 namespace garge_api.Models
 {
@@ -70,11 +71,13 @@ namespace garge_api.Models
         public DbSet<Anonymized.AnonymizedSeries> AnonymizedSeries { get; set; }
         public DbSet<Anonymized.AnonymizedReading> AnonymizedReadings { get; set; }
         public DbSet<PairingToken> PairingTokens { get; set; }
+        public DbSet<LegalPage> LegalPages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.AddAppKitRefreshTokens<User>();
+            modelBuilder.AddAppKitLegalPages();
 
             modelBuilder.Entity<UserProfile>()
                 .HasOne(up => up.User)

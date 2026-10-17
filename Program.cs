@@ -234,6 +234,7 @@ namespace garge_api
                 context.EnsureTriggers();
 
                 await app.Services.SeedAppKitRolesAsync(RoleNames.AllRoles);
+                await app.Services.SeedAppKitLegalPagesAsync<ApplicationDbContext>(LegalSeedText.All);
 
                 foreach (var rolePermission in RoleNames.RolePermissions)
                 {
@@ -285,6 +286,7 @@ namespace garge_api
             app.MapControllers();
             app.MapGargeVippsWebhooks();
             app.MapAppKitSiteSettings<ApplicationDbContext, AppSettings>("/api", SiteSettingsHooks.Configure);
+            app.MapAppKitLegalPages<ApplicationDbContext>(configure: LegalSeedText.Configure);
             app.MapAppKitAuth<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
             {
