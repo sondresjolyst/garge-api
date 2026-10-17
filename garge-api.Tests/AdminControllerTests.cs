@@ -385,13 +385,6 @@ public class AdminControllerTests : ControllerTestBase
         CreatedAt = createdAt, IsDeleted = deleted, DeletedAt = deletedAt,
     };
 
-    private static int TotalUsersOn(List<object> rows, DateTime date)
-    {
-        var key = date.ToString("yyyy-MM-dd");
-        var row = rows.Single(r => (string)r.GetType().GetProperty("date")!.GetValue(r)! == key);
-        return (int)row.GetType().GetProperty("totalUsers")!.GetValue(row)!;
-    }
-
     [Fact]
     public async Task GetStats_TotalUsers_ExcludesDeleted()
     {
@@ -408,34 +401,6 @@ public class AdminControllerTests : ControllerTestBase
         var ok = Assert.IsType<OkObjectResult>(result);
         var dto = Assert.IsType<AdminStatsDto>(ok.Value);
         Assert.Equal(2, dto.TotalUsers);
-    }
-
-    [Fact]
-    public async Task GetStatsHistory_SubtractsDeletionsOnDeletedDate()
-    {
-        // Three users sign up on d1; one deletes on d2. The running total climbs to 3, then dips to 2.
-        var db = CreateDbContext();
-        MockUserManager.Setup(m => m.Users).Returns(db.Users);
-        var today = DateTime.UtcNow.Date;
-        var d1 = today.AddDays(-3);
-        var d2 = today.AddDays(-2);
-        db.Users.AddRange(
-            MakeUser("u1", d1),
-            MakeUser("u2", d1),
-            MakeUser("u3", d1, deleted: true, deletedAt: d2));
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var options = new AppKitDailyStatsOptions<ApplicationDbContext, DailyStatSnapshot>();
-        DailyStatsSamplers.Configure(options);
-        var stats = new AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>(Options.Create(options), TimeProvider.System);
-        await stats.FreezeMissingDaysAsync(db, TestContext.Current.CancellationToken);
-
-        var result = await CreateAdminController(db).GetStatsHistory(stats);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var rows = Assert.IsType<List<object>>(ok.Value);
-        Assert.Equal(3, TotalUsersOn(rows, d1));
-        Assert.Equal(2, TotalUsersOn(rows, d2));
-        Assert.Equal(2, TotalUsersOn(rows, today));
     }
 
     [Fact]

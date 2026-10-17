@@ -5,7 +5,6 @@ using garge_api.Dtos.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using SjolystInnovation.AppKit.AdminStats;
 using SjolystInnovation.AppKit.Auth;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
@@ -233,34 +232,6 @@ namespace garge_api.Controllers
                 .OrderByDescending(d => d.Timestamp)
                 .ToListAsync();
             return Ok(devices);
-        }
-
-        /// <summary>
-        /// Gets cumulative daily stats over time for charting.
-        /// </summary>
-        /// <param name="stats">The stored daily snapshots and today's live counts.</param>
-        [HttpGet("/api/admin/stats/history")]
-        [SwaggerOperation(Summary = "Gets cumulative daily stats over time.")]
-        public async Task<IActionResult> GetStatsHistory(
-            [FromServices] AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot> stats)
-        {
-            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.GetUserId() });
-
-            // Stored completed-day snapshots are never rewritten, so they outlive the per-user data they
-            // were derived from and survive the 5-year purge. A hosted service stores completed days.
-            // Today is always sampled live, so same-day churn is not lost.
-            var snapshots = await stats.GetHistoryAsync(_context, cancellationToken: HttpContext.RequestAborted);
-
-            var result = snapshots.Select(s => (object)new
-            {
-                date = s.Date.ToString("yyyy-MM-dd"),
-                totalUsers = s.TotalUsers,
-                totalSensors = s.TotalSensors,
-                totalSwitches = s.TotalSwitches,
-                totalAutomations = s.TotalAutomations,
-            }).ToList();
-
-            return Ok(result);
         }
 
         /// <summary>
