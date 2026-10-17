@@ -13,9 +13,9 @@ namespace garge_api.Services
             return new EmailBrand(s.CompanyName)
             {
                 LegalName = s.CompanyLegalName,
-                OrgNumber = $"Org. no. {s.CompanyOrgNumber}{(s.VatEnabled ? " MVA" : "")}",
-                Address = s.CompanyAddress,
-                Email = s.CompanyEmail,
+                OrgNumber = $"Org. no. {s.OrgNumber}{(s.VatEnabled ? " MVA" : "")}",
+                Address = s.FormattedAddress,
+                Email = s.PublicEmail,
             };
         }
     }

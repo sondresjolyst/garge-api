@@ -582,7 +582,7 @@ namespace garge_api.Services
             var to = new EmailLayout.Party { Label = "Bill to", Name = name };
             foreach (var line in lines) to.Lines.Add(line);
             return EmailLayout.RenderParties(
-                from: new EmailLayout.Party { Label = "From", Name = s.CompanyLegalName, Lines = { s.CompanyAddress, s.CompanyEmail } },
+                from: new EmailLayout.Party { Label = "From", Name = s.CompanyLegalName, Lines = { s.FormattedAddress, s.PublicEmail } },
                 to: to);
         }
 
@@ -760,7 +760,7 @@ namespace garge_api.Services
                 {
                     Label = "From",
                     Name = s.CompanyLegalName,
-                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                    Lines = { s.FormattedAddress, s.PublicEmail }
                 },
                 to: new EmailLayout.Party
                 {
@@ -864,7 +864,7 @@ namespace garge_api.Services
                 {
                     Label = "From",
                     Name = s.CompanyLegalName,
-                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                    Lines = { s.FormattedAddress, s.PublicEmail }
                 },
                 to: new EmailLayout.Party
                 {

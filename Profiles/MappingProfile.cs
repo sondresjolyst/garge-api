@@ -27,7 +27,6 @@ public class MappingProfile : IRegister
         config.NewConfig<IdentityRole, RoleDto>();
         config.NewConfig<RolePermission, RolePermissionDto>().TwoWays();
         config.NewConfig<AppSettings, AppSettingsDto>();
-        config.NewConfig<AppSettings, PublicSettingsDto>();
         config.NewConfig<UpdateAppSettingsDto, AppSettings>()
             .IgnoreNullValues(true);
 

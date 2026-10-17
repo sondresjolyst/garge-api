@@ -89,7 +89,7 @@ namespace garge_api.Services
                 {
                     Label = "From",
                     Name = s.CompanyLegalName,
-                    Lines = { s.CompanyAddress, s.CompanyEmail }
+                    Lines = { s.FormattedAddress, s.PublicEmail }
                 },
                 to: new EmailLayout.Party
                 {

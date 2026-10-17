@@ -440,7 +440,7 @@ public class InvoiceServiceTests
         var (svc, db, html) = CreateCapturingHtml();
         var order = await SeedPaidOrderAsync(db);
         var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
-        settings.CompanyOrgNumber = "999 888 777";
+        settings.OrgNumber = "999 888 777";
         settings.VatEnabled = vatOnNow;
         var item = await db.OrderItems.SingleAsync(TestContext.Current.CancellationToken);
         item.VatPercentage = lineVat;
@@ -451,6 +451,21 @@ public class InvoiceServiceTests
 
         Assert.Equal(expectMva, html.Single().Contains("999 888 777 MVA"));
         Assert.Contains("999 888 777", html.Single());
+    }
+
+    [Fact]
+    public async Task OrderInvoice_ShowsTheSellerAddressAsOneLine()
+    {
+        var (svc, db, html) = CreateCapturingHtml();
+        var order = await SeedPaidOrderAsync(db);
+        var settings = await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken);
+        settings.PublicEmail = "post@garge.no";
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.GenerateAndStoreAsync(order.Id);
+
+        Assert.Contains(System.Web.HttpUtility.HtmlEncode("Mårvegen 21a, 4347 Lye"), html.Single());
+        Assert.Contains("post@garge.no", html.Single());
     }
 
     [Fact]
@@ -550,7 +565,7 @@ public class InvoiceServiceTests
     {
         var settings = await db.AppSettings.SingleAsync();
         settings.VatEnabled = true;
-        settings.CompanyOrgNumber = "999 888 777";
+        settings.OrgNumber = "999 888 777";
         await db.SaveChangesAsync();
     }
 
