@@ -60,7 +60,28 @@ public class UserControllerTests : ControllerTestBase
 
         var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id, deleter.Object);
 
-        Assert.Equal(409, Assert.IsType<ConflictObjectResult>(result).StatusCode);
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal(409, conflict.StatusCode);
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal("lastAdmin", body.GetProperty("code").GetString());
+        Assert.Equal(new LastAdminException().Message, body.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task DeleteOwnAccount_ConcurrentChange_ReturnsConflictWithItsCode()
+    {
+        using var db = CreateDbContext();
+        var user = MakeDbUser();
+        MockUserManager.Setup(m => m.FindByIdAsync(user.Id)).ReturnsAsync(user);
+        var deleter = new Mock<IAccountDeleter<User>>();
+        var refused = new AccountChangeConflictException(new InvalidOperationException("serialization failure"));
+        deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(refused);
+
+        var result = await CreateUserController(db, callerId: user.Id).DeleteOwnAccount(user.Id, deleter.Object);
+
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(Assert.IsType<ConflictObjectResult>(result).Value);
+        Assert.Equal("accountChangeConflict", body.GetProperty("code").GetString());
+        Assert.Equal(refused.Message, body.GetProperty("message").GetString());
     }
 
     [Fact]

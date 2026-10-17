@@ -478,6 +478,25 @@ public class AdminControllerTests : ControllerTestBase
         var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
         deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(new SjolystInnovation.AppKit.Auth.LastAdminException());
 
-        Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var conflict = Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal("lastAdmin", body.GetProperty("code").GetString());
+        Assert.Equal(new SjolystInnovation.AppKit.Auth.LastAdminException().Message, body.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task DeleteUser_ConcurrentChange_ReturnsConflictWithItsCode()
+    {
+        using var db = CreateDbContext();
+        var user = new User { Id = "u9", FirstName = "F", LastName = "L" };
+        MockUserManager.Setup(m => m.FindByIdAsync("u9")).ReturnsAsync(user);
+        var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
+        var refused = new SjolystInnovation.AppKit.Auth.AccountChangeConflictException(new InvalidOperationException("serialization failure"));
+        deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(refused);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal("accountChangeConflict", body.GetProperty("code").GetString());
+        Assert.Equal(refused.Message, body.GetProperty("message").GetString());
     }
 }

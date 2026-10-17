@@ -10,6 +10,7 @@ using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
 using garge_api.Models.Admin;
 using garge_api.Services;
+using garge_api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -263,7 +264,7 @@ namespace garge_api.Controllers
             }
             catch (Exception e) when (e is LastAdminException or AccountChangeConflictException)
             {
-                return Conflict(new { message = e.Message });
+                return Conflict(AccountDeletionConflict.Body(e));
             }
 
             _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.GetUserId() });
