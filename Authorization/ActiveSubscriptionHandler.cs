@@ -31,7 +31,7 @@ namespace garge_api.Authorization
             AuthorizationHandlerContext context,
             ActiveSubscriptionRequirement requirement)
         {
-            var userId = context.User.UserId();
+            var userId = context.User.GetUserId();
             if (userId == null) return;
 
             using var scope = _scopeFactory.CreateScope();

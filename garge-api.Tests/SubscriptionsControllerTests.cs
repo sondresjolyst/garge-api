@@ -26,11 +26,11 @@ public class SubscriptionsControllerTests : ControllerTestBase
                 It.IsAny<HttpRequest>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns((HttpRequest req, string body, string secret) =>
                 string.IsNullOrEmpty(secret)
-                    ? VippsWebhookResult.MissingSecret
+                    ? VippsWebhookSignatureResult.MissingSecret
                     : (req.Headers["X-Test-Valid"] == "1"
                        && (string.IsNullOrEmpty(req.Headers["X-Test-Secret"]) || req.Headers["X-Test-Secret"] == secret)
-                        ? VippsWebhookResult.Valid
-                        : VippsWebhookResult.BadSignature));
+                        ? VippsWebhookSignatureResult.Valid
+                        : VippsWebhookSignatureResult.BadSignature));
         return mock;
     }
 

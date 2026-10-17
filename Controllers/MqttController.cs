@@ -48,7 +48,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Username already exists.")]
         public async Task<IActionResult> CreateUser([FromBody] CreateEMQXMqttUserDto dto)
         {
-            _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.UserId(), dto.Username });
+            _logger.LogInformation("CreateUser called by {@LogData}", new { CallerUserId = User.GetUserId(), dto.Username });
 
             if (await _context.EMQXMqttUsers.AnyAsync(u => u.Username == dto.Username))
             {

@@ -20,7 +20,10 @@ public class VippsServiceTests
             FrontendBaseUrl = "https://www.garge.no",
             ApiBaseUrl = "https://garge-api.prod.tumogroup.com"
         });
-        var client = new VippsClient(new HttpClient(), Options.Create(new VippsOptions()), new FixedVippsEnvironment(false), NullLogger<VippsClient>.Instance);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAppKitVipps(_ => { });
+        var client = services.BuildServiceProvider().GetRequiredService<IVippsClient>();
         return new VippsService(client, appOpts, TimeProvider.System, NullLogger<VippsService>.Instance);
     }
 
@@ -63,7 +66,7 @@ public class VippsServiceTests
         var body = """{"reference":"42","name":"AUTHORIZED"}""";
         var req = BuildRequest(body, "my-secret");
 
-        Assert.Equal(VippsWebhookResult.Valid, svc.VerifyWebhookSignature(req, body, "my-secret"));
+        Assert.Equal(VippsWebhookSignatureResult.Valid, svc.VerifyWebhookSignature(req, body, "my-secret"));
     }
 
     [Fact]
@@ -73,7 +76,7 @@ public class VippsServiceTests
         var body = """{"reference":"42","name":"AUTHORIZED"}""";
         var req = BuildRequest(body, "correct-secret");
 
-        Assert.Equal(VippsWebhookResult.BadSignature, svc.VerifyWebhookSignature(req, body, "wrong-secret"));
+        Assert.Equal(VippsWebhookSignatureResult.BadSignature, svc.VerifyWebhookSignature(req, body, "wrong-secret"));
     }
 
     [Fact]
@@ -84,7 +87,7 @@ public class VippsServiceTests
         var tampered = """{"reference":"99","name":"AUTHORIZED"}""";
         var req = BuildRequest(original, "secret");
 
-        Assert.Equal(VippsWebhookResult.BadContentHash,
+        Assert.Equal(VippsWebhookSignatureResult.BadContentHash,
             svc.VerifyWebhookSignature(req, tampered, "secret"));
     }
 
@@ -95,7 +98,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", overrideAuth: "");
 
-        Assert.Equal(VippsWebhookResult.MissingHeader, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookSignatureResult.MissingHeader, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -105,7 +108,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "real");
 
-        Assert.Equal(VippsWebhookResult.MissingSecret, svc.VerifyWebhookSignature(req, body, string.Empty));
+        Assert.Equal(VippsWebhookSignatureResult.MissingSecret, svc.VerifyWebhookSignature(req, body, string.Empty));
     }
 
     [Theory]
@@ -118,7 +121,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
 
-        Assert.Equal(VippsWebhookResult.Stale, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookSignatureResult.Stale, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -140,7 +143,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", when: DateTimeOffset.UtcNow.AddMinutes(minutesFromNow));
 
-        Assert.Equal(VippsWebhookResult.Valid, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookSignatureResult.Valid, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -150,7 +153,7 @@ public class VippsServiceTests
         var body = """{"reference":"42"}""";
         var req = BuildRequest(body, "secret", overrideDate: "not-a-date");
 
-        Assert.Equal(VippsWebhookResult.BadDate, svc.VerifyWebhookSignature(req, body, "secret"));
+        Assert.Equal(VippsWebhookSignatureResult.BadDate, svc.VerifyWebhookSignature(req, body, "secret"));
     }
 
     [Fact]
@@ -161,7 +164,7 @@ public class VippsServiceTests
         var bogus = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes("other")));
         var req = BuildRequest(body, "secret", overrideContentHash: bogus);
 
-        Assert.Equal(VippsWebhookResult.BadContentHash,
+        Assert.Equal(VippsWebhookSignatureResult.BadContentHash,
             svc.VerifyWebhookSignature(req, body, "secret"));
     }
 }

@@ -137,7 +137,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> Checkout([FromBody] CreateOrderDto dto)
         {
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
 
             if (!PhoneNumber.TryNormalizeNo(dto.PhoneNumber, out var msisdn))
                 return BadRequest("Invalid Norwegian phone number.");
@@ -242,7 +242,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> GetMyOrders()
         {
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
 
             var orders = await _context.Orders
                 .Include(o => o.OrderItems).ThenInclude(oi => oi.ShopItem)
@@ -310,7 +310,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> GetInvoicePdf(int id)
         {
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
             var isAdmin = User.IsInRole("Admin");
 
             var invoice = await _context.Invoices
@@ -421,7 +421,7 @@ namespace garge_api.Controllers
             var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
                 new Registration(settings.VippsShopWebhookSecret, false),
                 new Registration(settings.VippsTestShopWebhookSecret, true));
-            if (verify != VippsWebhookResult.Valid)
+            if (verify != VippsWebhookSignatureResult.Valid)
             {
                 _logger.LogWarning("Shop webhook verify failed: {Reason}", verify);
                 return Unauthorized();
@@ -665,7 +665,7 @@ namespace garge_api.Controllers
             if (!await _context.ShopItems.AnyAsync(i => i.Id == itemId))
                 return NotFound();
 
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
             return await PhotoEndpointHelpers.UpsertAsync(
                 _context,
                 _context.ShopItemPhotos,

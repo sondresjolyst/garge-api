@@ -41,7 +41,7 @@ namespace garge_api.Controllers
         private async Task<bool> UserCanAccessSensorAsync(int sensorId)
         {
             if (IsAdmin()) return true;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
@@ -55,7 +55,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have access to this sensor.")]
         public async Task<IActionResult> GetActivities(int sensorId)
         {
-            _logger.LogInformation("GetActivities called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+            _logger.LogInformation("GetActivities called by {@LogData}", new { CallerUserId = User.GetUserId(), sensorId });
 
             var sensorExists = await _context.Sensors.AnyAsync(s => s.Id == sensorId);
             if (!sensorExists)
@@ -66,7 +66,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanAccessSensorAsync(sensorId))
             {
-                _logger.LogWarning("GetActivities forbidden for {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+                _logger.LogWarning("GetActivities forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), sensorId });
                 return Forbid();
             }
 
@@ -117,7 +117,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have access to this sensor.")]
         public async Task<IActionResult> CreateActivity(int sensorId, [FromBody] CreateSensorActivityDto dto)
         {
-            _logger.LogInformation("CreateActivity called by {@LogData}", new { CallerUserId = User.UserId(), sensorId });
+            _logger.LogInformation("CreateActivity called by {@LogData}", new { CallerUserId = User.GetUserId(), sensorId });
 
             var sensorExists = await _context.Sensors.AnyAsync(s => s.Id == sensorId);
             if (!sensorExists)
@@ -126,7 +126,7 @@ namespace garge_api.Controllers
             if (!await UserCanAccessSensorAsync(sensorId))
                 return Forbid();
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             if (string.IsNullOrEmpty(userId))
                 return Unauthorized();
 
@@ -174,7 +174,7 @@ namespace garge_api.Controllers
             if (activity == null)
                 return NotFound(new { message = "Activity not found!" });
 
-            var currentUserId = User.UserId();
+            var currentUserId = User.GetUserId();
             if (!IsAdmin() && activity.UserId != currentUserId)
                 return Forbid();
 
@@ -214,7 +214,7 @@ namespace garge_api.Controllers
             if (activity == null)
                 return NotFound(new { message = "Activity not found!" });
 
-            var currentUserId = User.UserId();
+            var currentUserId = User.GetUserId();
             if (!IsAdmin() && activity.UserId != currentUserId)
                 return Forbid();
 

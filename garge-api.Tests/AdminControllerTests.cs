@@ -5,11 +5,14 @@ using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
+using garge_api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
+using SjolystInnovation.AppKit.AdminStats;
 using Xunit;
 
 namespace garge_api.Tests;
@@ -423,8 +426,12 @@ public class AdminControllerTests : ControllerTestBase
             MakeUser("u2", d1),
             MakeUser("u3", d1, deleted: true, deletedAt: d2));
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var options = new AppKitDailyStatsOptions<ApplicationDbContext, DailyStatSnapshot>();
+        DailyStatsSamplers.Configure(options);
+        var stats = new AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>(Options.Create(options), TimeProvider.System);
+        await stats.FreezeMissingDaysAsync(db, TestContext.Current.CancellationToken);
 
-        var result = await CreateAdminController(db).GetStatsHistory();
+        var result = await CreateAdminController(db).GetStatsHistory(stats);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var rows = Assert.IsType<List<object>>(ok.Value);

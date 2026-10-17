@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace garge_api.Controllers
 {
@@ -42,7 +41,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> Subscribe([FromBody] CreatePushSubscriptionDto dto)
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = User.GetUserId();
             if (userId == null) return Forbid();
 
             var existing = await db.PushSubscriptions
@@ -73,7 +72,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> SendTest()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = User.GetUserId();
             if (userId == null) return Forbid();
 
             await webPushService.SendAsync(userId, "Test notification", "Push notifications are working!", null, CancellationToken.None);
@@ -85,7 +84,7 @@ namespace garge_api.Controllers
         [Authorize]
         public async Task<IActionResult> Unsubscribe([FromBody] DeletePushSubscriptionDto dto)
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = User.GetUserId();
             if (userId == null) return Forbid();
 
             var sub = await db.PushSubscriptions

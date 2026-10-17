@@ -46,7 +46,7 @@ namespace garge_api.Controllers
             // Admins always have access.
             if (IsSwitchAdmin()) return true;
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             if (string.IsNullOrEmpty(userId)) return false;
 
             // Delegate to the shared ownership service so the request-time access
@@ -69,7 +69,7 @@ namespace garge_api.Controllers
         private async Task<bool> UserOwnsSwitchAsync(Switch sw, CancellationToken ct = default)
         {
             if (IsSwitchAdmin()) return true;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             if (string.IsNullOrEmpty(userId)) return false;
             if (await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == sw.Id && us.IsOwner, ct)) return true;
             return await IsIndirectSwitchOwnerAsync(sw, userId, ct);
@@ -79,7 +79,7 @@ namespace garge_api.Controllers
         private async Task<bool> UserCanEditSwitchAsync(Switch sw, CancellationToken ct = default)
         {
             if (await UserOwnsSwitchAsync(sw, ct)) return true;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             return userId != null && await _context.UserSwitches.AnyAsync(us =>
                 us.UserId == userId && us.SwitchId == sw.Id && us.Permission == SharePermission.Edit, ct);
         }
@@ -88,7 +88,7 @@ namespace garge_api.Controllers
         private async Task<string> CallerSwitchAccessAsync(Switch sw, CancellationToken ct = default)
         {
             if (await UserOwnsSwitchAsync(sw, ct)) return DeviceAccess.Owner;
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             var perm = await _context.UserSwitches
                 .Where(us => us.UserId == userId && us.SwitchId == sw.Id && !us.IsOwner)
                 .Select(us => (SharePermission?)us.Permission)
@@ -139,7 +139,7 @@ namespace garge_api.Controllers
         /// owner's history. Admins see everything; the access check still gates visibility overall.
         /// </summary>
         private IQueryable<SwitchData> WithinOwnershipWindow(IQueryable<SwitchData> query)
-            => query.WithinSwitchOwnership(_context, User.UserId(), IsSwitchAdmin());
+            => query.WithinSwitchOwnership(_context, User.GetUserId(), IsSwitchAdmin());
 
         /// <summary>
         /// Retrieves all available switches.
@@ -149,9 +149,9 @@ namespace garge_api.Controllers
         [SwaggerResponse(200, "A list of all switches.", typeof(IEnumerable<SwitchDto>))]
         public async Task<IActionResult> GetAllSwitches(CancellationToken ct = default)
         {
-            _logger.LogInformation("GetAllSwitches called by {@LogData}", new { CallerUserId = User.UserId() });
+            _logger.LogInformation("GetAllSwitches called by {@LogData}", new { CallerUserId = User.GetUserId() });
 
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
             var isAdmin = IsSwitchAdmin();
 
             var allSwitches = await _context.Switches
@@ -204,7 +204,7 @@ namespace garge_api.Controllers
                 dtos.Add(dto);
             }
 
-            _logger.LogInformation("Returning {@LogData}", new { Count = accessibleSwitches.Count, CallerUserId = User.UserId() });
+            _logger.LogInformation("Returning {@LogData}", new { Count = accessibleSwitches.Count, CallerUserId = User.GetUserId() });
             return Ok(dtos);
         }
 
@@ -218,7 +218,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitch(int id, CancellationToken ct = default)
         {
-            _logger.LogInformation("GetSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("GetSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), id });
 
             var switchEntity = await _context.Switches.FindAsync(new object[] { id }, ct);
             if (switchEntity == null)
@@ -229,11 +229,11 @@ namespace garge_api.Controllers
 
             if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
-                _logger.LogWarning("GetSwitch forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
+                _logger.LogWarning("GetSwitch forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), id });
                 return Forbid();
             }
 
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
             var customName = await _context.UserSwitchCustomNames
                 .Where(x => x.UserId == userId && x.SwitchId == id)
                 .Select(x => x.CustomName)
@@ -243,7 +243,7 @@ namespace garge_api.Controllers
             dto.CustomName = customName;
             dto.Access = await CallerSwitchAccessAsync(switchEntity, ct);
 
-            _logger.LogInformation("Returning switch {@LogData}", new { id, CallerUserId = User.UserId() });
+            _logger.LogInformation("Returning switch {@LogData}", new { id, CallerUserId = User.GetUserId() });
             return Ok(dto);
         }
 
@@ -257,7 +257,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Switch name already exists.")]
         public async Task<IActionResult> CreateSwitch([FromBody] CreateSwitchDto switchDto)
         {
-            _logger.LogInformation("CreateSwitch called by {@LogData}", new { CallerUserId = User.UserId(), switchDto.Name, switchDto.Type });
+            _logger.LogInformation("CreateSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), switchDto.Name, switchDto.Type });
 
             var switchEntity = _mapper.Map<Switch>(switchDto);
             switchEntity.Role = switchDto.Name;
@@ -292,7 +292,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> UpdateSwitch(int id, [FromBody] UpdateSwitchDto switchDto)
         {
-            _logger.LogInformation("UpdateSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("UpdateSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), id });
 
             if (id != switchDto.Id)
             {
@@ -327,7 +327,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSwitch(int id)
         {
-            _logger.LogInformation("DeleteSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("DeleteSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), id });
 
             var switchEntity = await _context.Switches.FindAsync(id);
             if (switchEntity == null)
@@ -353,7 +353,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitchData(int switchId, string? timeRange, DateTime? startDate, DateTime? endDate, CancellationToken ct = default)
         {
-            _logger.LogInformation("GetSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
+            _logger.LogInformation("GetSwitchData called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
 
             var switchEntity = await _context.Switches.AsNoTracking().FirstOrDefaultAsync(s => s.Id == switchId, ct);
             if (switchEntity == null)
@@ -364,7 +364,7 @@ namespace garge_api.Controllers
 
             if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
-                _logger.LogWarning("GetSwitchData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
+                _logger.LogWarning("GetSwitchData forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
                 return Forbid();
             }
 
@@ -389,7 +389,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetSwitchState(int switchId, CancellationToken ct = default)
         {
-            _logger.LogInformation("GetSwitchState called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
+            _logger.LogInformation("GetSwitchState called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
 
             var switchEntity = await _context.Switches.FindAsync(new object[] { switchId }, ct);
             if (switchEntity == null)
@@ -400,7 +400,7 @@ namespace garge_api.Controllers
 
             if (!await UserHasRequiredRoleAsync(switchEntity, ct))
             {
-                _logger.LogWarning("GetSwitchState forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
+                _logger.LogWarning("GetSwitchState forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
                 return Forbid();
             }
 
@@ -433,7 +433,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchData(int switchId, [FromBody] CreateSwitchDataDto switchDataDto)
         {
-            _logger.LogInformation("CreateSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
+            _logger.LogInformation("CreateSwitchData called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
 
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
@@ -472,7 +472,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> GetMultipleSwitchesData([FromQuery] List<int> switchIds, string? timeRange, DateTime? startDate, DateTime? endDate, CancellationToken ct = default)
         {
-            _logger.LogInformation("GetMultipleSwitchesData called by {@LogData}", new { CallerUserId = User.UserId(), switchIds });
+            _logger.LogInformation("GetMultipleSwitchesData called by {@LogData}", new { CallerUserId = User.GetUserId(), switchIds });
 
             var switches = await _context.Switches.Where(s => switchIds.Contains(s.Id)).ToListAsync(ct);
             if (switches.Count != switchIds.Count)
@@ -485,7 +485,7 @@ namespace garge_api.Controllers
             {
                 if (!await UserHasRequiredRoleAsync(switchEntity, ct))
                 {
-                    _logger.LogWarning("GetMultipleSwitchesData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId = switchEntity.Id });
+                    _logger.LogWarning("GetMultipleSwitchesData forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId = switchEntity.Id });
                     return Forbid();
                 }
             }
@@ -511,7 +511,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteSwitchData(int switchId, int dataId)
         {
-            _logger.LogInformation("DeleteSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId, dataId });
+            _logger.LogInformation("DeleteSwitchData called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId, dataId });
 
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
@@ -522,7 +522,7 @@ namespace garge_api.Controllers
 
             if (!await UserCanEditSwitchAsync(switchEntity))
             {
-                _logger.LogWarning("DeleteSwitchData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
+                _logger.LogWarning("DeleteSwitchData forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
                 return Forbid();
             }
 
@@ -552,7 +552,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> CreateSwitchDataByName(string switchName, [FromBody] CreateSwitchDataDto switchDataDto)
         {
-            _logger.LogInformation("CreateSwitchDataByName called by {@LogData}", new { CallerUserId = User.UserId(), switchName });
+            _logger.LogInformation("CreateSwitchDataByName called by {@LogData}", new { CallerUserId = User.GetUserId(), switchName });
 
             var switchEntity = await _context.Switches.FirstOrDefaultAsync(s => s.Name == switchName);
             if (switchEntity == null)
@@ -591,7 +591,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(403, "User does not have the required role.")]
         public async Task<IActionResult> DeleteAllSwitchData(int switchId)
         {
-            _logger.LogInformation("DeleteAllSwitchData called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
+            _logger.LogInformation("DeleteAllSwitchData called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
 
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
@@ -602,7 +602,7 @@ namespace garge_api.Controllers
 
             if (!await UserHasRequiredRoleAsync(switchEntity))
             {
-                _logger.LogWarning("DeleteAllSwitchData forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
+                _logger.LogWarning("DeleteAllSwitchData forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
                 return Forbid();
             }
 
@@ -626,7 +626,7 @@ namespace garge_api.Controllers
             int switchId,
             [FromBody] garge_api.Dtos.Sensor.UpdateCustomNameDto dto)
         {
-            _logger.LogInformation("UpdateCustomName (switch) called by {@LogData}", new { CallerUserId = User.UserId(), switchId });
+            _logger.LogInformation("UpdateCustomName (switch) called by {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
 
             var switchEntity = await _context.Switches.FindAsync(switchId);
             if (switchEntity == null)
@@ -637,11 +637,11 @@ namespace garge_api.Controllers
 
             if (!await UserHasRequiredRoleAsync(switchEntity))
             {
-                _logger.LogWarning("UpdateCustomName (switch) forbidden for {@LogData}", new { CallerUserId = User.UserId(), switchId });
+                _logger.LogWarning("UpdateCustomName (switch) forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), switchId });
                 return Forbid();
             }
 
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
 
             var existing = await _context.UserSwitchCustomNames
                 .FirstOrDefaultAsync(x => x.UserId == userId && x.SwitchId == switchId);
@@ -683,7 +683,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Invalid registration code.")]
         public async Task<IActionResult> ClaimSwitch([FromBody] ClaimSwitchDto dto)
         {
-            _logger.LogInformation("ClaimSwitch called by {@LogData}", new { CallerUserId = User.UserId(), dto.RegistrationCode });
+            _logger.LogInformation("ClaimSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), dto.RegistrationCode });
 
             if (string.IsNullOrWhiteSpace(dto.RegistrationCode))
                 return BadRequest(new { message = "Registration code is required." });
@@ -692,7 +692,7 @@ namespace garge_api.Controllers
             if (switchEntity == null)
                 return NotFound(new { message = "Invalid registration code." });
 
-            var userId = User.UserId();
+            var userId = User.GetUserId();
             var alreadyClaimed = await _context.UserSwitches.AnyAsync(us => us.UserId == userId && us.SwitchId == switchEntity.Id);
             if (!alreadyClaimed)
             {
@@ -713,7 +713,7 @@ namespace garge_api.Controllers
                 await _context.SaveChangesAsync();
                 _ownership.InvalidateSwitch(switchEntity.Id);
                 await _hub.Clients.Group(DeviceHub.UserGroup(userId!)).SendAsync("device-created", new { kind = "switch", id = switchEntity.Id });
-                _logger.LogInformation("ClaimSwitch assigned switch to user {@LogData}", new { switchEntity.Id, CallerUserId = User.UserId() });
+                _logger.LogInformation("ClaimSwitch assigned switch to user {@LogData}", new { switchEntity.Id, CallerUserId = User.GetUserId() });
             }
             return Ok(new { message = "Switch successfully claimed.", switchId = switchEntity.Id, registrationCode = switchEntity.RegistrationCode });
         }
@@ -725,9 +725,9 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "Switch not found.")]
         public async Task<IActionResult> UnclaimSwitch(int id)
         {
-            _logger.LogInformation("UnclaimSwitch called by {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("UnclaimSwitch called by {@LogData}", new { CallerUserId = User.GetUserId(), id });
 
-            var userId = User.UserId()!;
+            var userId = User.GetUserId()!;
             var callerRow = await _context.UserSwitches.FirstOrDefaultAsync(us => us.UserId == userId && us.SwitchId == id);
             var callerWasOwner = callerRow?.IsOwner == true;
 
@@ -747,7 +747,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
             _ownership.InvalidateSwitch(id);
 
-            _logger.LogInformation("Switch unclaimed by user {@LogData}", new { CallerUserId = User.UserId(), id, CascadedViewers = callerWasOwner });
+            _logger.LogInformation("Switch unclaimed by user {@LogData}", new { CallerUserId = User.GetUserId(), id, CascadedViewers = callerWasOwner });
             return Ok(new { message = "Switch removed from your account." });
         }
 
@@ -769,7 +769,7 @@ namespace garge_api.Controllers
             var target = await _context.Users.FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.IsDeleted);
             if (target == null)
                 return NotFound(new { message = "No Garge account with that email." });
-            if (target.Id == User.UserId())
+            if (target.Id == User.GetUserId())
                 return BadRequest(new { message = "You already own this switch." });
 
             var upsert = await DeviceShareHelper.UpsertShareAsync(
@@ -790,7 +790,7 @@ namespace garge_api.Controllers
             await _hub.Clients.Group(DeviceHub.UserGroup(target.Id))
                 .SendAsync("device-created", new { kind = "switch", id });
 
-            _logger.LogInformation("Switch shared {@LogData}", new { id, OwnerUserId = User.UserId(), dto.Permission });
+            _logger.LogInformation("Switch shared {@LogData}", new { id, OwnerUserId = User.GetUserId(), dto.Permission });
             return Ok(new { message = "Switch shared." });
         }
 
@@ -814,7 +814,7 @@ namespace garge_api.Controllers
             await _context.SaveChangesAsync();
             _ownership.InvalidateSwitch(id);
 
-            _logger.LogInformation("Switch share revoked {@LogData}", new { id, OwnerUserId = User.UserId(), shareUserId });
+            _logger.LogInformation("Switch share revoked {@LogData}", new { id, OwnerUserId = User.GetUserId(), shareUserId });
             return Ok(new { message = "Share revoked." });
         }
 

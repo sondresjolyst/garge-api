@@ -58,11 +58,11 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User profile not found.")]
         public async Task<IActionResult> GetUserProfile(string id)
         {
-            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.UserId(), id });
+            _logger.LogInformation("GetUserProfile called by {@LogData}", new { CallerUserId = User.GetUserId(), id });
 
-            if (!User.IsCallerOf(id))
+            if (!User.IsCaller(id))
             {
-                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.UserId(), id });
+                _logger.LogWarning("GetUserProfile forbidden for {@LogData}", new { CallerUserId = User.GetUserId(), id });
                 return Forbid();
             }
 
@@ -104,7 +104,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "The last admin cannot be deleted.")]
         public async Task<IActionResult> DeleteOwnAccount(string id, [FromServices] IAccountDeleter<User> deleter)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)
@@ -135,7 +135,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> ExportData(string id)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var profile = await _context.UserProfiles.FindAsync(id);
             if (profile == null)
@@ -404,7 +404,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(409, "Garge Security is on and would be left without an alert channel.")]
         public async Task<IActionResult> UpdatePreferences(string id, [FromBody] UpdateUserPreferencesDto dto)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var userProfile = await _context.UserProfiles.SingleOrDefaultAsync(up => up.Id == id);
             if (userProfile == null)
@@ -451,7 +451,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> UpdateProfile(string id, [FromBody] UpdateProfileDto dto)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)
@@ -482,7 +482,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> GetDataRetention(string id)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)
@@ -503,7 +503,7 @@ namespace garge_api.Controllers
         [SwaggerResponse(404, "User not found.")]
         public async Task<IActionResult> UpdateDataRetention(string id, [FromBody] UpdateDataRetentionDto dto)
         {
-            if (!User.IsCallerOf(id)) return Forbid();
+            if (!User.IsCaller(id)) return Forbid();
 
             var user = await _userManager.FindByIdAsync(id);
             if (user == null || user.IsDeleted)

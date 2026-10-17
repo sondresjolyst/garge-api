@@ -49,7 +49,7 @@ namespace garge_api.Services
             client.CreateChargeAsync(agreementId, new VippsCreateChargeRequest
             {
                 AmountInOre = amountInOre,
-                Due = dueDate,
+                Due = DateOnly.FromDateTime(dueDate),
                 Description = description,
                 OrderId = idempotencyKey,
             }, idempotencyKey, isTest);
@@ -102,7 +102,7 @@ namespace garge_api.Services
 
         public Task DeleteWebhookAsync(string webhookId, bool isTest) => client.DeleteWebhookAsync(webhookId, isTest);
 
-        public VippsWebhookResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
+        public VippsWebhookSignatureResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
         {
             var host = request.Headers.Host.ToString();
             var result = VippsWebhookSignature.Verify(new VippsWebhookRequest
