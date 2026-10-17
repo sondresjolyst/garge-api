@@ -11,24 +11,19 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
-using System.Text.Json;
 
 namespace garge_api.Controllers
 {
     [ApiController]
     [Route("api/subscriptions")]
     [Authorize]
-    public class SubscriptionsController : VippsWebhookControllerBase
+    public class SubscriptionsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
         private readonly IVippsService _vipps;
         private readonly IInvoiceService _invoice;
-        private readonly ISubscriptionEmailService _subEmail;
         private readonly IAppSettingsCache _settingsCache;
-        private readonly IWebhookSecretProtector _protector;
-        private readonly IWebPushService _push;
         private readonly AppOptions _appOpts;
-        private readonly VippsSettings _vippsOpts;
         private readonly IMapper _mapper;
         private readonly ILogger<SubscriptionsController> _logger;
 
@@ -36,24 +31,16 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             IVippsService vipps,
             IInvoiceService invoice,
-            ISubscriptionEmailService subEmail,
             IAppSettingsCache settingsCache,
-            IWebhookSecretProtector protector,
-            IWebPushService push,
             IOptions<AppOptions> appOpts,
-            IOptions<VippsSettings> vippsOpts,
             IMapper mapper,
             ILogger<SubscriptionsController> logger)
         {
             _context = context;
             _vipps = vipps;
             _invoice = invoice;
-            _subEmail = subEmail;
             _settingsCache = settingsCache;
-            _protector = protector;
-            _push = push;
             _appOpts = appOpts.Value;
-            _vippsOpts = vippsOpts.Value;
             _mapper = mapper;
             _logger = logger;
         }
@@ -226,7 +213,7 @@ namespace garge_api.Controllers
             if (!dto.ConsentToWaiveWithdrawal)
                 return BadRequest("Consent to waive 14-day withdrawal right is required for immediate access.");
 
-            if (!PhoneNumber.TryNormalizeNo(dto.PhoneNumber, out var msisdn))
+            if (!VippsPhoneNumber.TryNormalize(dto.PhoneNumber, out var msisdn))
                 return BadRequest("Invalid Norwegian phone number.");
 
             var product = await _context.Products.FindAsync(dto.ProductId);
@@ -435,250 +422,6 @@ namespace garge_api.Controllers
                 ? "Quantity updated. Confirm the new charge ceiling in your Vipps app before the next charge."
                 : "Quantity updated. The next charge will reflect the new total.";
             return Ok(new { subscription = dtoOut, message });
-        }
-
-        /// <summary>Webhook endpoint for Vipps agreement status changes.</summary>
-        [HttpPost("webhook")]
-        [AllowAnonymous]
-        public async Task<IActionResult> Webhook()
-        {
-            var rawBody = await ReadRawBodyAsync(Request);
-            var settings = await _settingsCache.GetAsync();
-            var (verify, sentFromTest) = VerifySignature(_vipps, _protector, Request, rawBody,
-                new Registration(settings.VippsSubscriptionWebhookSecret, false),
-                new Registration(settings.VippsTestSubscriptionWebhookSecret, true));
-            if (verify != VippsWebhookSignatureResult.Valid)
-            {
-                _logger.LogWarning("Subscription webhook verify failed: {Reason}", verify);
-                return Unauthorized();
-            }
-
-            VippsAgreementWebhookDto? payload;
-            try
-            {
-                payload = JsonSerializer.Deserialize<VippsAgreementWebhookDto>(rawBody, JsonOpts);
-            }
-            catch
-            {
-                return BadRequest();
-            }
-
-            if (payload == null) return BadRequest();
-
-            // Recurring events carry no event id. A charge event is told apart by its charge id.
-            var eventId = EventKey(!string.IsNullOrEmpty(payload.EventId)
-                ? payload.EventId
-                : $"{payload.AgreementId}:{payload.EventType}:{payload.ChargeId}:{payload.Occurred?.Ticks}", sentFromTest);
-
-            if (await AlreadyProcessedAsync(_context, eventId))
-            {
-                _logger.LogInformation("Subscription webhook duplicate {EventId} skipped", eventId);
-                return Ok();
-            }
-
-            var subscription = await _context.Subscriptions
-                .FirstOrDefaultAsync(s => s.VippsAgreementId == payload.AgreementId);
-
-            if (subscription == null)
-            {
-                _logger.LogWarning("Webhook: unknown agreementId {AgreementId}", payload.AgreementId);
-                await SaveProcessedAsync(_context, "subscription", eventId);
-                return Ok();
-            }
-
-            if (sentFromTest != subscription.IsTest)
-            {
-                _logger.LogError("Subscription webhook {EventId} rejected: sent from the {Sent} environment for a {Subscription} subscription {SubscriptionId}",
-                    eventId, sentFromTest ? "test" : "production", subscription.IsTest ? "test" : "production", subscription.Id);
-                return await RejectAsync(_context, "subscription", eventId);
-            }
-
-            // Recurring events may leave the merchant number out, so only a number that differs is refused.
-            var expectedMsn = subscription.IsTest ? _vippsOpts.TestMerchantSerialNumber : _vippsOpts.MerchantSerialNumber;
-            if (!string.IsNullOrEmpty(payload.Msn) && !MerchantMatches(payload.Msn, expectedMsn))
-            {
-                _logger.LogError("Subscription webhook {EventId} rejected: MSN mismatch (got {Got}, expected {Expected}) for subscription {SubscriptionId}",
-                    eventId, payload.Msn, expectedMsn, subscription.Id);
-                return await RejectAsync(_context, "subscription", eventId);
-            }
-
-            var wasActive = subscription.Status == SubscriptionStatus.Active;
-            var chargeFailureCounted = false;
-
-            switch (payload.EventType)
-            {
-                case VippsEvents.AgreementActivated:
-                    subscription.Status = SubscriptionStatus.Active;
-                    if (subscription.StartDate == null)
-                        subscription.StartDate = payload.Occurred ?? DateTime.UtcNow;
-                    if (string.IsNullOrEmpty(subscription.BillingAddress))
-                        await TryPopulateBillingAddressAsync(subscription, payload.AgreementId);
-                    break;
-                case VippsEvents.AgreementStopped:
-                case VippsEvents.AgreementRejected:
-                    subscription.Status = SubscriptionStatus.Stopped;
-                    break;
-                case VippsEvents.AgreementExpired:
-                    subscription.Status = SubscriptionStatus.Expired;
-                    break;
-                case VippsEvents.ChargeCaptured when payload.Occurred.HasValue:
-                    var product = await _context.Products.FindAsync(subscription.ProductId);
-                    if (product == null) break;
-                    // Billing days follow the Norwegian calendar date the subscription started on.
-                    var anchor = LocalTime.Date(subscription.StartDate ?? payload.Occurred.Value);
-                    if (SubscriptionCharges.TryParse(payload.ChargeId, out var capturedSubId, out var capturedDue, out _)
-                        && capturedSubId == subscription.Id)
-                    {
-                        // A scheduled charge moves billing on from the date it was due, never backwards.
-                        var next = SubscriptionCharges.NextDue(anchor, capturedDue, product.Interval);
-                        if (subscription.NextChargeDate == null || next > subscription.NextChargeDate)
-                        {
-                            subscription.NextChargeDate = next;
-                            subscription.FailedChargeAttempts = 0;
-                            subscription.LastChargeFailureReason = null;
-                        }
-                    }
-                    else if (subscription.NextChargeDate == null)
-                    {
-                        // The initial charge, captured when the agreement is accepted, starts billing.
-                        subscription.NextChargeDate = SubscriptionCharges.NextDue(anchor, LocalTime.Date(payload.Occurred.Value), product.Interval);
-                    }
-                    break;
-                case VippsEvents.ChargeFailed:
-                    if (SubscriptionCharges.TryParse(payload.ChargeId, out var failedSubId, out var failedDue, out var failedAttempt)
-                        && failedSubId == subscription.Id
-                        && failedDue == subscription.NextChargeDate
-                        && failedAttempt == subscription.FailedChargeAttempts)
-                    {
-                        subscription.FailedChargeAttempts++;
-                        subscription.LastChargeFailureReason = payload.FailureReason is { Length: > 0 and <= 50 } reason ? reason : null;
-                        chargeFailureCounted = true;
-                        _logger.LogWarning("Charge attempt {Attempt} of {Max} failed for subscription {SubId} agreement {AgreementId}",
-                            subscription.FailedChargeAttempts, SubscriptionCharges.MaxAttempts, subscription.Id, payload.AgreementId);
-                        if (subscription.FailedChargeAttempts >= SubscriptionCharges.MaxAttempts)
-                        {
-                            // The failure is saved either way. A subscription left active here is stopped by
-                            // the charge scheduler, which retries the cancel.
-                            try
-                            {
-                                await _vipps.CancelAgreementAsync(subscription.VippsAgreementId, $"cancel-{subscription.Id}", subscription.IsTest);
-                                subscription.Status = SubscriptionStatus.Stopped;
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Vipps agreement cancel failed for subscription {SubscriptionId} after its last failed charge", subscription.Id);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Charge {ChargeId} failed for subscription {SubId} agreement {AgreementId}, not the current attempt",
-                            payload.ChargeId, subscription.Id, payload.AgreementId);
-                    }
-                    break;
-                case VippsEvents.ChargeCreationFailed:
-                    _logger.LogWarning("Charge creation failed for subscription {SubId} agreement {AgreementId}",
-                        subscription.Id, payload.AgreementId);
-                    break;
-            }
-
-            subscription.UpdatedAt = DateTime.UtcNow;
-            if (!await SaveProcessedAsync(_context, "subscription", eventId))
-            {
-                _logger.LogInformation("Subscription webhook duplicate {EventId} skipped", eventId);
-                return Ok();
-            }
-
-            _logger.LogInformation("Webhook: agreement {AgreementId} -> {EventType}",
-                payload.AgreementId, payload.EventType);
-
-            if (!wasActive && subscription.Status == SubscriptionStatus.Active)
-            {
-                try { await _subEmail.SendActivatedAsync(subscription.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Activation email failed for subscription {SubscriptionId}", subscription.Id); }
-
-                _ = SafePushAsync(subscription.UserId, "Subscription active",
-                    "Your Garge subscription is confirmed.");
-            }
-
-            if (payload.EventType == VippsEvents.ChargeCaptured && !string.IsNullOrEmpty(payload.ChargeId))
-            {
-                var product = await _context.Products.FindAsync(subscription.ProductId);
-                if (product != null)
-                {
-                    // The invoice shows what Vipps captured. Without an amount in the event it falls
-                    // back to what the scheduler charges for this subscription on the capture date.
-                    var amountInOre = payload.AmountCaptured ?? payload.Amount;
-                    if (amountInOre == null)
-                    {
-                        var notices = await _context.PriceChangeNotices
-                            .Include(n => n.PriceChange)
-                            .Where(n => n.SubscriptionId == subscription.Id && n.AppliedAt == null)
-                            .ToListAsync();
-                        amountInOre = SubscriptionPricing.UnitPriceFor(subscription, notices, payload.Occurred ?? DateTime.UtcNow) * subscription.Quantity;
-                    }
-                    try
-                    {
-                        await _invoice.GenerateForSubscriptionChargeAsync(
-                            subscription.Id,
-                            payload.ChargeId,
-                            amountInOre.Value,
-                            payload.Occurred ?? DateTime.UtcNow);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Subscription invoice generation failed for subscription {SubscriptionId} charge {ChargeId}",
-                            subscription.Id, payload.ChargeId);
-                    }
-                }
-            }
-
-            if (chargeFailureCounted && subscription.Status == SubscriptionStatus.Stopped)
-            {
-                try { await _subEmail.SendStoppedForNonPaymentAsync(subscription.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Stopped-for-non-payment email failed for subscription {SubscriptionId}", subscription.Id); }
-
-                _ = SafePushAsync(subscription.UserId, "Subscription stopped",
-                    subscription.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
-                        ? "The charge was above the maximum amount approved in Vipps, so your Garge subscription has been stopped. You can subscribe again under Billing."
-                        : "We couldn't charge your Garge subscription, so it has been stopped. You can subscribe again under Billing.");
-            }
-            else if (chargeFailureCounted)
-            {
-                try { await _subEmail.SendChargeFailedAsync(subscription.Id); }
-                catch (Exception ex) { _logger.LogError(ex, "Charge-failed email failed for subscription {SubscriptionId}", subscription.Id); }
-
-                _ = SafePushAsync(subscription.UserId, "Payment failed",
-                    subscription.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
-                        ? "The charge for your Garge subscription is above the maximum amount you approved. Approve the new amount in the Vipps app."
-                        : "We couldn't charge your Garge subscription. Please update your payment method in Vipps.");
-            }
-
-            return Ok();
-        }
-
-        private async Task SafePushAsync(string userId, string title, string body)
-        {
-            try { await _push.SendAsync(userId, title, body); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Push send failed for user {UserId}", userId); }
-        }
-
-        private async Task TryPopulateBillingAddressAsync(Subscription subscription, string agreementId)
-        {
-            try
-            {
-                var details = await _vipps.GetAgreementAsync(agreementId, subscription.IsTest);
-                if (string.IsNullOrEmpty(details?.Sub)) return;
-
-                var info = await _vipps.GetUserInfoAsync(details.Sub, subscription.IsTest);
-                var formatted = VippsAddressFormatter.Format(info?.Address);
-                if (!string.IsNullOrEmpty(formatted))
-                    subscription.BillingAddress = formatted;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to fetch Vipps user info for subscription {SubscriptionId}", subscription.Id);
-            }
         }
     }
 }

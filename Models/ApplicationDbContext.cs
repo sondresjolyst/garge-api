@@ -9,7 +9,6 @@ using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
-using garge_api.Models.Webhook;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -19,7 +18,7 @@ using SjolystInnovation.AppKit.Auth;
 namespace garge_api.Models
 {
     public partial class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext, IAuthDbContext
+        : IdentityDbContext<User, IdentityRole, string>(options), IDataProtectionKeyContext, IAuthDbContext, IVippsWebhookDbContext
     {
         public DbSet<DataProtectionKey> DataProtectionKeys { get; set; }
         public DbSet<UserProfile> UserProfiles { get; set; }
@@ -67,7 +66,7 @@ namespace garge_api.Models
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
         public DbSet<DailyStatSnapshot> DailyStatSnapshots { get; set; }
-        public DbSet<ProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
+        public DbSet<VippsProcessedWebhookEvent> ProcessedWebhookEvents { get; set; }
         public DbSet<Anonymized.AnonymizedSeries> AnonymizedSeries { get; set; }
         public DbSet<Anonymized.AnonymizedReading> AnonymizedReadings { get; set; }
         public DbSet<PairingToken> PairingTokens { get; set; }
@@ -477,11 +476,7 @@ namespace garge_api.Models
                 .IsUnique()
                 .HasFilter("\"ReplacesInvoiceId\" IS NOT NULL");
 
-            modelBuilder.Entity<ProcessedWebhookEvent>()
-                .HasIndex(p => new { p.Source, p.Id });
-
-            modelBuilder.Entity<ProcessedWebhookEvent>()
-                .HasIndex(p => p.ProcessedAt);
+            modelBuilder.AddAppKitVippsProcessedWebhookEvents();
 
             modelBuilder.Entity<PairingToken>()
                 .HasIndex(t => t.Token)

@@ -5,11 +5,8 @@ using Microsoft.Extensions.Options;
 namespace garge_api.Services
 {
     /// <summary>Turns garge's products and orders into Vipps requests, sent through <see cref="IVippsClient"/>.</summary>
-    public partial class VippsService(IVippsClient client, IOptions<AppOptions> appOpts, TimeProvider time, ILogger<VippsService> logger) : IVippsService
+    public class VippsService(IVippsClient client, IOptions<AppOptions> appOpts) : IVippsService
     {
-        // Older signatures are accepted, and logged so the logs show how Vipps signs its retries.
-        private static readonly TimeSpan FreshSignatureAge = TimeSpan.FromMinutes(5);
-
         public Task<VippsCreateAgreementResponse> CreateAgreementAsync(
             Product product, string userId, string redirectUrl, string phoneNumber,
             int unitPriceInOre, int quantity, string idempotencyKey)
@@ -92,42 +89,10 @@ namespace garge_api.Services
         public Task RefundChargeAsync(string agreementId, string chargeId, int amountInOre, string description, string idempotencyKey, bool? isTest = null) =>
             client.RefundChargeAsync(agreementId, chargeId, amountInOre, description, idempotencyKey, isTest);
 
-        public async Task<(string WebhookId, string Secret)> RegisterWebhookAsync(string url, IReadOnlyList<string> events, bool isTest)
-        {
-            var registered = await client.RegisterWebhookAsync(url, events, isTest);
-            return (registered.Id, registered.Secret);
-        }
-
-        public Task<IReadOnlyList<VippsWebhook>> ListWebhooksAsync(bool isTest) => client.ListWebhooksAsync(isTest);
-
-        public Task DeleteWebhookAsync(string webhookId, bool isTest) => client.DeleteWebhookAsync(webhookId, isTest);
-
-        public VippsWebhookSignatureResult VerifyWebhookSignature(HttpRequest request, string rawBody, string secret)
-        {
-            var host = request.Headers.Host.ToString();
-            var result = VippsWebhookSignature.Verify(new VippsWebhookRequest
-            {
-                Method = request.Method,
-                PathAndQuery = request.Path.Value + request.QueryString.Value,
-                Host = string.IsNullOrEmpty(host) ? request.Host.Value ?? string.Empty : host,
-                Authorization = request.Headers.Authorization.ToString(),
-                Date = request.Headers["x-ms-date"].ToString(),
-                ContentSha256 = request.Headers["x-ms-content-sha256"].ToString(),
-                Body = rawBody,
-            }, secret, time.GetUtcNow());
-
-            if (result.IsValid && result.Age > FreshSignatureAge)
-                LogOldSignature(logger, result.Age.TotalMinutes);
-            return result.Result;
-        }
-
         private static int CheckedAgreementAmount(long amountInOre) =>
             amountInOre is > 0 and <= SubscriptionCharges.MaxAgreementAmountInOre
                 ? (int)amountInOre
                 : throw new ArgumentOutOfRangeException(nameof(amountInOre), amountInOre,
                     $"A Vipps agreement amount must be between 1 and {SubscriptionCharges.MaxAgreementAmountInOre} øre.");
-
-        [LoggerMessage(Level = LogLevel.Warning, Message = "Vipps webhook signed {AgeMinutes:F0} minutes ago accepted, as a retry may keep its first signature")]
-        private static partial void LogOldSignature(ILogger logger, double ageMinutes);
     }
 }

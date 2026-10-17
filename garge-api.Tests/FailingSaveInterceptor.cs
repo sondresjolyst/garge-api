@@ -5,8 +5,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 namespace garge_api.Tests;
 
 /// <summary>
-/// Fails the first save that changes anything besides the processed-webhook marker, the way a dropped
-/// database connection would in the middle of handling an event.
+/// Fails the first save that changes anything besides the processed-webhook marker and the webhook
+/// settings a test stores, the way a dropped database connection would in the middle of handling an event.
 /// </summary>
 public sealed class FailingSaveInterceptor : SaveChangesInterceptor
 {
@@ -18,7 +18,7 @@ public sealed class FailingSaveInterceptor : SaveChangesInterceptor
         DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
     {
         var changesState = eventData.Context!.ChangeTracker.Entries()
-            .Any(e => e.Entity is not garge_api.Models.Webhook.ProcessedWebhookEvent
+            .Any(e => e.Entity is not (VippsProcessedWebhookEvent or garge_api.Models.Admin.AppSettings)
                       && e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted);
         if (_failuresLeft > 0 && changesState)
         {
