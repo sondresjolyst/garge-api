@@ -49,8 +49,7 @@ public class AdminControllerTests : ControllerTestBase
             MockUserManager.Object,
             db,
             NullLogger<AdminController>.Instance,
-            MockMapper.Object,
-            MockEmailService.Object);
+            MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: isAdmin);
         return controller;
     }
@@ -448,7 +447,7 @@ public class AdminControllerTests : ControllerTestBase
 
         var controller = new AdminController(
             roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+            NullLogger<AdminController>.Instance, MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: true);
 
         var result = await controller.AssignPermission("Default", "TotallyMadeUpPermission");
@@ -469,7 +468,7 @@ public class AdminControllerTests : ControllerTestBase
 
         var controller = new AdminController(
             roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+            NullLogger<AdminController>.Instance, MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: true);
 
         var result = await controller.AssignPermission("Default", "Electricity");

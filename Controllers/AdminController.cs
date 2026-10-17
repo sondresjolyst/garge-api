@@ -26,7 +26,6 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AdminController> _logger;
         private readonly IMapper _mapper;
-        private readonly IEmailService _emailService;
         private readonly Services.IAppSettingsCache? _settingsCache;
         private readonly Services.ISecurityModeService? _security;
 
@@ -36,7 +35,6 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             ILogger<AdminController> logger,
             IMapper mapper,
-            IEmailService emailService,
             Services.IAppSettingsCache? settingsCache = null,
             Services.ISecurityModeService? security = null)
         {
@@ -45,7 +43,6 @@ namespace garge_api.Controllers
             _context = context;
             _logger = logger;
             _mapper = mapper;
-            _emailService = emailService;
             _settingsCache = settingsCache;
             _security = security;
         }
@@ -236,27 +233,6 @@ namespace garge_api.Controllers
                 .OrderByDescending(d => d.Timestamp)
                 .ToListAsync();
             return Ok(devices);
-        }
-
-        /// <summary>
-        /// Gets Brevo transactional email stats for the last N days.
-        /// </summary>
-        [HttpGet("/api/admin/email-stats")]
-        [SwaggerOperation(Summary = "Gets Brevo email stats.")]
-        [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
-        public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
-        {
-            _logger.LogInformation("GetEmailStats called by {@LogData}", new { CallerUserId = User.GetUserId() });
-            try
-            {
-                var stats = await _emailService.GetEmailStatsAsync(days);
-                return Ok(stats);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("GetEmailStats failed: {Error}", ex.Message);
-                return StatusCode(502, new { message = "Failed to fetch email stats from Brevo." });
-            }
         }
 
         /// <summary>

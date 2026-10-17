@@ -1,5 +1,3 @@
-using garge_api.Dtos.Admin;
-
 public sealed class EmailAttachment
 {
     public required string FileName { get; set; }
@@ -11,5 +9,4 @@ public interface IEmailService
 {
     /// <summary>Sends an email. Returns false when Brevo refused it, which is logged.</summary>
     Task<bool> SendEmailAsync(string email, string subject, string message, IReadOnlyList<EmailAttachment>? attachments = null);
-    Task<EmailStatsDto> GetEmailStatsAsync(int days = 30);
 }
