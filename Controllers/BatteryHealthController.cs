@@ -2,6 +2,7 @@ using MapsterMapper;
 using garge_api.Constants;
 using garge_api.Dtos.Sensor;
 using garge_api.Helpers;
+using SjolystInnovation.AppKit.Hosting;
 using garge_api.Models;
 using garge_api.Models.Sensor;
 using garge_api.Services;

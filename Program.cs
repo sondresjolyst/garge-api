@@ -278,7 +278,7 @@ namespace garge_api
             });
 
             app.UseRouting();
-            app.UseMiddleware<RequestLoggingMiddleware>();
+            app.UseAppKitRequestLogging();
             app.UseCors("AllowAllOrigins");
             app.UseAuthentication();
             app.UseAuthorization();

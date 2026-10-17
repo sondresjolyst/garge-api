@@ -1,5 +1,6 @@
 ﻿using garge_api.Services;
 using garge_api.Helpers;
+using SjolystInnovation.AppKit.Hosting;
 using garge_api.Dtos.Electricity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
