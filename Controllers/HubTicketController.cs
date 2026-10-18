@@ -17,7 +17,7 @@ namespace garge_api.Controllers
     {
         /// <summary>
         /// Issues a short-lived ticket for the signed-in user. Send it as the access token when connecting to
-        /// /hubs/devices. It works for one connection and expires after a minute.
+        /// /hubs/devices within a minute. It then works for that one connection only.
         /// </summary>
         [HttpPost]
         [ProducesResponseType(typeof(HubTicketResponseDto), StatusCodes.Status200OK)]

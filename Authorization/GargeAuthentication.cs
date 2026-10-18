@@ -26,21 +26,34 @@ namespace garge_api.Authorization
             services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
             {
                 var readToken = options.Events.OnMessageReceived;
-                options.Events.OnMessageReceived = context =>
+                var checkUser = options.Events.OnTokenValidated;
+                options.Events.OnMessageReceived = async context =>
                 {
                     if (!context.Request.Path.StartsWithSegments(DeviceHubPath) || ReadTicket(context.Request) is not { } ticket)
-                        return readToken(context);
+                    {
+                        await readToken(context);
+                        return;
+                    }
 
                     var tickets = context.HttpContext.RequestServices.GetRequiredService<IHubTicketService>();
                     var principal = tickets.Redeem(ticket, context.Request.Query["id"].ToString());
                     if (principal is null)
                     {
                         context.Fail("The hub ticket is unknown, expired, or in use by another connection.");
-                        return Task.CompletedTask;
+                        return;
                     }
-                    context.Principal = principal;
+
+                    // Success skips token validation, so a ticket gets the same user check as a session token here.
+                    // A deleted or inactive user is refused, and the roles are the user's current ones.
+                    var validated = new TokenValidatedContext(context.HttpContext, context.Scheme, context.Options) { Principal = principal };
+                    await checkUser(validated);
+                    if (validated.Result?.Failure is { } failure)
+                    {
+                        context.Fail(failure);
+                        return;
+                    }
+                    context.Principal = validated.Principal;
                     context.Success();
-                    return Task.CompletedTask;
                 };
             });
             return builder;

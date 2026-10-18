@@ -1,11 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text.Json;
 using garge_api.Authorization;
 using garge_api.Controllers;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
@@ -147,6 +149,39 @@ public class DeviceHubAuthenticationTests
         var response = await app.SendAsync(HttpMethod.Post, $"/hubs/devices/negotiate?negotiateVersion=1&access_token={ticket}", null);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ticket_ForADeletedUser_IsRefused()
+    {
+        await using var app = await HubApp.StartAsync();
+        var ticket = app.Tickets.Issue(HubApp.PrincipalFor(app.KariId));
+        await app.DeleteUserAsync(app.KariId);
+
+        var response = await app.SendAsync(HttpMethod.Post, "/hubs/devices/negotiate?negotiateVersion=1", ticket);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ticket_UsesTheUsersCurrentRoles()
+    {
+        await using var app = await HubApp.StartAsync();
+        // The ticket claims the bridge role, which kari does not have.
+        var ticket = app.Tickets.Issue(HubApp.PrincipalFor(app.KariId, DeviceHub.BridgeRole));
+        await using var connection = app.Connect(() => ticket);
+        var received = new List<string>();
+        var ownEvent = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.On<string>("deviceSettings", value => { lock (received) received.Add(value); });
+        connection.On<string>("switch", value => ownEvent.TrySetResult(value));
+
+        await connection.StartAsync(Ct);
+        await app.WaitForTrackedAsync(app.KariId);
+        await app.Hub.Clients.Group(DeviceHub.BridgeGroup).SendAsync("deviceSettings", "bridged", Ct);
+        await app.Hub.Clients.Group(DeviceHub.UserGroup(app.KariId)).SendAsync("switch", "kari", Ct);
+
+        Assert.Equal("kari", await ownEvent.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct));
+        lock (received) Assert.Empty(received);
     }
 
     [Fact]
@@ -307,6 +342,21 @@ public class DeviceHubAuthenticationTests
             var request = new HttpRequestMessage(method, path);
             if (bearer is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
             return Client.SendAsync(request, Ct);
+        }
+
+        public IHubTicketService Tickets => _host.Services.GetRequiredService<IHubTicketService>();
+
+        /// <summary>A signed-in principal for a user who has not called the API yet, so no user check is cached.</summary>
+        public static ClaimsPrincipal PrincipalFor(string userId, params string[] roles) =>
+            new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId), .. roles.Select(r => new Claim(ClaimTypes.Role, r))], "Test"));
+
+        public async Task DeleteUserAsync(string userId)
+        {
+            using var scope = _host.Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var user = await users.FindByIdAsync(userId);
+            user!.IsDeleted = true;
+            Assert.True((await users.UpdateAsync(user)).Succeeded);
         }
 
         public async Task<string> TicketAsync(string jwt)
