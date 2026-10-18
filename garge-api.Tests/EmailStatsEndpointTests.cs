@@ -74,6 +74,18 @@ public class EmailStatsEndpointTests
     }
 
     [Fact]
+    public async Task MoreDaysThanBrevoKeeps_Answers400WithoutAskingBrevo()
+    {
+        await using var app = await StatsApp.StartAsync();
+
+        var response = await app.GetAsync("/api/admin/email-stats?days=91", "Admin");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Must be at most 90.", await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(app.Stats.Days);
+    }
+
+    [Fact]
     public async Task BrevoDown_Answers502()
     {
         await using var app = await StatsApp.StartAsync();
@@ -87,6 +99,7 @@ public class EmailStatsEndpointTests
     private sealed class FakeStats : IEmailStats
     {
         public List<int> Days { get; } = [];
+        public int MaxDays => 90;
         public bool Fail { get; set; }
 
         public Task<EmailStats> GetAsync(int days = 30, CancellationToken cancellationToken = default)

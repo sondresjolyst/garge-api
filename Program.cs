@@ -283,6 +283,7 @@ namespace garge_api
             app.UseAuthentication();
             app.UseAuthorization();
             app.UseAppKitRateLimiting();
+            app.UseAppKitBadRequests();
             app.MapControllers();
             app.MapGargeVippsWebhooks();
             app.MapAppKitSiteSettings<ApplicationDbContext, AppSettings>("/api", SiteSettingsHooks.Configure);
