@@ -101,6 +101,7 @@ namespace garge_api
             builder.Services.AddScoped<IAccountDataEraser<User>, AccountDataEraser>();
             builder.Services.AddScoped<IAccountDeletedHandler<User>, AccountHubDisconnect>();
             builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
+            builder.Services.AddProblemDetails();
             builder.Services.AddEndpointsApiExplorer();
 
             builder.Services.AddAppKitJwtBearer<User>(u => !u.IsDeleted, o => o.QueryTokenPaths.Add("/hubs"));
@@ -265,6 +266,8 @@ namespace garge_api
             }
 
             app.UseAppKitForwardedHeaders();
+
+            app.UseExceptionHandler();
 
             app.UseAppKitSecurityHeaders();
 
