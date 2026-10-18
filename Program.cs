@@ -287,6 +287,8 @@ namespace garge_api
             app.MapGargeVippsWebhooks();
             app.MapAppKitSiteSettings<ApplicationDbContext, AppSettings>("/api", SiteSettingsHooks.Configure);
             app.MapAppKitLegalPages<ApplicationDbContext>(configure: LegalSeedText.Configure);
+            app.MapAppKitEmailStats(EmailStatsEndpoint.Path, EmailStatsEndpoint.Configure);
+            app.MapAppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>(StatsHistoryEndpoint.Prefix, StatsHistoryEndpoint.Configure);
             app.MapAppKitAuth<User, ApplicationDbContext>(configure: o => o.IsActive = u => !u.IsDeleted);
             app.MapAppKitUserAdmin<User, ApplicationDbContext>(configure: o =>
             {

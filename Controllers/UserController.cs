@@ -119,7 +119,7 @@ namespace garge_api.Controllers
             }
             catch (Exception e) when (e is LastAdminException or AccountChangeConflictException)
             {
-                return Conflict(new { message = e.Message });
+                return Conflict(AccountDeletionConflict.Body(e));
             }
 
             _logger.LogInformation("Account soft-deleted by user {UserId}", LogSanitizer.Sanitize(id));

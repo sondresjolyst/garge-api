@@ -5,12 +5,12 @@ using garge_api.Dtos.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using SjolystInnovation.AppKit.AdminStats;
 using SjolystInnovation.AppKit.Auth;
 using Swashbuckle.AspNetCore.Annotations;
 using MapsterMapper;
 using garge_api.Models.Admin;
 using garge_api.Services;
+using garge_api.Helpers;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
@@ -26,7 +26,6 @@ namespace garge_api.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AdminController> _logger;
         private readonly IMapper _mapper;
-        private readonly IEmailService _emailService;
         private readonly Services.IAppSettingsCache? _settingsCache;
         private readonly Services.ISecurityModeService? _security;
 
@@ -36,7 +35,6 @@ namespace garge_api.Controllers
             ApplicationDbContext context,
             ILogger<AdminController> logger,
             IMapper mapper,
-            IEmailService emailService,
             Services.IAppSettingsCache? settingsCache = null,
             Services.ISecurityModeService? security = null)
         {
@@ -45,7 +43,6 @@ namespace garge_api.Controllers
             _context = context;
             _logger = logger;
             _mapper = mapper;
-            _emailService = emailService;
             _settingsCache = settingsCache;
             _security = security;
         }
@@ -239,55 +236,6 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Gets Brevo transactional email stats for the last N days.
-        /// </summary>
-        [HttpGet("/api/admin/email-stats")]
-        [SwaggerOperation(Summary = "Gets Brevo email stats.")]
-        [SwaggerResponse(200, "Email stats retrieved successfully.", typeof(EmailStatsDto))]
-        public async Task<IActionResult> GetEmailStats([FromQuery] int days = 30)
-        {
-            _logger.LogInformation("GetEmailStats called by {@LogData}", new { CallerUserId = User.GetUserId() });
-            try
-            {
-                var stats = await _emailService.GetEmailStatsAsync(days);
-                return Ok(stats);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("GetEmailStats failed: {Error}", ex.Message);
-                return StatusCode(502, new { message = "Failed to fetch email stats from Brevo." });
-            }
-        }
-
-        /// <summary>
-        /// Gets cumulative daily stats over time for charting.
-        /// </summary>
-        /// <param name="stats">The stored daily snapshots and today's live counts.</param>
-        [HttpGet("/api/admin/stats/history")]
-        [SwaggerOperation(Summary = "Gets cumulative daily stats over time.")]
-        public async Task<IActionResult> GetStatsHistory(
-            [FromServices] AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot> stats)
-        {
-            _logger.LogInformation("GetStatsHistory called by {@LogData}", new { CallerUserId = User.GetUserId() });
-
-            // Stored completed-day snapshots are never rewritten, so they outlive the per-user data they
-            // were derived from and survive the 5-year purge. A hosted service stores completed days.
-            // Today is always sampled live, so same-day churn is not lost.
-            var snapshots = await stats.GetHistoryAsync(_context, cancellationToken: HttpContext.RequestAborted);
-
-            var result = snapshots.Select(s => (object)new
-            {
-                date = s.Date.ToString("yyyy-MM-dd"),
-                totalUsers = s.TotalUsers,
-                totalSensors = s.TotalSensors,
-                totalSwitches = s.TotalSwitches,
-                totalAutomations = s.TotalAutomations,
-            }).ToList();
-
-            return Ok(result);
-        }
-
-        /// <summary>
         /// Deletes a user's account. The row stays, scrubbed, so their orders and invoices keep it for the
         /// bookkeeping retention period.
         /// </summary>
@@ -316,7 +264,7 @@ namespace garge_api.Controllers
             }
             catch (Exception e) when (e is LastAdminException or AccountChangeConflictException)
             {
-                return Conflict(new { message = e.Message });
+                return Conflict(AccountDeletionConflict.Body(e));
             }
 
             _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.GetUserId() });

@@ -49,8 +49,7 @@ public class AdminControllerTests : ControllerTestBase
             MockUserManager.Object,
             db,
             NullLogger<AdminController>.Instance,
-            MockMapper.Object,
-            MockEmailService.Object);
+            MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: isAdmin);
         return controller;
     }
@@ -386,13 +385,6 @@ public class AdminControllerTests : ControllerTestBase
         CreatedAt = createdAt, IsDeleted = deleted, DeletedAt = deletedAt,
     };
 
-    private static int TotalUsersOn(List<object> rows, DateTime date)
-    {
-        var key = date.ToString("yyyy-MM-dd");
-        var row = rows.Single(r => (string)r.GetType().GetProperty("date")!.GetValue(r)! == key);
-        return (int)row.GetType().GetProperty("totalUsers")!.GetValue(row)!;
-    }
-
     [Fact]
     public async Task GetStats_TotalUsers_ExcludesDeleted()
     {
@@ -412,34 +404,6 @@ public class AdminControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task GetStatsHistory_SubtractsDeletionsOnDeletedDate()
-    {
-        // Three users sign up on d1; one deletes on d2. The running total climbs to 3, then dips to 2.
-        var db = CreateDbContext();
-        MockUserManager.Setup(m => m.Users).Returns(db.Users);
-        var today = DateTime.UtcNow.Date;
-        var d1 = today.AddDays(-3);
-        var d2 = today.AddDays(-2);
-        db.Users.AddRange(
-            MakeUser("u1", d1),
-            MakeUser("u2", d1),
-            MakeUser("u3", d1, deleted: true, deletedAt: d2));
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-        var options = new AppKitDailyStatsOptions<ApplicationDbContext, DailyStatSnapshot>();
-        DailyStatsSamplers.Configure(options);
-        var stats = new AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>(Options.Create(options), TimeProvider.System);
-        await stats.FreezeMissingDaysAsync(db, TestContext.Current.CancellationToken);
-
-        var result = await CreateAdminController(db).GetStatsHistory(stats);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var rows = Assert.IsType<List<object>>(ok.Value);
-        Assert.Equal(3, TotalUsersOn(rows, d1));
-        Assert.Equal(2, TotalUsersOn(rows, d2));
-        Assert.Equal(2, TotalUsersOn(rows, today));
-    }
-
-    [Fact]
     public async Task AssignPermission_UnknownPermission_Returns400()
     {
         var db = CreateDbContext();
@@ -448,7 +412,7 @@ public class AdminControllerTests : ControllerTestBase
 
         var controller = new AdminController(
             roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+            NullLogger<AdminController>.Instance, MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: true);
 
         var result = await controller.AssignPermission("Default", "TotallyMadeUpPermission");
@@ -469,7 +433,7 @@ public class AdminControllerTests : ControllerTestBase
 
         var controller = new AdminController(
             roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object, MockEmailService.Object);
+            NullLogger<AdminController>.Instance, MockMapper.Object);
         controller.ControllerContext = MakeControllerContext(isAdmin: true);
 
         var result = await controller.AssignPermission("Default", "Electricity");
@@ -514,6 +478,25 @@ public class AdminControllerTests : ControllerTestBase
         var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
         deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(new SjolystInnovation.AppKit.Auth.LastAdminException());
 
-        Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var conflict = Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal("lastAdmin", body.GetProperty("code").GetString());
+        Assert.Equal(new SjolystInnovation.AppKit.Auth.LastAdminException().Message, body.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task DeleteUser_ConcurrentChange_ReturnsConflictWithItsCode()
+    {
+        using var db = CreateDbContext();
+        var user = new User { Id = "u9", FirstName = "F", LastName = "L" };
+        MockUserManager.Setup(m => m.FindByIdAsync("u9")).ReturnsAsync(user);
+        var deleter = new Mock<SjolystInnovation.AppKit.Auth.IAccountDeleter<User>>();
+        var refused = new SjolystInnovation.AppKit.Auth.AccountChangeConflictException(new InvalidOperationException("serialization failure"));
+        deleter.Setup(d => d.DeleteAsync(user, It.IsAny<CancellationToken>())).ThrowsAsync(refused);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(await CreateAdminController(db).DeleteUser("u9", deleter.Object));
+        var body = System.Text.Json.JsonSerializer.SerializeToElement(conflict.Value);
+        Assert.Equal("accountChangeConflict", body.GetProperty("code").GetString());
+        Assert.Equal(refused.Message, body.GetProperty("message").GetString());
     }
 }
