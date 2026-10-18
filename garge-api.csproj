@@ -40,7 +40,7 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="SjolystInnovation.AppKit.AdminStats" Version="1.0.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Auth" Version="1.0.1" />
-    <PackageReference Include="SjolystInnovation.AppKit.Email" Version="1.0.1" />
+    <PackageReference Include="SjolystInnovation.AppKit.Email" Version="1.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Hosting" Version="1.0.1" />
     <PackageReference Include="SjolystInnovation.AppKit.SiteSettings" Version="1.0.1" />
     <PackageReference Include="SjolystInnovation.AppKit.Vipps" Version="1.0.0" />
