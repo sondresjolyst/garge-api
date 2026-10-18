@@ -19,17 +19,6 @@ namespace garge_api.Tests;
 
 public class AdminControllerTests : ControllerTestBase
 {
-    private static Mock<RoleManager<IdentityRole>> CreateRoleManagerMock()
-    {
-        var store = new Mock<IRoleStore<IdentityRole>>();
-        return new Mock<RoleManager<IdentityRole>>(
-            store.Object,
-            Array.Empty<IRoleValidator<IdentityRole>>(),
-            Mock.Of<ILookupNormalizer>(),
-            new IdentityErrorDescriber(),
-            NullLogger<RoleManager<IdentityRole>>.Instance);
-    }
-
     private AdminController CreateAdminController(ApplicationDbContext db, bool isAdmin = true)
     {
         MockMapper.Setup(m => m.Map<AppSettingsDto>(It.IsAny<AppSettings>()))
@@ -45,7 +34,6 @@ public class AdminControllerTests : ControllerTestBase
             });
 
         var controller = new AdminController(
-            CreateRoleManagerMock().Object,
             MockUserManager.Object,
             db,
             NullLogger<AdminController>.Instance,
@@ -401,45 +389,6 @@ public class AdminControllerTests : ControllerTestBase
         var ok = Assert.IsType<OkObjectResult>(result);
         var dto = Assert.IsType<AdminStatsDto>(ok.Value);
         Assert.Equal(2, dto.TotalUsers);
-    }
-
-    [Fact]
-    public async Task AssignPermission_UnknownPermission_Returns400()
-    {
-        var db = CreateDbContext();
-        var roleManager = CreateRoleManagerMock();
-        roleManager.Setup(r => r.RoleExistsAsync("Default")).ReturnsAsync(true);
-
-        var controller = new AdminController(
-            roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object);
-        controller.ControllerContext = MakeControllerContext(isAdmin: true);
-
-        var result = await controller.AssignPermission("Default", "TotallyMadeUpPermission");
-
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Empty(db.RolePermissions);
-    }
-
-    [Fact]
-    public async Task AssignPermission_AlreadyAssigned_DoesNotInsertDuplicate()
-    {
-        var db = CreateDbContext();
-        db.RolePermissions.Add(new RolePermission { RoleName = "Default", Permission = "Electricity" });
-        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
-
-        var roleManager = CreateRoleManagerMock();
-        roleManager.Setup(r => r.RoleExistsAsync("Default")).ReturnsAsync(true);
-
-        var controller = new AdminController(
-            roleManager.Object, MockUserManager.Object, db,
-            NullLogger<AdminController>.Instance, MockMapper.Object);
-        controller.ControllerContext = MakeControllerContext(isAdmin: true);
-
-        var result = await controller.AssignPermission("Default", "Electricity");
-
-        Assert.IsType<OkObjectResult>(result);
-        Assert.Single(db.RolePermissions);
     }
 
     [Fact]

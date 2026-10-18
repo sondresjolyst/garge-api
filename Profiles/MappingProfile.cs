@@ -17,15 +17,12 @@ using garge_api.Models.Sensor;
 using garge_api.Models.Shop;
 using garge_api.Models.Subscription;
 using garge_api.Models.Switch;
-using Microsoft.AspNetCore.Identity;
 
 public class MappingProfile : IRegister
 {
     public void Register(TypeAdapterConfig config)
     {
         // Admin mappings
-        config.NewConfig<IdentityRole, RoleDto>();
-        config.NewConfig<RolePermission, RolePermissionDto>().TwoWays();
         config.NewConfig<AppSettings, AppSettingsDto>();
         config.NewConfig<UpdateAppSettingsDto, AppSettings>()
             .IgnoreNullValues(true);
