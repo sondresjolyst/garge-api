@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.17.0](https://github.com/sondresjolyst/garge-api/compare/v2.16.1...v2.17.0) (2026-10-18)
+
+
+### Features
+
+* **admin:** move user administration onto SjolystInnovation.AppKit.Auth ([#483](https://github.com/sondresjolyst/garge-api/issues/483)) ([ecdf082](https://github.com/sondresjolyst/garge-api/commit/ecdf0827e3fd220b40db60ba34e466f3613991fb)), closes [#478](https://github.com/sondresjolyst/garge-api/issues/478)
+* **api:** answer unreadable JSON bodies with 400 through AppKit.Hosting 1.0.1 ([#502](https://github.com/sondresjolyst/garge-api/issues/502)) ([66bef04](https://github.com/sondresjolyst/garge-api/commit/66bef041cf6069bf7475803aa340cd4f069431a1))
+* **api:** move company settings and branding onto AppKit.SiteSettings ([#488](https://github.com/sondresjolyst/garge-api/issues/488)) ([c69ee16](https://github.com/sondresjolyst/garge-api/commit/c69ee16eab5def3df082f762f048810b64108860)), closes [#484](https://github.com/sondresjolyst/garge-api/issues/484)
+* **api:** serve editable legal pages through AppKit.SiteSettings ([#490](https://github.com/sondresjolyst/garge-api/issues/490)) ([bb5d229](https://github.com/sondresjolyst/garge-api/commit/bb5d2293e7c14fd21b7a806a28320a7b7a753781)), closes [#485](https://github.com/sondresjolyst/garge-api/issues/485)
+* **api:** serve email stats and stats history from the AppKit 1.0.1 packages and code account deletion conflicts ([#499](https://github.com/sondresjolyst/garge-api/issues/499)) ([a80311b](https://github.com/sondresjolyst/garge-api/commit/a80311b368180fc108263fae3924cfe9140026f7))
+* **auth:** add a logout endpoint that deletes the refresh token ([c6acc72](https://github.com/sondresjolyst/garge-api/commit/c6acc72de5c99fdce02164334a63ea2875c22ca8))
+* **auth:** end every session when the password is reset ([8434d86](https://github.com/sondresjolyst/garge-api/commit/8434d8630b4b1fabf9e9b5dcc06bbe844f6cad0c))
+* **auth:** send invite emails and move to SjolystInnovation.AppKit.Auth 0.5.0 ([#479](https://github.com/sondresjolyst/garge-api/issues/479)) ([ec7d6d8](https://github.com/sondresjolyst/garge-api/commit/ec7d6d8a502d3bfbb4f46cc44c84daec9e2270ec))
+* **auth:** send reset and verification emails through SjolystInnovation.AppKit.Auth ([#482](https://github.com/sondresjolyst/garge-api/issues/482)) ([8e257f9](https://github.com/sondresjolyst/garge-api/commit/8e257f942e7e658a30b46475a330715060306980))
+* **auth:** serve sign-in and password reset from SjolystInnovation.AppKit.Auth ([#477](https://github.com/sondresjolyst/garge-api/issues/477)) ([dc11d9f](https://github.com/sondresjolyst/garge-api/commit/dc11d9f1e7f90def93aace402b8112787de0b330))
+* **auth:** use SjolystInnovation.AppKit.Auth for Identity, bearer tokens and token cleanup ([#475](https://github.com/sondresjolyst/garge-api/issues/475)) ([f451471](https://github.com/sondresjolyst/garge-api/commit/f45147131df5679a4c75317457caa3f35743f65a))
+* **email:** send through SjolystInnovation.AppKit.Email instead of the Brevo SDK ([#476](https://github.com/sondresjolyst/garge-api/issues/476)) ([dca3aa6](https://github.com/sondresjolyst/garge-api/commit/dca3aa67112b5d912ee822292928a2f08eb80446))
+* **invoices:** issue a credit note for every refund and let admins refund subscription charges ([1f49430](https://github.com/sondresjolyst/garge-api/commit/1f494306dcd6b54d4510a9018bf86e4a5f6d554e))
+* **invoices:** issue a credit note for every refund and let admins refund subscription charges ([#469](https://github.com/sondresjolyst/garge-api/issues/469)) ([d3d158b](https://github.com/sondresjolyst/garge-api/commit/d3d158b9a6ad4dc93096e0d8fdd775adeec0048e))
+* **pricing:** store prices as what the customer pays and take VAT out of them ([#457](https://github.com/sondresjolyst/garge-api/issues/457)) ([9f48b77](https://github.com/sondresjolyst/garge-api/commit/9f48b7741cf07eb178b870d03d0757d784185d8c))
+* **shop:** record the captured amount and finish partial captures and refunds ([ee065f8](https://github.com/sondresjolyst/garge-api/commit/ee065f86f83cf5809932123b7c54e6bb59bfb77a))
+* **subscriptions:** add price increases with 30 days notice ([f93eaba](https://github.com/sondresjolyst/garge-api/commit/f93eaba69a513aa517d1cf9f7fc5b651266373bc))
+* **subscriptions:** tell the admins when Vipps refuses a scheduled charge ([62d94f4](https://github.com/sondresjolyst/garge-api/commit/62d94f4741f7d699c3e13d5d94b1c32231eb2966))
+* use SjolystInnovation.AppKit.Hosting for startup and rate limiting ([#474](https://github.com/sondresjolyst/garge-api/issues/474)) ([95aff21](https://github.com/sondresjolyst/garge-api/commit/95aff219cd1d4cd285ff22ef648df1d475572673))
+* **users:** delete accounts through SjolystInnovation.AppKit.Auth ([#480](https://github.com/sondresjolyst/garge-api/issues/480)) ([ede77ce](https://github.com/sondresjolyst/garge-api/commit/ede77ceb3a9721926ed59a46fa3d4a489b45b35c)), closes [#471](https://github.com/sondresjolyst/garge-api/issues/471)
+* **vat:** decide VAT by the date of the sale against a registration date ([e731b47](https://github.com/sondresjolyst/garge-api/commit/e731b47372fb81b147394cedd7e6668b797a3215))
+* **vat:** read a plain registration date as midnight in Norway ([83e0a18](https://github.com/sondresjolyst/garge-api/commit/83e0a18e317e1a78f6621e3ec2b34b8d64d1c97c))
+* **vat:** track turnover against the VAT threshold and correct sales made before registration ([#458](https://github.com/sondresjolyst/garge-api/issues/458)) ([67d239c](https://github.com/sondresjolyst/garge-api/commit/67d239c8daea9e23481bac1f07ecd231b9bd22ab))
+
+
+### Bug Fixes
+
+* **api:** answer unhandled errors with a problem details 500 through AddProblemDetails and UseExceptionHandler ([#504](https://github.com/sondresjolyst/garge-api/issues/504)) ([9af5ff7](https://github.com/sondresjolyst/garge-api/commit/9af5ff7a84f5ebfea20872a6a709334c73d7d807)), closes [#503](https://github.com/sondresjolyst/garge-api/issues/503)
+* **auth:** keep revoked refresh tokens until they expire ([#472](https://github.com/sondresjolyst/garge-api/issues/472)) ([0d23f9a](https://github.com/sondresjolyst/garge-api/commit/0d23f9a646f8bd0fa7e98af3eb732c9d318e7a81))
+* correct Vipps amounts, tax and webhook handling ([#452](https://github.com/sondresjolyst/garge-api/issues/452)) ([809ee99](https://github.com/sondresjolyst/garge-api/commit/809ee99af50d9102d0e4032477d6fe2540cd7c3f))
+* **invoices:** mark only invoices with a PDF as already emailed ([1b478e3](https://github.com/sondresjolyst/garge-api/commit/1b478e34f8979d04347fd6f9e53947ffb61ea888))
+* **notifications:** listen again after the database connection is lost ([d90792e](https://github.com/sondresjolyst/garge-api/commit/d90792e306fb0c8e4e958633a08bc51ea3e53ea1))
+* trust only configured proxies for X-Forwarded-For ([#473](https://github.com/sondresjolyst/garge-api/issues/473)) ([632673d](https://github.com/sondresjolyst/garge-api/commit/632673d3b4fd8d1978c35c189a2acb8426211fdb))
+* **vipps:** retry failed charges with new keys and verify capture and refund totals ([#455](https://github.com/sondresjolyst/garge-api/issues/455)) ([4f22f01](https://github.com/sondresjolyst/garge-api/commit/4f22f01d6e329e2a451a4f9282307a054758c038))
+* **vipps:** use each payment's own environment and register webhooks in both ([#454](https://github.com/sondresjolyst/garge-api/issues/454)) ([a6ac62b](https://github.com/sondresjolyst/garge-api/commit/a6ac62b500634969a97bafff11bb7a1598f87899))
+
+
+### Dependencies
+
+* **nuget:** bump `Swashbuckle.AspNetCore.Annotations` from 10.2.3 to 10.3.0 ([#497](https://github.com/sondresjolyst/garge-api/issues/497)) ([b9edf60](https://github.com/sondresjolyst/garge-api/commit/b9edf60f6f95712aad5dce38a43e09b277c370a5))
+* **nuget:** bump `Swashbuckle.AspNetCore` from 10.2.3 to 10.3.0 ([#496](https://github.com/sondresjolyst/garge-api/issues/496)) ([cc6607b](https://github.com/sondresjolyst/garge-api/commit/cc6607b71d41dbc44c20e3541d4d7f00ea3b2cbb))
+* **nuget:** bump `xunit.v3` from 4.0.1 to 4.0.2 ([#498](https://github.com/sondresjolyst/garge-api/issues/498)) ([ead90c9](https://github.com/sondresjolyst/garge-api/commit/ead90c9bf1a2af40cac9caaaa9f8e42035a090df))
+
 ## [2.16.1](https://github.com/sondresjolyst/garge-api/compare/v2.16.0...v2.16.1) (2026-10-04)
 
 
