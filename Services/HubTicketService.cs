@@ -16,7 +16,9 @@ namespace garge_api.Services
         /// <summary>
         /// Returns the principal the ticket was issued for, or null when the ticket is unknown, has expired,
         /// or is already bound to another connection. A ticket binds to the first connection token it is
-        /// used with, so the negotiate call and every request of that one connection can use it.
+        /// used with, so the negotiate call and every request of that one connection can use it. Once bound,
+        /// it keeps working for that connection while the connection stays in use, because long polling and
+        /// server-sent events send it again on every request. The principal is a snapshot taken at issue.
         /// </summary>
         ClaimsPrincipal? Redeem(string ticket, string? connectionToken);
     }
@@ -29,6 +31,12 @@ namespace garge_api.Services
         /// <summary>How long a ticket can open a connection.</summary>
         public static readonly TimeSpan Lifetime = TimeSpan.FromSeconds(60);
 
+        /// <summary>
+        /// How long a bound ticket stays valid after its connection last used it. It is longer than the
+        /// 90 second long polling timeout and the 30 second client timeout.
+        /// </summary>
+        public static readonly TimeSpan BoundIdleLifetime = TimeSpan.FromMinutes(3);
+
         public const string AuthenticationType = "HubTicket";
 
         private const string KeyPrefix = "garge:hub-ticket:";
@@ -40,6 +48,7 @@ namespace garge_api.Services
             public string? RoleType { get; } = roleType;
             public DateTimeOffset ExpiresAt { get; } = expiresAt;
             public string? ConnectionToken;
+            public long LastUsedTicks;
         }
 
         public string Issue(ClaimsPrincipal user)
@@ -61,17 +70,37 @@ namespace garge_api.Services
             if (string.IsNullOrEmpty(ticket) || !cache.TryGetValue(KeyPrefix + ticket, out Entry? entry) || entry is null)
                 return null;
 
-            if (time.GetUtcNow() >= entry.ExpiresAt)
+            var now = time.GetUtcNow();
+            var bound = Volatile.Read(ref entry.ConnectionToken);
+            if (bound is null)
+            {
+                if (now >= entry.ExpiresAt)
+                {
+                    cache.Remove(KeyPrefix + ticket);
+                    return null;
+                }
+                if (!string.IsNullOrEmpty(connectionToken))
+                {
+                    bound = Interlocked.CompareExchange(ref entry.ConnectionToken, connectionToken, null) ?? connectionToken;
+                    if (bound == connectionToken)
+                    {
+                        // Keep the entry while its connection keeps using it.
+                        cache.Set(KeyPrefix + ticket, entry, new MemoryCacheEntryOptions { SlidingExpiration = BoundIdleLifetime });
+                        Interlocked.Exchange(ref entry.LastUsedTicks, now.UtcTicks);
+                    }
+                }
+            }
+            else if (now.UtcTicks - Interlocked.Read(ref entry.LastUsedTicks) >= BoundIdleLifetime.Ticks)
             {
                 cache.Remove(KeyPrefix + ticket);
                 return null;
             }
 
-            if (!string.IsNullOrEmpty(connectionToken))
+            if (bound is not null)
             {
-                var bound = Interlocked.CompareExchange(ref entry.ConnectionToken, connectionToken, null);
-                if (bound is not null && bound != connectionToken)
+                if (bound != connectionToken)
                     return null;
+                Interlocked.Exchange(ref entry.LastUsedTicks, now.UtcTicks);
             }
 
             return new ClaimsPrincipal(new ClaimsIdentity(entry.Claims, AuthenticationType, entry.NameType, entry.RoleType));

@@ -108,6 +108,47 @@ public class HubTicketServiceTests
     }
 
     [Fact]
+    public void BoundTicket_KeepsWorkingForItsConnection_PastTheLifetime()
+    {
+        var (service, clock) = Create();
+        var ticket = service.Issue(User("u-1"));
+        Assert.NotNull(service.Redeem(ticket, "conn-a"));
+
+        // Long polling sends the ticket again on every poll, long after it was issued.
+        for (var i = 0; i < 5; i++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(50));
+            Assert.Equal("u-1", service.Redeem(ticket, "conn-a")?.GetUserId());
+        }
+        Assert.Null(service.Redeem(ticket, "conn-b"));
+        Assert.Null(service.Redeem(ticket, null));
+    }
+
+    [Fact]
+    public void BoundTicket_ExpiresWhenItsConnectionStopsUsingIt()
+    {
+        var (service, clock) = Create();
+        var ticket = service.Issue(User("u-1"));
+        Assert.NotNull(service.Redeem(ticket, "conn-a"));
+
+        clock.Advance(HubTicketService.BoundIdleLifetime - TimeSpan.FromSeconds(1));
+        Assert.NotNull(service.Redeem(ticket, "conn-a"));
+        clock.Advance(HubTicketService.BoundIdleLifetime);
+        Assert.Null(service.Redeem(ticket, "conn-a"));
+    }
+
+    [Fact]
+    public void UnboundTicket_CannotBindAfterItExpires()
+    {
+        var (service, clock) = Create();
+        var ticket = service.Issue(User("u-1"));
+
+        clock.Advance(HubTicketService.Lifetime);
+
+        Assert.Null(service.Redeem(ticket, "conn-a"));
+    }
+
+    [Fact]
     public void Issue_NeedsAUserId()
     {
         var (service, _) = Create();

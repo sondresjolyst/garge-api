@@ -24,8 +24,6 @@ namespace garge_api.Controllers
         [ProducesResponseType(StatusCodes.Status401Unauthorized)]
         public ActionResult<HubTicketResponseDto> Create()
         {
-            if (string.IsNullOrEmpty(User.GetUserId())) return Forbid();
-
             return Ok(new HubTicketResponseDto
             {
                 Ticket = tickets.Issue(User),
