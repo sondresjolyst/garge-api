@@ -17,11 +17,9 @@ using System.Security.Claims;
 namespace garge_api.Controllers
 {
     [ApiController]
-    [Route("api/roles")]
     [Authorize(Policy = "Admin")]
     public class AdminController : ControllerBase
     {
-        private readonly RoleManager<IdentityRole> _roleManager;
         private readonly UserManager<User> _userManager;
         private readonly ApplicationDbContext _context;
         private readonly ILogger<AdminController> _logger;
@@ -30,7 +28,6 @@ namespace garge_api.Controllers
         private readonly Services.ISecurityModeService? _security;
 
         public AdminController(
-            RoleManager<IdentityRole> roleManager,
             UserManager<User> userManager,
             ApplicationDbContext context,
             ILogger<AdminController> logger,
@@ -38,114 +35,12 @@ namespace garge_api.Controllers
             Services.IAppSettingsCache? settingsCache = null,
             Services.ISecurityModeService? security = null)
         {
-            _roleManager = roleManager;
             _userManager = userManager;
             _context = context;
             _logger = logger;
             _mapper = mapper;
             _settingsCache = settingsCache;
             _security = security;
-        }
-
-        /// <summary>
-        /// Creates a new role.
-        /// </summary>
-        /// <param name="dto">The role DTO.</param>
-        /// <returns>The created role.</returns>
-        [HttpPost]
-        [SwaggerOperation(Summary = "Creates a new role.")]
-        [SwaggerResponse(201, "Role created successfully.", typeof(RoleDto))]
-        [SwaggerResponse(409, "Role already exists.")]
-        public async Task<IActionResult> CreateRole([FromBody] RoleDto dto)
-        {
-            _logger.LogInformation("CreateRole called with {@LogData}", new { dto.Name, CallerUserId = User.GetUserId() });
-
-            if (await _roleManager.RoleExistsAsync(dto.Name))
-            {
-                _logger.LogWarning("Role creation failed: {@LogData} already exists", new { dto.Name });
-                return Conflict(new { message = "Role already exists!" });
-            }
-
-            var result = await _roleManager.CreateAsync(new IdentityRole(dto.Name));
-            if (result.Succeeded)
-            {
-                _logger.LogInformation("Role created: {@LogData}", new { dto.Name, CallerUserId = User.GetUserId() });
-                return CreatedAtAction(nameof(GetRole), new { roleName = dto.Name }, dto);
-            }
-
-            _logger.LogError("Role creation failed for {@LogData}: {@Errors}", new { dto.Name }, result.Errors);
-            return BadRequest(result.Errors);
-        }
-
-        /// <summary>
-        /// Gets all roles.
-        /// </summary>
-        /// <returns>A list of all roles.</returns>
-        [HttpGet]
-        [SwaggerOperation(Summary = "Gets all roles.")]
-        [SwaggerResponse(200, "Roles retrieved successfully.", typeof(IEnumerable<RoleDto>))]
-        public async Task<IActionResult> GetRoles()
-        {
-            _logger.LogInformation("GetRoles called by {@LogData}", new { CallerUserId = User.GetUserId() });
-
-            var roles = await _roleManager.Roles.ToListAsync();
-            var dtos = _mapper.Map<IEnumerable<RoleDto>>(roles);
-            return Ok(dtos);
-        }
-
-        /// <summary>
-        /// Gets a role by name.
-        /// </summary>
-        /// <param name="roleName">The name of the role.</param>
-        /// <returns>The role DTO.</returns>
-        [HttpGet("{roleName}")]
-        [SwaggerOperation(Summary = "Gets a role by name.")]
-        [SwaggerResponse(200, "Role retrieved successfully.", typeof(RoleDto))]
-        [SwaggerResponse(404, "Role not found.")]
-        public async Task<IActionResult> GetRole(string roleName)
-        {
-            _logger.LogInformation("GetRole called for {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
-
-            var role = await _roleManager.FindByNameAsync(roleName);
-            if (role == null)
-            {
-                _logger.LogWarning("Role not found: {@LogData}", new { roleName });
-                return NotFound(new { message = "Role not found!" });
-            }
-
-            var dto = _mapper.Map<RoleDto>(role);
-            return Ok(dto);
-        }
-
-        /// <summary>
-        /// Deletes a role by its name.
-        /// </summary>
-        /// <param name="roleName">The name of the role to delete.</param>
-        /// <returns>No content.</returns>
-        [HttpDelete("{roleName}")]
-        [SwaggerOperation(Summary = "Deletes a role by its name.")]
-        [SwaggerResponse(204, "No content.")]
-        [SwaggerResponse(404, "Role not found.")]
-        public async Task<IActionResult> DeleteRole(string roleName)
-        {
-            _logger.LogInformation("DeleteRole called for {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
-
-            var role = await _roleManager.FindByNameAsync(roleName);
-            if (role == null)
-            {
-                _logger.LogWarning("DeleteRole failed: Role not found {@LogData}", new { roleName });
-                return NotFound(new { message = "Role not found!" });
-            }
-
-            var result = await _roleManager.DeleteAsync(role);
-            if (result.Succeeded)
-            {
-                _logger.LogInformation("Role deleted: {@LogData}", new { roleName, CallerUserId = User.GetUserId() });
-                return NoContent();
-            }
-
-            _logger.LogError("DeleteRole failed for {@LogData}: {@Errors}", new { roleName }, result.Errors);
-            return BadRequest(result.Errors);
         }
 
         /// <summary>
@@ -270,51 +165,6 @@ namespace garge_api.Controllers
             _logger.LogInformation("User deleted: {@LogData}", new { id, CallerUserId = User.GetUserId() });
             return NoContent();
         }
-        /// <summary>
-        /// Assigns a permission to a role.
-        /// </summary>
-        /// <param name="roleName">The role name.</param>
-        /// <param name="permission">The permission to assign.</param>
-        /// <returns>Status of the assignment.</returns>
-        [HttpPost("{roleName}/permissions")]
-        [SwaggerOperation(Summary = "Assigns a permission to a role.")]
-        [SwaggerResponse(200, "Permission assigned successfully.")]
-        [SwaggerResponse(404, "Role not found.")]
-        public async Task<IActionResult> AssignPermission([FromRoute] string roleName, [FromQuery] string permission)
-        {
-            _logger.LogInformation("AssignPermission called: {@LogData}", new { roleName, permission, CallerUserId = User.GetUserId() });
-
-            if (!await _roleManager.RoleExistsAsync(roleName))
-            {
-                _logger.LogWarning("AssignPermission failed: Role not found {@LogData}", new { roleName });
-                return NotFound(new { message = "Role not found!" });
-            }
-
-            if (!Constants.RoleNames.KnownPermissions.Contains(permission))
-            {
-                _logger.LogWarning("AssignPermission failed: Unknown permission {@LogData}", new { permission });
-                return BadRequest(new { message = $"Unknown permission. Allowed: {string.Join(", ", Constants.RoleNames.KnownPermissions)}." });
-            }
-
-            if (await _context.RolePermissions.AnyAsync(rp => rp.RoleName == roleName && rp.Permission == permission))
-            {
-                _logger.LogInformation("AssignPermission no-op: Permission already assigned {@LogData}", new { permission, roleName });
-                return Ok(new { message = "Permission assigned successfully!" });
-            }
-
-            var rolePermission = new RolePermission
-            {
-                RoleName = roleName,
-                Permission = permission
-            };
-
-            _context.RolePermissions.Add(rolePermission);
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation("Permission assigned: {@LogData}", new { permission, roleName, CallerUserId = User.GetUserId() });
-            return Ok(new { message = "Permission assigned successfully!" });
-        }
-
         /// <summary>
         /// Gets the Garge Security alert threshold. Admin only, deliberately off the public settings payload.
         /// </summary>
