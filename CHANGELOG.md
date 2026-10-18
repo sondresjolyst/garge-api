@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.18.0](https://github.com/sondresjolyst/garge-api/compare/v2.17.0...v2.18.0) (2026-10-18)
+
+
+### Features
+
+* **email:** tag Brevo emails with the app name ([#508](https://github.com/sondresjolyst/garge-api/issues/508)) ([db69716](https://github.com/sondresjolyst/garge-api/commit/db69716671d0dfc6986325eda8f24cf32d8f7f3b))
+* **hubs:** authenticate the device hub with a short-lived ticket ([#507](https://github.com/sondresjolyst/garge-api/issues/507)) ([43d5f87](https://github.com/sondresjolyst/garge-api/commit/43d5f872cdf34a4ca299111ba688dada34104ff9))
+
 ## [2.17.0](https://github.com/sondresjolyst/garge-api/compare/v2.16.1...v2.17.0) (2026-10-18)
 
 
