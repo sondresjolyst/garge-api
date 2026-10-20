@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.1](https://github.com/sondresjolyst/garge-api/compare/v2.18.0...v2.18.1) (2026-10-20)
+
+
+### Dependencies
+
+* **nuget:** bump `SjolystInnovation.AppKit.Hosting` from 1.0.1 to 1.0.3 ([#505](https://github.com/sondresjolyst/garge-api/issues/505)) ([5996955](https://github.com/sondresjolyst/garge-api/commit/599695563def2ab16538e36e7f2c58363dbfe4da))
+
 ## [2.18.0](https://github.com/sondresjolyst/garge-api/compare/v2.17.0...v2.18.0) (2026-10-18)
 
 
