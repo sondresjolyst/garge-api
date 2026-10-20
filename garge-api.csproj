@@ -42,7 +42,7 @@
     <PackageReference Include="SjolystInnovation.AppKit.Auth" Version="1.0.1" />
     <PackageReference Include="SjolystInnovation.AppKit.Email" Version="1.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Hosting" Version="1.0.3" />
-    <PackageReference Include="SjolystInnovation.AppKit.SiteSettings" Version="1.0.1" />
+    <PackageReference Include="SjolystInnovation.AppKit.SiteSettings" Version="1.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Vipps" Version="1.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.3.0" />
     <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="10.3.0" />
