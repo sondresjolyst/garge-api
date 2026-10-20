@@ -104,7 +104,7 @@ namespace garge_api
             builder.Services.AddProblemDetails();
             builder.Services.AddEndpointsApiExplorer();
 
-            builder.Services.AddAppKitJwtBearer<User>(u => !u.IsDeleted, o => o.QueryTokenPaths.Add("/hubs"));
+            builder.Services.AddGargeJwtBearer();
 
             builder.Services.AddAppKitHealthChecks<ApplicationDbContext>();
 
@@ -299,7 +299,7 @@ namespace garge_api
                 o.Roles = RoleNames.AllRoles;
                 o.NewUser = u => new User { FirstName = u.FirstName, LastName = u.LastName };
             });
-            app.MapHub<garge_api.Hubs.DeviceHub>("/hubs/devices");
+            app.MapHub<garge_api.Hubs.DeviceHub>(GargeAuthentication.DeviceHubPath);
             app.MapAppKitHealthChecks();
             app.Run();
         }
