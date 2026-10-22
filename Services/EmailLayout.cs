@@ -84,6 +84,7 @@ namespace garge_api.Services
                 <head>
                 <meta charset="utf-8">
                 <style>
+                  @page { margin: 0 0 15mm 0; }
                   * { box-sizing: border-box; margin: 0; padding: 0; }
                   body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a1a1a; background: #fff; }
 

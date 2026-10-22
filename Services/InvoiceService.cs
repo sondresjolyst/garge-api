@@ -6,6 +6,7 @@ using garge_api.Models.Subscription;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text;
+using SjolystInnovation.AppKit.Pdf;
 using System.Web;
 
 namespace garge_api.Services

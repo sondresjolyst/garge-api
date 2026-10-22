@@ -14,7 +14,7 @@ ASP.NET Core Web API backend for the Garge smart garage system. Handles all busi
 | Realtime | SignalR + Postgres `LISTEN`/`NOTIFY` |
 | Logging | Serilog |
 | Email | Brevo |
-| PDF | PuppeteerSharp |
+| PDF | SjolystInnovation.AppKit.Pdf (PuppeteerSharp) |
 | Rate Limiting | AspNetCoreRateLimit |
 | API Docs | Swashbuckle + Microsoft.AspNetCore.OpenApi |
 | Tests | xUnit v3 on Microsoft.Testing.Platform |
