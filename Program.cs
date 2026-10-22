@@ -14,6 +14,7 @@ using SjolystInnovation.AppKit.Auth;
 using SjolystInnovation.AppKit.Hosting;
 using SjolystInnovation.AppKit.Email;
 using SjolystInnovation.AppKit.AdminStats;
+using SjolystInnovation.AppKit.Pdf;
 using SjolystInnovation.AppKit.SiteSettings;
 using Microsoft.AspNetCore.ResponseCompression;
 using System.IO.Compression;
@@ -123,7 +124,7 @@ namespace garge_api
                 .SetApplicationName("garge-api")
                 .ProtectKeysWithConfiguredCertificate(builder.Configuration, required: builder.Environment.IsProduction());
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
-            builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
+            builder.Services.AddAppKitPdf();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
             builder.Services.AddScoped<IPermissionService, PermissionService>();
             builder.Services.AddScoped<IMqttAclService, MqttAclService>();

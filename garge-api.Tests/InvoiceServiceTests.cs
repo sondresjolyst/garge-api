@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using SjolystInnovation.AppKit.Pdf;
 using Xunit;
 
 namespace garge_api.Tests;
@@ -39,7 +40,7 @@ public class InvoiceServiceTests
         var pdf = pdfRenderer ?? new Mock<IPdfRenderer>();
         if (pdfRenderer == null)
         {
-            pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ReturnsAsync(new byte[] { 1, 2, 3 });
+            pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new byte[] { 1, 2, 3 });
         }
 
         var svc = new InvoiceService(scopeFactory.Object, email.Object, pdf.Object,
@@ -90,7 +91,7 @@ public class InvoiceServiceTests
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Never);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -107,7 +108,7 @@ public class InvoiceServiceTests
         // The data export lists invoice amounts, so an order invoice stores the order total.
         Assert.Equal(order.TotalInOre, saved.AmountInOre);
         Assert.NotEqual(0, saved.AmountInOre);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",
             It.Is<string>(s => s.Contains($"#{id:D4}")),
@@ -119,7 +120,7 @@ public class InvoiceServiceTests
     public async Task GenerateAndStoreAsync_RenderThrows_KeepsTheSaleForTheRetry()
     {
         var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("chromium gone"));
         var (svc, db, email, _) = Create(pdf);
         var order = await SeedPaidOrderAsync(db);
 
@@ -148,7 +149,7 @@ public class InvoiceServiceTests
 
         Assert.Equal(inProgress.Id, id);
         Assert.Single(db.Invoices);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Never);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
@@ -170,7 +171,7 @@ public class InvoiceServiceTests
         Assert.Equal(existing.Id, id);
         var saved = await db.Invoices.SingleAsync(TestContext.Current.CancellationToken);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
@@ -180,7 +181,7 @@ public class InvoiceServiceTests
     public async Task GenerateAndStoreAsync_ForceRegenerateOnExistingInvoice_KeepsRowOnRenderFail()
     {
         var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("chromium gone"));
         var (svc, db, _, _) = Create(pdf);
         var order = await SeedPaidOrderAsync(db);
         var existing = new Invoice { OrderId = order.Id, IssuedAt = DateTime.UtcNow.AddDays(-1), PdfData = [9, 9, 9] };
@@ -249,7 +250,7 @@ public class InvoiceServiceTests
         Assert.Equal(29900, saved.AmountInOre);
         Assert.Null(saved.OrderId);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved.PdfData);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",
             It.Is<string>(s => s.Contains($"#{id:D4}")),
@@ -291,7 +292,7 @@ public class InvoiceServiceTests
 
         Assert.Equal(first, second);
         Assert.Single(db.Invoices);
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
@@ -301,7 +302,7 @@ public class InvoiceServiceTests
     public async Task GenerateForSubscriptionChargeAsync_RenderFails_KeepsTheSaleForTheRetry()
     {
         var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).ThrowsAsync(new Exception("chromium gone"));
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new Exception("chromium gone"));
         var (svc, db, _, _) = Create(pdf);
         var subscription = await SeedSubscriptionAsync(db);
 
@@ -341,7 +342,7 @@ public class InvoiceServiceTests
     {
         var html = new List<string>();
         var pdf = new Mock<IPdfRenderer>();
-        pdf.Setup(p => p.RenderAsync(It.IsAny<string>())).Callback<string>(html.Add).ReturnsAsync(new byte[] { 1 });
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<string, CancellationToken>((h, _) => html.Add(h)).ReturnsAsync(new byte[] { 1 });
         var (svc, db, _, _) = Create(pdf);
         return (svc, db, html);
     }
@@ -553,9 +554,9 @@ public class InvoiceServiceTests
         if (pdf == null)
         {
             pdf = new Mock<IPdfRenderer>();
-            pdf.Setup(p => p.RenderAsync(It.IsAny<string>()))
-                .Callback<string>(h => pages[h.Contains("CREDIT NOTE") ? "credit" : h.Contains("Replaces invoice") ? "invoice" : "other"] = h)
-                .ReturnsAsync((string h) => h.Contains("CREDIT NOTE") ? new byte[] { 2 } : new byte[] { 3 });
+            pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback<string, CancellationToken>((h, _) => pages[h.Contains("CREDIT NOTE") ? "credit" : h.Contains("Replaces invoice") ? "invoice" : "other"] = h)
+                .ReturnsAsync((string h, CancellationToken _) => h.Contains("CREDIT NOTE") ? new byte[] { 2 } : new byte[] { 3 });
         }
         var (svc, db, email, _) = Create(pdf, vat: RealVat);
         return (svc, db, email, pages);
@@ -884,7 +885,7 @@ public class InvoiceServiceTests
     public async Task AVatCorrectionWhosePdfFailed_IsFinishedByTheRetryJob_AndEmailedOnce()
     {
         var pdf = new Mock<IPdfRenderer>();
-        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("chromium gone"))
             .ReturnsAsync(new byte[] { 2 })
             .ReturnsAsync(new byte[] { 3 });
@@ -909,7 +910,7 @@ public class InvoiceServiceTests
     public async Task AVatCorrectionWhoseNewInvoicePdfFailed_KeepsTheCreditNotePdf()
     {
         var pdf = new Mock<IPdfRenderer>();
-        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>()))
+        pdf.SetupSequence(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new byte[] { 2 })
             .ThrowsAsync(new Exception("chromium gone"))
             .ReturnsAsync(new byte[] { 3 });
@@ -971,7 +972,7 @@ public class InvoiceServiceTests
 
         email.Verify(e => e.SendEmailAsync("buyer@example.com", It.Is<string>(s => s.Contains($"#{id:D4}")), It.IsAny<string>(),
             It.Is<IReadOnlyList<EmailAttachment>?>(a => a != null && a.Single().Content.SequenceEqual(new byte[] { 1, 2, 3 }))), Times.Exactly(2));
-        pdf.Verify(p => p.RenderAsync(It.IsAny<string>()), Times.Once);
+        pdf.Verify(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         Assert.NotNull((await db.Invoices.AsNoTracking().SingleAsync(TestContext.Current.CancellationToken)).EmailedAt);
     }
 
