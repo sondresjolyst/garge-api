@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.19.0](https://github.com/sondresjolyst/garge-api/compare/v2.18.1...v2.19.0) (2026-10-22)
+
+
+### Features
+
+* **security:** encrypt the Data Protection keys with a certificate ([#514](https://github.com/sondresjolyst/garge-api/issues/514)) ([fa11e5c](https://github.com/sondresjolyst/garge-api/commit/fa11e5cedb5751a9dfbe8c5aafcfd18645295238))
+
 ## [2.18.1](https://github.com/sondresjolyst/garge-api/compare/v2.18.0...v2.18.1) (2026-10-20)
 
 
