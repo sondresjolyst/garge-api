@@ -120,7 +120,8 @@ namespace garge_api
             builder.Services.Configure<VippsSettings>(builder.Configuration.GetSection("Vipps"));
             builder.Services.AddDataProtection()
                 .PersistKeysToDbContext<ApplicationDbContext>()
-                .SetApplicationName("garge-api");
+                .SetApplicationName("garge-api")
+                .ProtectKeysWithConfiguredCertificate(builder.Configuration, required: builder.Environment.IsProduction());
             builder.Services.AddSingleton<IAppSettingsCache, AppSettingsCache>();
             builder.Services.AddSingleton<IPdfRenderer, PuppeteerPdfRenderer>();
             builder.Services.AddScoped<ISubscriptionCapacityService, SubscriptionCapacityService>();
