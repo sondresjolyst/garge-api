@@ -180,6 +180,38 @@ public class AuthControllerTests : ControllerTestBase
         MockVerificationEmails.Verify(m => m.SendEmailVerificationAsync(captured, It.Is<string>(c => c.Length == 6), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData("::ffff:203.0.113.7", "203.0.113.0")]
+    [InlineData("203.0.113.7", "203.0.113.0")]
+    [InlineData("2001:db8:abcd:1234::1", "2001:db8:abcd::")]
+    public async Task Register_StoresTheTruncatedClientAddress(string remote, string expected)
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockUserManager.Setup(m => m.AddToRoleAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        User? captured = null;
+        MockUserManager.Setup(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .Callback<User, string>((u, _) => captured = u)
+            .ReturnsAsync(IdentityResult.Success);
+        MockMapper.Setup(m => m.Map<User>(It.IsAny<RegisterUserDto>()))
+            .Returns((RegisterUserDto src) => new User
+            {
+                Id = "new-user", UserName = src.UserName, Email = src.Email,
+                FirstName = src.FirstName, LastName = src.LastName
+            });
+
+        var controller = CreateAuthController(CreateDbContext());
+        controller.ControllerContext = new ControllerContext { HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext() };
+        controller.HttpContext.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(remote);
+
+        await controller.Register(MakeRegisterDto(), TestContext.Current.CancellationToken);
+
+        Assert.NotNull(captured);
+        Assert.Equal(expected, captured!.TermsAcceptedIp);
+    }
+
     [Fact]
     public async Task Register_EmailAlreadyExists_ReturnsGenericOkToPreventEnumeration()
     {

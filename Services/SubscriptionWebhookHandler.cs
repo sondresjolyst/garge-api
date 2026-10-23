@@ -28,7 +28,7 @@ namespace garge_api.Services
                 return VippsWebhookOutcome.Rejected;
             }
 
-            if (delivery.IsTest != subscription.IsTest)
+            if (!VippsPaymentEventChecks.EnvironmentMatches(delivery, subscription.IsTest))
             {
                 logger.LogError("Subscription webhook {EventId} rejected: sent from the {Sent} environment for a {Subscription} subscription {SubscriptionId}",
                     eventId, delivery.IsTest ? "test" : "production", subscription.IsTest ? "test" : "production", subscription.Id);

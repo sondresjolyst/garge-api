@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SjolystInnovation.AppKit.Auth;
+using SjolystInnovation.AppKit.Hosting;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace garge_api.Controllers
@@ -91,7 +92,7 @@ namespace garge_api.Controllers
             var user = _mapper.Map<User>(registerUserDto);
             user.TermsAcceptedAt = DateTime.UtcNow;
             user.TermsVersion = registerUserDto.TermsVersion;
-            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext?.Connection?.RemoteIpAddress?.ToString());
+            user.TermsAcceptedIp = IpTruncator.Truncate(HttpContext?.Connection?.RemoteIpAddress);
 
             var result = await _userManager.CreateAsync(user, registerUserDto.Password);
             if (result.Succeeded)
