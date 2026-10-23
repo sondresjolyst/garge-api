@@ -28,7 +28,7 @@ namespace garge_api.Services
             _logger = logger;
         }
 
-        public async Task SendOrderConfirmedAsync(int orderId)
+        public async Task SendOrderConfirmedAsync(int orderId, CancellationToken ct = default)
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
@@ -36,7 +36,7 @@ namespace garge_api.Services
             var order = await db.Orders
                 .Include(o => o.User)
                 .Include(o => o.OrderItems).ThenInclude(i => i.ShopItem)
-                .FirstOrDefaultAsync(o => o.Id == orderId);
+                .FirstOrDefaultAsync(o => o.Id == orderId, ct);
 
             if (order?.User?.Email == null)
             {
@@ -45,7 +45,7 @@ namespace garge_api.Services
             }
 
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
-            var attachments = await WithdrawalFormAsync(order, settings);
+            var attachments = await WithdrawalFormAsync(order, settings, ct);
             var html = BuildHtml(order, settings, attachments.Count > 0);
 
             try
@@ -64,11 +64,11 @@ namespace garge_api.Services
         }
 
         // The confirmation goes out even when the form fails to render, so the buyer always hears about the order.
-        private async Task<IReadOnlyList<EmailAttachment>> WithdrawalFormAsync(Order order, AppSettings settings)
+        private async Task<IReadOnlyList<EmailAttachment>> WithdrawalFormAsync(Order order, AppSettings settings, CancellationToken ct)
         {
             try
             {
-                var pdf = await _pdfRenderer.RenderAsync(WithdrawalForm.Html(BuildWithdrawalForm(order, settings)));
+                var pdf = await _pdfRenderer.RenderAsync(WithdrawalForm.Html(BuildWithdrawalForm(order, settings)), ct);
                 return
                 [
                     new EmailAttachment
@@ -78,6 +78,10 @@ namespace garge_api.Services
                         ContentType = "application/pdf"
                     }
                 ];
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -107,9 +111,13 @@ namespace garge_api.Services
         // The quantity leads the name like the invoice's goods lines, and a single item is just its name.
         private static string WithdrawalFormItem(OrderItem item)
         {
-            var name = item.ShopItem?.Name ?? string.Empty;
-            return item.Quantity > 1 && name.Length > 0 ? $"{item.Quantity} × {name}" : name;
+            var name = ItemName(item);
+            return item.Quantity > 1 ? $"{item.Quantity} × {name}" : name;
         }
+
+        // An order line stores no name of its own, so a deleted shop item falls back to its id rather than a blank line.
+        private static string ItemName(OrderItem item) =>
+            string.IsNullOrWhiteSpace(item.ShopItem?.Name) ? $"Item #{item.ShopItemId}" : item.ShopItem.Name;
 
         private static string BuildHtml(Order order, AppSettings s, bool withdrawalFormAttached)
         {
@@ -122,7 +130,7 @@ namespace garge_api.Services
                 var lineTotal = item.PriceAtPurchaseInOre * item.Quantity;
                 lines.Append($"""
                     <tr>
-                      <td>{H(item.ShopItem?.Name)} × {item.Quantity}</td>
+                      <td>{H(ItemName(item))} × {item.Quantity}</td>
                       <td class="r">NOK {Nok(lineTotal)}</td>
                     </tr>
                     """);
@@ -165,7 +173,7 @@ namespace garge_api.Services
             return EmailLayout.Render(s, new EmailLayout.Meta
             {
                 Number = $"#{order.Id}",
-                Subtitle = $"ORDER  ·  {order.CreatedAt:yyyy-MM-dd}"
+                Subtitle = $"ORDER  ·  {LocalTime.Date(order.CreatedAt):yyyy-MM-dd}"
             }, body);
         }
     }

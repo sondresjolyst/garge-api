@@ -76,7 +76,7 @@ public class OrderEmailServiceTests
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",
@@ -91,7 +91,7 @@ public class OrderEmailServiceTests
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, shippingAddress: "Mårvegen 21a, 4347 Lye");
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -105,7 +105,7 @@ public class OrderEmailServiceTests
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, shippingAddress: null);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -119,7 +119,7 @@ public class OrderEmailServiceTests
         var (svc, db, email) = Create();
         var order = await SeedOrderAsync(db, email: null);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -133,7 +133,7 @@ public class OrderEmailServiceTests
         await db.AppSettings.AddAsync(new AppSettings { Id = 1 }, TestContext.Current.CancellationToken);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
-        await svc.SendOrderConfirmedAsync(orderId: 99999);
+        await svc.SendOrderConfirmedAsync(orderId: 99999, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             It.IsAny<string>(), It.IsAny<string>(),
@@ -150,7 +150,7 @@ public class OrderEmailServiceTests
                 It.IsAny<IReadOnlyList<EmailAttachment>?>()))
             .ThrowsAsync(new Exception("brevo down"));
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class OrderEmailServiceTests
             .Callback<string, string, string, IReadOnlyList<EmailAttachment>?>((_, _, h, a) => { html = h; sent = a; })
             .ReturnsAsync(true);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         var attachment = Assert.Single(sent!);
         Assert.Equal("withdrawal-form.pdf", attachment.FileName);
@@ -185,7 +185,7 @@ public class OrderEmailServiceTests
         var (svc, db, _) = Create(pdf);
         var order = await SeedOrderAsync(db);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         Assert.NotNull(rendered);
         Assert.Contains("Model withdrawal form", rendered);
@@ -202,7 +202,7 @@ public class OrderEmailServiceTests
         var (svc, db, email) = Create(pdf);
         var order = await SeedOrderAsync(db);
 
-        await svc.SendOrderConfirmedAsync(order.Id);
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
 
         email.Verify(e => e.SendEmailAsync(
             "buyer@example.com",
@@ -267,5 +267,82 @@ public class OrderEmailServiceTests
         var request = OrderEmailService.BuildWithdrawalForm(order, new AppSettings());
 
         Assert.Equal(DateOnly.Parse(expected), request.Order.OrderedOn);
+    }
+
+    [Fact]
+    public void BuildWithdrawalForm_FallsBackToItemId_WhenShopItemDeleted()
+    {
+        var order = new Order
+        {
+            Id = 42, UserId = "u", CreatedAt = DateTime.UtcNow,
+            OrderItems =
+            {
+                new OrderItem { ShopItemId = 7, Quantity = 1 },
+                new OrderItem { ShopItemId = 8, Quantity = 3 }
+            }
+        };
+
+        var request = OrderEmailService.BuildWithdrawalForm(order, new AppSettings());
+
+        Assert.Equal(["Item #7", "3 × Item #8"], request.Order.Items);
+    }
+
+    [Fact]
+    public async Task SendOrderConfirmedAsync_ShowsItemIdInBody_WhenShopItemDeleted()
+    {
+        var (svc, db, email) = Create();
+        var order = await SeedOrderAsync(db);
+        await db.OrderItems.AddAsync(new OrderItem
+        {
+            OrderId = order.Id, ShopItemId = 999, Quantity = 1,
+            PriceAtPurchaseInOre = 100, UnitPriceExclVatInOre = 100, VatPercentage = 0
+        }, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
+
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.Is<string>(html => html.Contains("Item #999 × 1")),
+            It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SendOrderConfirmedAsync_PropagatesCancellation_AndDoesNotSend()
+    {
+        using var cts = new CancellationTokenSource();
+        var pdf = new Mock<IPdfRenderer>();
+        pdf.Setup(p => p.RenderAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((_, ct) =>
+            {
+                cts.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(PdfBytes);
+            });
+        var (svc, db, email) = Create(pdf);
+        var order = await SeedOrderAsync(db);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => svc.SendOrderConfirmedAsync(order.Id, cts.Token));
+
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SendOrderConfirmedAsync_HeaderShowsOsloDate()
+    {
+        var (svc, db, email) = Create();
+        var order = await SeedOrderAsync(db);
+        // 23:30 UTC on 31 December is already 1 January in Oslo.
+        order.CreatedAt = new DateTime(2026, 12, 31, 23, 30, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await svc.SendOrderConfirmedAsync(order.Id, TestContext.Current.CancellationToken);
+
+        email.Verify(e => e.SendEmailAsync(
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.Is<string>(html => html.Contains("2027-01-01") && !html.Contains("2026-12-31")),
+            It.IsAny<IReadOnlyList<EmailAttachment>?>()), Times.Once);
     }
 }
