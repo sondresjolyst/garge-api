@@ -2,6 +2,6 @@ namespace garge_api.Services
 {
     public interface IOrderEmailService
     {
-        Task SendOrderConfirmedAsync(int orderId);
+        Task SendOrderConfirmedAsync(int orderId, CancellationToken ct = default);
     }
 }
