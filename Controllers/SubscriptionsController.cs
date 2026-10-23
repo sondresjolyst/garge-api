@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SjolystInnovation.AppKit.Hosting;
 using System.Security.Claims;
 
 namespace garge_api.Controllers
@@ -261,7 +262,7 @@ namespace garge_api.Controllers
                 Status = SubscriptionStatus.Pending,
                 IsTest = settings.VippsTestMode,
                 ConsentAcceptedAt = DateTime.UtcNow,
-                ConsentIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress?.ToString())
+                ConsentIp = IpTruncator.Truncate(HttpContext.Connection.RemoteIpAddress)
             };
 
             _context.Subscriptions.Add(subscription);
