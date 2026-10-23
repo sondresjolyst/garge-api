@@ -3,6 +3,7 @@ using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
+using SjolystInnovation.AppKit.Pdf;
 using System.Text;
 using System.Web;
 
@@ -12,15 +13,18 @@ namespace garge_api.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IEmailService _emailService;
+        private readonly IPdfRenderer _pdfRenderer;
         private readonly ILogger<OrderEmailService> _logger;
 
         public OrderEmailService(
             IServiceScopeFactory scopeFactory,
             IEmailService emailService,
+            IPdfRenderer pdfRenderer,
             ILogger<OrderEmailService> logger)
         {
             _scopeFactory = scopeFactory;
             _emailService = emailService;
+            _pdfRenderer = pdfRenderer;
             _logger = logger;
         }
 
@@ -41,14 +45,16 @@ namespace garge_api.Services
             }
 
             var settings = await db.AppSettings.FindAsync(1) ?? new AppSettings();
-            var html = BuildHtml(order, settings);
+            var attachments = await WithdrawalFormAsync(order, settings);
+            var html = BuildHtml(order, settings, attachments.Count > 0);
 
             try
             {
                 await _emailService.SendEmailAsync(
                     order.User.Email,
                     $"Order #{order.Id} confirmed — {settings.CompanyName}",
-                    html);
+                    html,
+                    attachments);
                 _logger.LogInformation("Order confirmation email sent for order {OrderId}", orderId);
             }
             catch (Exception ex)
@@ -57,7 +63,55 @@ namespace garge_api.Services
             }
         }
 
-        private static string BuildHtml(Order order, AppSettings s)
+        // The confirmation goes out even when the form fails to render, so the buyer always hears about the order.
+        private async Task<IReadOnlyList<EmailAttachment>> WithdrawalFormAsync(Order order, AppSettings settings)
+        {
+            try
+            {
+                var pdf = await _pdfRenderer.RenderAsync(WithdrawalForm.Html(BuildWithdrawalForm(order, settings)));
+                return
+                [
+                    new EmailAttachment
+                    {
+                        FileName = WithdrawalForm.FileName(WithdrawalFormLanguage.English),
+                        Content = pdf,
+                        ContentType = "application/pdf"
+                    }
+                ];
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Withdrawal form for order {OrderId} failed to render, the confirmation is sent without it", order.Id);
+                return [];
+            }
+        }
+
+        /// <summary>The English withdrawal form, filled in with the seller from the site settings and the order's items and date.</summary>
+        internal static WithdrawalFormRequest BuildWithdrawalForm(Order order, AppSettings s) => new(
+            new WithdrawalFormSeller(s.CompanyName)
+            {
+                LegalName = s.CompanyLegalName,
+                OrganizationNumber = s.OrgNumber,
+                AddressLines = [s.FormattedAddress],
+                Email = s.PublicEmail
+            },
+            new WithdrawalFormOrder(
+                $"#{order.Id}",
+                DateOnly.FromDateTime(LocalTime.Date(order.CreatedAt)),
+                order.OrderItems.Select(WithdrawalFormItem).ToList()))
+        {
+            // garge's emails and legal pages are in English.
+            Language = WithdrawalFormLanguage.English
+        };
+
+        // The quantity leads the name like the invoice's goods lines, and a single item is just its name.
+        private static string WithdrawalFormItem(OrderItem item)
+        {
+            var name = item.ShopItem?.Name ?? string.Empty;
+            return item.Quantity > 1 && name.Length > 0 ? $"{item.Quantity} × {name}" : name;
+        }
+
+        private static string BuildHtml(Order order, AppSettings s, bool withdrawalFormAttached)
         {
             static string Nok(int ore) => MoneyFormat.Nok(ore);
             static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
@@ -77,6 +131,10 @@ namespace garge_api.Services
             var shipBlock = string.IsNullOrEmpty(order.ShippingAddress)
                 ? string.Empty
                 : $"""<p><strong>Ship to:</strong> {H(order.ShippingAddress)}</p>""";
+
+            var withdrawalBlock = withdrawalFormAttached
+                ? "<p>The withdrawal form is attached if you want to cancel within 14 days of receiving your order.</p>"
+                : string.Empty;
 
             var body = $$"""
                 <h1>Thanks for your order, {{H(order.User?.FirstName)}}!</h1>
@@ -100,6 +158,8 @@ namespace garge_api.Services
                 </div>
 
                 {{shipBlock}}
+
+                {{withdrawalBlock}}
                 """;
 
             return EmailLayout.Render(s, new EmailLayout.Meta
