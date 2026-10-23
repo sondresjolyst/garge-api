@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.20.0](https://github.com/sondresjolyst/garge-api/compare/v2.19.1...v2.20.0) (2026-10-23)
+
+
+### Features
+
+* attach the withdrawal form to the order confirmation email ([#523](https://github.com/sondresjolyst/garge-api/issues/523)) ([14de011](https://github.com/sondresjolyst/garge-api/commit/14de0118b71ffca6aca8b6e81867c117cee8e002))
+
+
+### Bug Fixes
+
+* cancel the withdrawal form render and name deleted items on the order confirmation ([#526](https://github.com/sondresjolyst/garge-api/issues/526)) ([fb7f748](https://github.com/sondresjolyst/garge-api/commit/fb7f748acea98d204b357b7d37087488a52b1f84))
+
 ## [2.19.1](https://github.com/sondresjolyst/garge-api/compare/v2.19.0...v2.19.1) (2026-10-23)
 
 
