@@ -27,22 +27,14 @@ namespace garge_api.Services
                 return VippsWebhookOutcome.Rejected;
             }
 
-            if (delivery.IsTest != order.IsTest)
+            if (!VippsPaymentEventChecks.EnvironmentMatches(delivery, order.IsTest))
             {
                 logger.LogError("Shop webhook {EventId} rejected: sent from the {Sent} environment for a {Order} order {OrderId}",
                     eventId, delivery.IsTest ? "test" : "production", order.IsTest ? "test" : "production", order.Id);
                 return VippsWebhookOutcome.Rejected;
             }
 
-            // AUTHORIZED reserves the whole order. CAPTURED and REFUNDED can each be part of it.
-            var amount = payload.Amount?.Value;
-            var amountFits = payload.Name switch
-            {
-                "AUTHORIZED" => amount == order.TotalInOre,
-                "CAPTURED" or "REFUNDED" => amount > 0 && amount <= order.TotalInOre,
-                _ => true
-            };
-            if (!amountFits)
+            if (!VippsPaymentEventChecks.AmountFits(payload, order.TotalInOre))
             {
                 logger.LogError("Shop webhook {EventId} rejected: amount mismatch (got {Got}, expected {Expected}) for order {OrderId}",
                     eventId, payload.Amount?.Value, order.TotalInOre, order.Id);
@@ -56,6 +48,7 @@ namespace garge_api.Services
                 return VippsWebhookOutcome.Rejected;
             }
 
+            var amount = payload.Amount?.Value;
             var prevStatus = order.Status;
 
             try
