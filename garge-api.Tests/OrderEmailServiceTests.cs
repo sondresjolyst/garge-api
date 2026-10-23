@@ -232,7 +232,7 @@ public class OrderEmailServiceTests
     }
 
     [Fact]
-    public void BuildWithdrawalForm_MapsOrderItemsOnePerLineAndEnglish()
+    public void BuildWithdrawalForm_MapsOrderItemsOnePerLineWithQuantityAboveOneAndEnglish()
     {
         var order = new Order
         {
@@ -248,7 +248,7 @@ public class OrderEmailServiceTests
 
         Assert.Equal(WithdrawalFormLanguage.English, request.Language);
         Assert.Equal("#42", request.Order.Reference);
-        Assert.Equal(["Garge Sensor", "Garge Switch"], request.Order.Items);
+        Assert.Equal(["2 × Garge Sensor", "Garge Switch"], request.Order.Items);
         Assert.Null(request.Order.ReceivedOn);
     }
 

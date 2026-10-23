@@ -98,11 +98,18 @@ namespace garge_api.Services
             new WithdrawalFormOrder(
                 $"#{order.Id}",
                 DateOnly.FromDateTime(LocalTime.Date(order.CreatedAt)),
-                order.OrderItems.Select(i => i.ShopItem?.Name ?? string.Empty).ToList()))
+                order.OrderItems.Select(WithdrawalFormItem).ToList()))
         {
             // garge's emails and legal pages are in English.
             Language = WithdrawalFormLanguage.English
         };
+
+        // The quantity leads the name like the invoice's goods lines, and a single item is just its name.
+        private static string WithdrawalFormItem(OrderItem item)
+        {
+            var name = item.ShopItem?.Name ?? string.Empty;
+            return item.Quantity > 1 && name.Length > 0 ? $"{item.Quantity} × {name}" : name;
+        }
 
         private static string BuildHtml(Order order, AppSettings s, bool withdrawalFormAttached)
         {
