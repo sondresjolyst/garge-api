@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.19.1](https://github.com/sondresjolyst/garge-api/compare/v2.19.0...v2.19.1) (2026-10-23)
+
+
+### Miscellaneous Chores
+
+* release 2.19.1 ([#520](https://github.com/sondresjolyst/garge-api/issues/520)) ([fd4d78e](https://github.com/sondresjolyst/garge-api/commit/fd4d78e5708a083b7de00dfc9740e3f7b6e6ceec))
+
 ## [2.19.0](https://github.com/sondresjolyst/garge-api/compare/v2.18.1...v2.19.0) (2026-10-22)
 
 
