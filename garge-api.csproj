@@ -39,11 +39,11 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="SjolystInnovation.AppKit.AdminStats" Version="1.0.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Auth" Version="1.0.1" />
-    <PackageReference Include="SjolystInnovation.AppKit.Email" Version="1.1.0" />
-    <PackageReference Include="SjolystInnovation.AppKit.Hosting" Version="1.0.3" />
+    <PackageReference Include="SjolystInnovation.AppKit.Email" Version="1.3.0" />
+    <PackageReference Include="SjolystInnovation.AppKit.Hosting" Version="1.1.0" />
     <PackageReference Include="SjolystInnovation.AppKit.Pdf" Version="1.0.0" />
     <PackageReference Include="SjolystInnovation.AppKit.SiteSettings" Version="1.1.0" />
-    <PackageReference Include="SjolystInnovation.AppKit.Vipps" Version="1.0.0" />
+    <PackageReference Include="SjolystInnovation.AppKit.Vipps" Version="1.3.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.3.0" />
     <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="10.3.0" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
