@@ -364,6 +364,35 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_ActivatedForAStoppedSubscription_KeepsItStopped_AndMarksTheAgreementForStopping()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_late",
+            Status = SubscriptionStatus.Stopped
+        };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var subEmail = new Mock<ISubscriptionEmailService>();
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, subEmail: subEmail.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_late", msn = "msn-prod", eventId = "evt-late",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Stopped, updated.Status);
+        Assert.True(updated.AgreementStopPending);
+        Assert.Null(updated.StartDate);
+        subEmail.Verify(e => e.SendActivatedAsync(It.IsAny<int>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Webhook_Activated_VippsReturnsAddress_PopulatesBillingAddress()
     {
         using var db = CreateDbContext();

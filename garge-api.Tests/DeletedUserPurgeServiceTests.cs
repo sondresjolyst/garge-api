@@ -95,6 +95,28 @@ public class DeletedUserPurgeServiceTests
     }
 
     [Fact]
+    public async Task Purge_AgreementStillToBeStopped_KeepsUserUntilItIsStopped()
+    {
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        var sub = new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1,
+            Status = SubscriptionStatus.Stopped, AgreementStopPending = true,
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(0, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+        Assert.Single(db.Subscriptions);
+
+        sub.AgreementStopPending = false;
+        await db.SaveChangesAsync(Ct);
+        Assert.Equal(1, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+        Assert.Empty(db.Subscriptions);
+    }
+
+    [Fact]
     public async Task Purge_ActiveUser_Untouched()
     {
         using var db = NewDb();

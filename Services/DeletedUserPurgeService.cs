@@ -76,6 +76,8 @@ namespace garge_api.Services
             {
                 var orderIds = await db.Orders.Where(o => o.UserId == userId).Select(o => o.Id).ToListAsync(ct);
                 var subIds = await db.Subscriptions.Where(s => s.UserId == userId).Select(s => s.Id).ToListAsync(ct);
+                // A Vipps agreement still to be stopped keeps its subscription, so a late activation finds it.
+                if (await db.Subscriptions.AnyAsync(s => s.UserId == userId && s.AgreementStopPending, ct)) continue;
 
                 var invoiceDates = await db.Invoices
                     .Where(i => (i.OrderId != null && orderIds.Contains(i.OrderId.Value))
