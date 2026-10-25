@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.20.1](https://github.com/sondresjolyst/garge-api/compare/v2.20.0...v2.20.1) (2026-10-25)
+
+
+### Dependencies
+
+* **nuget:** Bump the aspnetcore group with 10 updates ([#528](https://github.com/sondresjolyst/garge-api/issues/528)) ([995ac24](https://github.com/sondresjolyst/garge-api/commit/995ac2420f35a8686551c63cecf6605bf7387f08))
+
 ## [2.20.0](https://github.com/sondresjolyst/garge-api/compare/v2.19.1...v2.20.0) (2026-10-23)
 
 
