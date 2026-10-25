@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.0](https://github.com/sondresjolyst/garge-api/compare/v2.20.1...v2.21.0) (2026-10-25)
+
+
+### Features
+
+* move the VAT threshold and the registration terms check to AppKit ([#531](https://github.com/sondresjolyst/garge-api/issues/531)) ([e58c922](https://github.com/sondresjolyst/garge-api/commit/e58c9225b53f52bba191052f01fc32e9fe80bc21))
+
 ## [2.20.1](https://github.com/sondresjolyst/garge-api/compare/v2.20.0...v2.20.1) (2026-10-25)
 
 
