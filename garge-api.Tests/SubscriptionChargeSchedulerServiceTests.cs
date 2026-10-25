@@ -885,6 +885,24 @@ public class SubscriptionChargeSchedulerServiceTests
     }
 
     [Fact]
+    public async Task Scheduler_APostedChargeThatWentQuiet_OnAnOpenAgreement_TellsTheAdminsOnce()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db);
+        var sub = await AddPostedChargeAsync(db, daysAgo: 8);
+        SetupAgreement(vipps, "ACTIVE");
+        SetupNotifier();
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        Notifier.Verify(n => n.NotifyUserAsync("admin-1", "A charge got no answer from Vipps",
+            It.Is<string>(m => m.Contains($"Subscription #{sub.Id}")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, sub.Status);
+    }
+
+    [Fact]
     public async Task Scheduler_APostedChargeStillWithinItsRetryDays_IsLeftAlone()
     {
         var (svc, vipps, db) = BuildHarness();

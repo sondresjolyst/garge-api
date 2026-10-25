@@ -14,7 +14,8 @@ namespace garge_api.Services
         private readonly ILogger<SubscriptionChargeSchedulerService> _logger;
         private static readonly TimeSpan Interval = TimeSpan.FromDays(1);
         private static readonly TimeSpan Lookahead = TimeSpan.FromDays(7);
-        // The retryDays the Vipps client sends with a charge when the request leaves it out.
+        // The retryDays sent with each charge: the default of VippsCreateChargeRequest.RetryDays in
+        // SjolystInnovation.AppKit.Vipps, which VippsService leaves as it is. The library has no public constant for it.
         private const int ChargeRetryDays = 5;
         // The alerts the admins got, by kind and charge key or subscription, so a failure that keeps coming back is
         // reported once. Sweeps run one at a time.
@@ -100,7 +101,7 @@ namespace garge_api.Services
                     var key = SubscriptionCharges.Key(sub.Id, dueDate, sub.FailedChargeAttempts);
                     if (sub.LastChargeKey == key)
                     {
-                        await StopIfPostedChargeWentQuietAsync(vipps, notifier, db, sub, key, dueDate, stoppingToken);
+                        await CheckQuietChargeAsync(vipps, notifier, db, sub, key, dueDate, stoppingToken);
                         continue;
                     }
                     var amountInOre = SubscriptionPricing.UnitPriceFor(sub, notices, dueDate) * sub.Quantity;
@@ -199,13 +200,20 @@ namespace garge_api.Services
 
         // A posted charge is captured or fails by its due date plus its retry days, and a webhook says which. When
         // neither came two days after that, the agreement may have been stopped with its webhook lost. The posted
-        // key then holds the subscription forever, so an agreement that has ended stops the subscription here.
-        private async Task StopIfPostedChargeWentQuietAsync(IVippsService vipps, ISecurityNotifier notifier, ApplicationDbContext db,
+        // key then holds the subscription forever, so an agreement that has ended stops the subscription here. An
+        // agreement that has not ended is reported once, so a charge that never gets a webhook is seen.
+        private async Task CheckQuietChargeAsync(IVippsService vipps, ISecurityNotifier notifier, ApplicationDbContext db,
             Subscription sub, string key, DateTime dueDate, CancellationToken ct)
         {
             if (dueDate.AddDays(ChargeRetryDays + 2) > DateTime.UtcNow) return;
             var ended = await SubscriptionAgreementStops.EndedStatusAsync(vipps, sub, _logger);
-            if (ended == null) return;
+            if (ended == null)
+            {
+                await AlertOnceAsync(notifier, db, $"quiet-open:{key}", "A charge got no answer from Vipps",
+                    $"Subscription #{sub.Id} ({sub.Product?.Name}) had a charge due {LocalTime.Format(dueDate, "yyyy-MM-dd")} that Vipps never reported as captured or failed, and its agreement has not ended. Check the charge in the Vipps portal.",
+                    $"garge-quiet-open-{sub.Id}", sub.Id, ct);
+                return;
+            }
             sub.Status = SubscriptionStatus.Stopped;
             sub.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
