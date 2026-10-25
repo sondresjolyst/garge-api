@@ -2,15 +2,18 @@ using garge_api.Helpers;
 using SjolystInnovation.AppKit.Hosting;
 using garge_api.Hubs;
 using garge_api.Models;
+using garge_api.Models.Subscription;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SjolystInnovation.AppKit.Auth;
 
 namespace garge_api.Services
 {
     /// <summary>
     /// Removes garge's own data for a deleted account inside the deletion transaction: telemetry moves
-    /// to the anonymized ML store, user-owned rows go, and the IP captured at terms acceptance is cleared.
+    /// to the anonymized ML store, user-owned rows go, subscriptions end, and the IP captured at terms
+    /// acceptance is cleared.
     /// </summary>
     public sealed class AccountDataEraser(ApplicationDbContext db, IAnonymizationService anonymizer, IDeviceOwnershipService ownership)
         : IAccountDataEraser<User>
@@ -48,6 +51,20 @@ namespace garge_api.Services
             foreach (var sid in sensorIds) ownership.InvalidateSensor(sid);
             foreach (var sid in switchIds) ownership.InvalidateSwitch(sid);
 
+            // Every subscription that has not ended, add-ons included, is stopped the way a cancel stops it, so the
+            // charge scheduler never charges it again. Vipps is told once the deletion commits. The subscriptions
+            // and their invoices stay, since bokføringsloven keeps them.
+            var now = DateTime.UtcNow;
+            var openSubscriptions = await db.Subscriptions
+                .Where(s => s.UserId == userId && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Pending))
+                .ToListAsync(cancellationToken);
+            foreach (var sub in openSubscriptions)
+            {
+                sub.Status = SubscriptionStatus.Stopped;
+                sub.UpdatedAt = now;
+                sub.AgreementStopRequestedAt = now;
+            }
+
             // Not part of the bokføringsloven invoice record, so it has no basis to outlive the account.
             user.TermsAcceptedIp = null;
         }
@@ -71,6 +88,28 @@ namespace garge_api.Services
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "ForceDisconnectHubAsync: send forceLogout failed for user {UserId}", LogSanitizer.Sanitize(userId));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops the Vipps agreements of the subscriptions the deletion ended, once it commits. A stop that fails stays
+    /// marked, and the charge scheduler tries it again. A stopped subscription is never charged either way.
+    /// </summary>
+    public sealed class AccountSubscriptionStop(ApplicationDbContext db, IVippsService vipps, IOptions<VippsSettings> settings, ILogger<AccountSubscriptionStop> logger)
+        : IAccountDeletedHandler<User>
+    {
+        public async Task OnDeletedAsync(User user, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var pending = await SubscriptionAgreementStops.PendingAsync(db, cancellationToken, user.Id);
+                await SubscriptionAgreementStops.StopAsync(db, vipps, settings.Value, pending, logger, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // The deletion has committed, so a failure here must not reach the caller. The scheduler retries.
+                logger.LogError(ex, "Stopping the Vipps agreements after an account deletion failed, the charge scheduler tries again");
             }
         }
     }

@@ -74,6 +74,13 @@ namespace garge_api.Models.Subscription
         [MaxLength(50)]
         public string? LastChargeFailureReason { get; set; }
 
+        /// <summary>
+        /// When the subscription was stopped here while its Vipps agreement still had to be stopped, or null. Set when
+        /// the account is deleted, or when Vipps activates the agreement of a stopped subscription. Cleared once the
+        /// agreement is stopped, or has ended in Vipps without being active.
+        /// </summary>
+        public DateTime? AgreementStopRequestedAt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

@@ -2016,6 +2016,9 @@ namespace garge_api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("AgreementStopRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("BillingAddress")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");

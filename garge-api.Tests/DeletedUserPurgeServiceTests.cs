@@ -95,6 +95,82 @@ public class DeletedUserPurgeServiceTests
     }
 
     [Fact]
+    public async Task Purge_AgreementStillToBeStopped_KeepsUserUntilItIsStopped()
+    {
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        var sub = new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow,
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(0, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+        Assert.Single(db.Subscriptions);
+
+        sub.AgreementStopRequestedAt = null;
+        await db.SaveChangesAsync(Ct);
+        Assert.Equal(1, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+        Assert.Empty(db.Subscriptions);
+    }
+
+    private static VippsSettings LiveOnly() => new()
+    {
+        BaseUrl = "https://api.vipps.no", ClientId = "id", ClientSecret = "s", SubscriptionKey = "k", MerchantSerialNumber = "m",
+    };
+
+    [Theory]
+    [InlineData(true, 1)]
+    [InlineData(false, 0)]
+    public async Task Purge_AMarkOlderThan30Days_StopsHolding_OnlyInAnEnvironmentWithoutCredentials(bool isTest, int expectedPurged)
+    {
+        // Only live credentials are set, so a test subscription cannot be stopped from here.
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1, IsTest = isTest,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow.AddDays(-31),
+        });
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(expectedPurged, await DeletedUserPurgeService.PurgeAsync(db, Ct, LiveOnly()));
+        Assert.Equal(1 - expectedPurged, db.Subscriptions.Count());
+    }
+
+    [Fact]
+    public async Task Purge_AYoungMark_HoldsTheUser_EvenWithoutCredentials()
+    {
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1, IsTest = true,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow.AddDays(-29),
+        });
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(0, await DeletedUserPurgeService.PurgeAsync(db, Ct, LiveOnly()));
+    }
+
+    [Fact]
+    public async Task Purge_WithoutSettings_AnOldMarkStillHolds()
+    {
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1, IsTest = true,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow.AddYears(-2),
+        });
+        await db.SaveChangesAsync(Ct);
+
+        Assert.Equal(0, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+    }
+
+    [Fact]
     public async Task Purge_ActiveUser_Untouched()
     {
         using var db = NewDb();

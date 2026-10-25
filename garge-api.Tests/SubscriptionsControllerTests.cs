@@ -58,7 +58,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
     private static VippsWebhookCall CreateWebhook(
         ApplicationDbContext db,
         Mock<IVippsService>? vipps = null, AppSettings? settings = null,
-        IInvoiceService? invoice = null, ISubscriptionEmailService? subEmail = null)
+        IInvoiceService? invoice = null, ISubscriptionEmailService? subEmail = null, ISecurityNotifier? notifier = null)
     {
         var vippsService = (vipps ?? MockVipps()).Object;
         var invoiceService = invoice ?? new Mock<IInvoiceService>().Object;
@@ -72,6 +72,7 @@ public class SubscriptionsControllerTests : ControllerTestBase
             services.AddSingleton(invoiceService);
             services.AddSingleton(email);
             services.AddSingleton(push.Object);
+            services.AddSingleton(notifier ?? new Mock<ISecurityNotifier>().Object);
         });
     }
 
@@ -361,6 +362,144 @@ public class SubscriptionsControllerTests : ControllerTestBase
 
         var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
         Assert.Equal(occurred, updated.StartDate);
+    }
+
+    [Fact]
+    public async Task Webhook_ActivatedForAStoppedSubscription_KeepsItStopped_AndMarksTheAgreementForStopping()
+    {
+        using var db = CreateDbContext();
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 1,
+            VippsAgreementId = "agr_late",
+            Status = SubscriptionStatus.Stopped
+        };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var subEmail = new Mock<ISubscriptionEmailService>();
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, subEmail: subEmail.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_late", msn = "msn-prod", eventId = "evt-late",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        var updated = await db.Subscriptions.FirstAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Stopped, updated.Status);
+        Assert.NotNull(updated.AgreementStopRequestedAt);
+        Assert.Null(updated.StartDate);
+        subEmail.Verify(e => e.SendActivatedAsync(It.IsAny<int>()), Times.Never);
+    }
+
+    private static async Task<Mock<ISecurityNotifier>> AdminNotifierAsync(ApplicationDbContext db)
+    {
+        db.Roles.Add(new Microsoft.AspNetCore.Identity.IdentityRole { Id = "role-admin", Name = "Admin", NormalizedName = "ADMIN" });
+        db.UserRoles.Add(new Microsoft.AspNetCore.Identity.IdentityUserRole<string> { UserId = "admin-1", RoleId = "role-admin" });
+        await db.SaveChangesAsync();
+        var notifier = new Mock<ISecurityNotifier>();
+        notifier.Setup(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        return notifier;
+    }
+
+    [Theory]
+    [InlineData("recurring.agreement-activated.v1", "activated the agreement")]
+    [InlineData("recurring.charge-captured.v1", "captured 59.00 kr")]
+    public async Task Webhook_ActivationOrCaptureForAStoppedSubscription_TellsTheAdmins(string eventType, string expected)
+    {
+        using var db = CreateDbContext();
+        db.Products.Add(new Product { Id = 51, Name = "Garge Basic", PriceInOre = 5900, Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true });
+        var sub = new Subscription
+        {
+            UserId = "user-1", ProductId = 51, VippsAgreementId = "agr_stopped", Status = SubscriptionStatus.Stopped,
+            StartDate = DateTime.UtcNow.AddMonths(-1), NextChargeDate = DateTime.UtcNow.Date.AddDays(3)
+        };
+        db.Subscriptions.Add(sub);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var notifier = await AdminNotifierAsync(db);
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, notifier: notifier.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_stopped", msn = "msn-prod", eventId = $"evt-{eventType}", eventType,
+            occurred = DateTime.UtcNow, chargeId = "chr-late", amount = 5900, amountCaptured = 5900
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        notifier.Verify(n => n.NotifyUserAsync("admin-1", "Vipps event for a stopped subscription",
+            It.Is<string>(m => m.Contains(expected) && m.Contains($"subscription #{sub.Id}")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(SubscriptionStatus.Stopped, (await db.Subscriptions.SingleAsync(TestContext.Current.CancellationToken)).Status);
+    }
+
+    [Theory]
+    [InlineData("STOPPED", 0)]
+    [InlineData("ACTIVE", 1)]
+    public async Task Webhook_ActivationOfAStoppedSubscription_TellsTheAdminsOnlyWhenTheAgreementIsActive(string agreement, int alerts)
+    {
+        using var db = CreateDbContext();
+        db.Subscriptions.Add(new Subscription { UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_late2", Status = SubscriptionStatus.Stopped });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var notifier = await AdminNotifierAsync(db);
+        var vipps = MockVipps();
+        vipps.Setup(v => v.GetAgreementAsync("agr_late2", It.IsAny<bool?>())).ReturnsAsync(new VippsAgreement { Id = "agr_late2", Status = agreement });
+
+        var ctrl = CreateWebhook(db, vipps, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, notifier: notifier.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_late2", msn = "msn-prod", eventId = $"evt-late2-{agreement}",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        notifier.Verify(n => n.NotifyUserAsync(It.IsAny<string>(), "Vipps event for a stopped subscription", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(alerts));
+    }
+
+    [Fact]
+    public async Task Webhook_CaptureForAnActiveSubscription_TellsNoAdmin()
+    {
+        using var db = CreateDbContext();
+        db.Products.Add(new Product { Id = 52, Name = "Garge Basic", PriceInOre = 5900, Interval = BillingInterval.Monthly, Type = ProductType.Primary, IsActive = true });
+        db.Subscriptions.Add(new Subscription { UserId = "user-1", ProductId = 52, VippsAgreementId = "agr_active", Status = SubscriptionStatus.Active, StartDate = DateTime.UtcNow.AddMonths(-1) });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var notifier = await AdminNotifierAsync(db);
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" }, notifier: notifier.Object);
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_active", msn = "msn-prod", eventId = "evt-active-capture", eventType = "recurring.charge-captured.v1",
+            occurred = DateTime.UtcNow, chargeId = "chr-ok", amount = 5900
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        notifier.Verify(n => n.NotifyUserAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Webhook_EachActivationOfAStoppedSubscription_GivesAFreshMark()
+    {
+        using var db = CreateDbContext();
+        var old = DateTime.UtcNow.AddDays(-40);
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_again", Status = SubscriptionStatus.Stopped,
+            AgreementStopRequestedAt = old
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var before = DateTime.UtcNow;
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_again", msn = "msn-prod", eventId = "evt-again",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        var mark = (await db.Subscriptions.SingleAsync(TestContext.Current.CancellationToken)).AgreementStopRequestedAt;
+        Assert.NotNull(mark);
+        Assert.True(mark >= before, $"{mark} should be after {before}");
     }
 
     [Fact]

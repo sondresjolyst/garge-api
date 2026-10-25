@@ -101,6 +101,7 @@ namespace garge_api
             builder.Services.AddAppKitAccounts<User, ApplicationDbContext>(o => o.AdminRole = RoleNames.Admin);
             builder.Services.AddScoped<IAccountDataEraser<User>, AccountDataEraser>();
             builder.Services.AddScoped<IAccountDeletedHandler<User>, AccountHubDisconnect>();
+            builder.Services.AddScoped<IAccountDeletedHandler<User>, AccountSubscriptionStop>();
             builder.Services.AddAppKitAuth<ApplicationDbContext>(builder.Configuration.GetSection("Jwt"));
             builder.Services.AddProblemDetails();
             builder.Services.AddEndpointsApiExplorer();
