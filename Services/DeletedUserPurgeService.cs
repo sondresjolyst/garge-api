@@ -74,10 +74,14 @@ namespace garge_api.Services
             var purged = 0;
             foreach (var userId in deletedUserIds)
             {
+                // A Vipps agreement still to be stopped keeps its subscription, so a late activation finds it. A mark
+                // older than 30 days, for example in an environment without credentials, which the admins were told
+                // of, no longer holds the purge back.
+                var markedSince = now - SubscriptionAgreementStops.MarkHoldsPurge;
+                if (await db.Subscriptions.AnyAsync(s => s.UserId == userId && s.AgreementStopRequestedAt > markedSince, ct)) continue;
+
                 var orderIds = await db.Orders.Where(o => o.UserId == userId).Select(o => o.Id).ToListAsync(ct);
                 var subIds = await db.Subscriptions.Where(s => s.UserId == userId).Select(s => s.Id).ToListAsync(ct);
-                // A Vipps agreement still to be stopped keeps its subscription, so a late activation finds it.
-                if (await db.Subscriptions.AnyAsync(s => s.UserId == userId && s.AgreementStopPending, ct)) continue;
 
                 var invoiceDates = await db.Invoices
                     .Where(i => (i.OrderId != null && orderIds.Contains(i.OrderId.Value))

@@ -2016,8 +2016,8 @@ namespace garge_api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<bool>("AgreementStopPending")
-                        .HasColumnType("boolean");
+                    b.Property<DateTime?>("AgreementStopRequestedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("BillingAddress")
                         .HasMaxLength(500)
@@ -2046,9 +2046,6 @@ namespace garge_api.Migrations
                     b.Property<string>("LastChargeKey")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime?>("LastChargeRefusedAt")
-                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("NextChargeDate")
                         .HasColumnType("timestamp with time zone");

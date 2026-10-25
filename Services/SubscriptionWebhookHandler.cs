@@ -11,6 +11,7 @@ namespace garge_api.Services
         IInvoiceService invoice,
         ISubscriptionEmailService subEmail,
         IWebPushService push,
+        ISecurityNotifier notifier,
         ILogger<SubscriptionWebhookHandler> logger) : IVippsRecurringWebhookHandler
     {
         public async Task<VippsWebhookOutcome> HandleAsync(VippsWebhookDelivery<VippsRecurringEvent> delivery, CancellationToken cancellationToken)
@@ -36,6 +37,7 @@ namespace garge_api.Services
             }
 
             var wasActive = subscription.Status == SubscriptionStatus.Active;
+            var wasStopped = subscription.Status == SubscriptionStatus.Stopped;
             var chargeFailureCounted = false;
 
             switch (payload.EventType)
@@ -43,7 +45,7 @@ namespace garge_api.Services
                 case VippsEvents.AgreementActivated when subscription.Status == SubscriptionStatus.Stopped:
                     // A stopped subscription, for example of a deleted account, is not started again. Its agreement
                     // is stopped in Vipps instead, by the charge scheduler.
-                    subscription.AgreementStopPending = true;
+                    subscription.AgreementStopRequestedAt ??= DateTime.UtcNow;
                     logger.LogWarning("Webhook: agreement {AgreementId} activated for stopped subscription {SubscriptionId}, stopping it",
                         payload.AgreementId, subscription.Id);
                     break;
@@ -123,7 +125,12 @@ namespace garge_api.Services
             }
 
             subscription.UpdatedAt = DateTime.UtcNow;
-            return VippsWebhookOutcome.Applied(_ => AfterCommitAsync(subscription, payload, occurred, wasActive, chargeFailureCounted));
+            return VippsWebhookOutcome.Applied(async _ =>
+            {
+                await AfterCommitAsync(subscription, payload, occurred, wasActive, chargeFailureCounted);
+                if (wasStopped && payload.EventType is VippsEvents.AgreementActivated or VippsEvents.ChargeCaptured)
+                    await AlertStoppedAsync(subscription, payload);
+            });
         }
 
         private async Task AfterCommitAsync(Subscription subscription, VippsRecurringEvent payload, DateTime? occurred, bool wasActive, bool chargeFailureCounted)
@@ -191,6 +198,25 @@ namespace garge_api.Services
                     subscription.LastChargeFailureReason == SubscriptionCharges.AmountTooHigh
                         ? "The charge for your Garge subscription is above the maximum amount you approved. Approve the new amount in the Vipps app."
                         : "We couldn't charge your Garge subscription. Please update your payment method in Vipps.");
+            }
+        }
+
+        // A stopped subscription, for example of a deleted account, should never be activated or charged again. The
+        // admins are told, so a captured charge can be refunded by hand. Nothing is refunded here.
+        private async Task AlertStoppedAsync(Subscription subscription, VippsRecurringEvent payload)
+        {
+            var amount = payload.AmountCaptured ?? payload.Amount;
+            var message = payload.EventType == VippsEvents.ChargeCaptured
+                ? $"Vipps captured {(amount is int ore ? $"{MoneyFormat.Nok(ore)} kr" : "a charge")} for subscription #{subscription.Id}, which is stopped. Check whether it has to be refunded."
+                : $"Vipps activated the agreement of subscription #{subscription.Id}, which is stopped. The agreement is being stopped. Check whether its initial charge has to be refunded.";
+            try
+            {
+                if (!await notifier.NotifyAdminsAsync(db, "Vipps event for a stopped subscription", message, $"garge-stopped-sub-{subscription.Id}"))
+                    logger.LogError("The alert for stopped subscription {SubscriptionId} reached no admin", subscription.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Could not tell the admins about stopped subscription {SubscriptionId}", subscription.Id);
             }
         }
 

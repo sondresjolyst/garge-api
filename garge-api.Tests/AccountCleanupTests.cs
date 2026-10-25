@@ -159,15 +159,15 @@ public class AccountCleanupTests : ControllerTestBase
         foreach (var sub in new[] { primary, addOn, pending })
         {
             Assert.Equal(SubscriptionStatus.Stopped, sub.Status);
-            Assert.True(sub.AgreementStopPending);
+            Assert.NotNull(sub.AgreementStopRequestedAt);
             Assert.True(sub.UpdatedAt >= before);
             // A cancel keeps the date the paid period ends.
             Assert.Equal(new DateTime(2026, 6, 20, 0, 0, 0, DateTimeKind.Utc), sub.NextChargeDate);
         }
         Assert.Equal(SubscriptionStatus.Expired, ended.Status);
-        Assert.False(ended.AgreementStopPending);
+        Assert.Null(ended.AgreementStopRequestedAt);
         Assert.Equal(SubscriptionStatus.Active, others.Status);
-        Assert.False(others.AgreementStopPending);
+        Assert.Null(others.AgreementStopRequestedAt);
         Assert.Equal(5, db.Subscriptions.Count());
         Assert.Equal("chr-1", Assert.Single(db.Invoices).VippsChargeId);
     }
@@ -182,7 +182,7 @@ public class AccountCleanupTests : ControllerTestBase
         var live = Sub("agr_live", SubscriptionStatus.Stopped);
         var test = Sub("agr_test", SubscriptionStatus.Stopped, isTest: true);
         var others = Sub("agr_other", SubscriptionStatus.Stopped, userId: "someone-else");
-        foreach (var s in new[] { live, test, others }) s.AgreementStopPending = true;
+        foreach (var s in new[] { live, test, others }) s.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.AddRange(live, test, others);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -192,9 +192,9 @@ public class AccountCleanupTests : ControllerTestBase
         vipps.Verify(v => v.CancelAgreementAsync("agr_live", It.Is<string>(k => k.StartsWith($"stop-{live.Id}-")), false), Times.Once);
         vipps.Verify(v => v.CancelAgreementAsync("agr_test", It.Is<string>(k => k.StartsWith($"stop-{test.Id}-")), true), Times.Once);
         vipps.Verify(v => v.CancelAgreementAsync("agr_other", It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
-        Assert.False(live.AgreementStopPending);
-        Assert.False(test.AgreementStopPending);
-        Assert.True(others.AgreementStopPending);
+        Assert.Null(live.AgreementStopRequestedAt);
+        Assert.Null(test.AgreementStopRequestedAt);
+        Assert.NotNull(others.AgreementStopRequestedAt);
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public class AccountCleanupTests : ControllerTestBase
         using var db = CreateDbContext();
         var first = Sub("agr_down", SubscriptionStatus.Stopped);
         var second = Sub("agr_up", SubscriptionStatus.Stopped);
-        first.AgreementStopPending = second.AgreementStopPending = true;
+        first.AgreementStopRequestedAt = second.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.AddRange(first, second);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -212,8 +212,8 @@ public class AccountCleanupTests : ControllerTestBase
 
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
-        Assert.True(first.AgreementStopPending);
-        Assert.False(second.AgreementStopPending);
+        Assert.NotNull(first.AgreementStopRequestedAt);
+        Assert.Null(second.AgreementStopRequestedAt);
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_live", SubscriptionStatus.Stopped);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -237,16 +237,18 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_unknown", SubscriptionStatus.Stopped);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
         vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
             .ThrowsAsync(new HttpRequestException("gone", null, HttpStatusCode.NotFound));
+        vipps.Setup(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("gone", null, HttpStatusCode.NotFound));
 
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
-        Assert.False(sub.AgreementStopPending);
+        Assert.Null(sub.AgreementStopRequestedAt);
     }
 
     [Theory]
@@ -258,7 +260,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_refused", SubscriptionStatus.Stopped, isTest: true);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -268,7 +270,7 @@ public class AccountCleanupTests : ControllerTestBase
 
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
-        Assert.Equal(kept, sub.AgreementStopPending);
+        Assert.Equal(kept, sub.AgreementStopRequestedAt != null);
     }
 
     [Fact]
@@ -276,7 +278,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_refused", SubscriptionStatus.Stopped);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -287,7 +289,7 @@ public class AccountCleanupTests : ControllerTestBase
 
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
-        Assert.True(sub.AgreementStopPending);
+        Assert.NotNull(sub.AgreementStopRequestedAt);
     }
 
     [Fact]
@@ -295,7 +297,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("", SubscriptionStatus.Stopped);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -303,7 +305,7 @@ public class AccountCleanupTests : ControllerTestBase
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
         vipps.Verify(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
-        Assert.False(sub.AgreementStopPending);
+        Assert.Null(sub.AgreementStopRequestedAt);
     }
 
     [Theory]
@@ -314,7 +316,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_live", SubscriptionStatus.Stopped);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -323,7 +325,7 @@ public class AccountCleanupTests : ControllerTestBase
 
         await StopHandler(db, vipps).OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
-        Assert.True(sub.AgreementStopPending);
+        Assert.NotNull(sub.AgreementStopRequestedAt);
     }
 
     [Fact]
@@ -331,7 +333,7 @@ public class AccountCleanupTests : ControllerTestBase
     {
         using var db = CreateDbContext();
         var sub = Sub("agr_test", SubscriptionStatus.Stopped, isTest: true);
-        sub.AgreementStopPending = true;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
         var vipps = new Mock<IVippsService>();
@@ -340,7 +342,7 @@ public class AccountCleanupTests : ControllerTestBase
             .OnDeletedAsync(MakeDbUser(), TestContext.Current.CancellationToken);
 
         vipps.Verify(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
-        Assert.True(sub.AgreementStopPending);
+        Assert.NotNull(sub.AgreementStopRequestedAt);
     }
 
     [Fact]
@@ -399,6 +401,6 @@ public class AccountCleanupTests : ControllerTestBase
 
         Assert.Equal((true, SubscriptionStatus.Stopped), seenAtStop);
         using var check = provider.CreateScope();
-        Assert.False(check.ServiceProvider.GetRequiredService<ApplicationDbContext>().Subscriptions.Single().AgreementStopPending);
+        Assert.Null(check.ServiceProvider.GetRequiredService<ApplicationDbContext>().Subscriptions.Single().AgreementStopRequestedAt);
     }
 }

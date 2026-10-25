@@ -102,7 +102,7 @@ public class DeletedUserPurgeServiceTests
         var sub = new Subscription
         {
             UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1,
-            Status = SubscriptionStatus.Stopped, AgreementStopPending = true,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow,
         };
         db.Subscriptions.Add(sub);
         await db.SaveChangesAsync(Ct);
@@ -110,8 +110,24 @@ public class DeletedUserPurgeServiceTests
         Assert.Equal(0, await DeletedUserPurgeService.PurgeAsync(db, Ct));
         Assert.Single(db.Subscriptions);
 
-        sub.AgreementStopPending = false;
+        sub.AgreementStopRequestedAt = null;
         await db.SaveChangesAsync(Ct);
+        Assert.Equal(1, await DeletedUserPurgeService.PurgeAsync(db, Ct));
+        Assert.Empty(db.Subscriptions);
+    }
+
+    [Fact]
+    public async Task Purge_AMarkOlderThan30Days_NoLongerHoldsThePurge()
+    {
+        using var db = NewDb();
+        AddDeletedUser(db, "u1");
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "u1", ProductId = 1, VippsAgreementId = "agr-u1", Quantity = 1,
+            Status = SubscriptionStatus.Stopped, AgreementStopRequestedAt = DateTime.UtcNow.AddDays(-31),
+        });
+        await db.SaveChangesAsync(Ct);
+
         Assert.Equal(1, await DeletedUserPurgeService.PurgeAsync(db, Ct));
         Assert.Empty(db.Subscriptions);
     }

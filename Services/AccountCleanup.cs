@@ -62,7 +62,7 @@ namespace garge_api.Services
             {
                 sub.Status = SubscriptionStatus.Stopped;
                 sub.UpdatedAt = now;
-                sub.AgreementStopPending = true;
+                sub.AgreementStopRequestedAt = now;
             }
 
             // Not part of the bokføringsloven invoice record, so it has no basis to outlive the account.

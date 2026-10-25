@@ -11,15 +11,8 @@ namespace garge_api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<bool>(
-                name: "AgreementStopPending",
-                table: "Subscriptions",
-                type: "boolean",
-                nullable: false,
-                defaultValue: false);
-
             migrationBuilder.AddColumn<DateTime>(
-                name: "LastChargeRefusedAt",
+                name: "AgreementStopRequestedAt",
                 table: "Subscriptions",
                 type: "timestamp with time zone",
                 nullable: true);
@@ -29,11 +22,7 @@ namespace garge_api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "AgreementStopPending",
-                table: "Subscriptions");
-
-            migrationBuilder.DropColumn(
-                name: "LastChargeRefusedAt",
+                name: "AgreementStopRequestedAt",
                 table: "Subscriptions");
         }
     }

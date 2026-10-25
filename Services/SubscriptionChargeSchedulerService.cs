@@ -13,11 +13,8 @@ namespace garge_api.Services
         private readonly ILogger<SubscriptionChargeSchedulerService> _logger;
         private static readonly TimeSpan Interval = TimeSpan.FromDays(1);
         private static readonly TimeSpan Lookahead = TimeSpan.FromDays(7);
-        // Every start of the service runs a sweep, so a refused charge waits this long before its next attempt.
-        // Restarts and replicas then do not use up the attempts within hours.
-        internal static readonly TimeSpan RefusalRetryDelay = TimeSpan.FromHours(20);
-        // The charge keys the admins were told about, so a charge that keeps failing is reported once. Sweeps run
-        // one at a time.
+        // The alerts the admins got, by kind and charge key or subscription, so a failure that keeps coming back is
+        // reported once. Sweeps run one at a time.
         private readonly HashSet<string> _alertedKeys = [];
 
         public SubscriptionChargeSchedulerService(
@@ -52,8 +49,12 @@ namespace garge_api.Services
 
                 var email = scope.ServiceProvider.GetRequiredService<ISubscriptionEmailService>();
 
-                await SubscriptionAgreementStops.StopAsync(db, vipps, _vippsOpts,
-                    await SubscriptionAgreementStops.PendingAsync(db, stoppingToken), _logger, stoppingToken);
+                var stops = await SubscriptionAgreementStops.PendingAsync(db, stoppingToken);
+                foreach (var sub in stops.Where(s => !_vippsOpts.IsConfigured(s.IsTest)))
+                    await AlertOnceAsync(notifier, db, $"stop-unconfigured:{sub.Id}", "A Vipps agreement cannot be stopped",
+                        $"Subscription #{sub.Id} is stopped, but its Vipps agreement is in the {(sub.IsTest ? "test" : "production")} environment, which has no credentials here. Stop it in the Vipps portal.",
+                        $"garge-stop-unconfigured-{sub.Id}", sub.Id, stoppingToken);
+                await SubscriptionAgreementStops.StopAsync(db, vipps, _vippsOpts, stops, _logger, stoppingToken);
 
                 var due = await db.Subscriptions
                     .Include(s => s.Product)
@@ -78,7 +79,6 @@ namespace garge_api.Services
                     // may have stopped this one since.
                     await db.Entry(sub).ReloadAsync(stoppingToken);
                     if (sub.Status != SubscriptionStatus.Active || sub.FailedChargeAttempts >= SubscriptionCharges.MaxAttempts) continue;
-                    if (sub.LastChargeRefusedAt > DateTime.UtcNow - RefusalRetryDelay) continue;
                     if (sub.Product == null || !sub.NextChargeDate.HasValue) continue;
                     if (!_vippsOpts.IsConfigured(sub.IsTest))
                     {
@@ -109,25 +109,26 @@ namespace garge_api.Services
                     }
                     catch (Exception ex) when (IsChargeRefusal(ex))
                     {
-                        // Vipps answers a reused key with the same refusal, so the refusal counts as a failed attempt
-                        // and the next attempt gets its own key. The attempt limit then stops the agreement.
-                        sub.FailedChargeAttempts++;
-                        sub.LastChargeFailureReason = null;
-                        sub.LastChargeRefusedAt = DateTime.UtcNow;
-                        sub.UpdatedAt = DateTime.UtcNow;
-                        await db.SaveChangesAsync(stoppingToken);
-                        _logger.LogError(ex, "ChargeScheduler: Vipps refused charge attempt {Attempt} of {Max} for subscription {SubId} due {DueDate}",
-                            sub.FailedChargeAttempts, SubscriptionCharges.MaxAttempts, sub.Id, dueDate);
-                        await AlertAdminsAsync(notifier, db, sub, key, amountInOre, dueDate,
-                            sub.FailedChargeAttempts >= SubscriptionCharges.MaxAttempts
-                                ? $"That was the last of {SubscriptionCharges.MaxAttempts} attempts, so the subscription is stopped."
-                                : $"That was attempt {sub.FailedChargeAttempts} of {SubscriptionCharges.MaxAttempts}. The next daily run posts a new charge, and the agreement is stopped after {SubscriptionCharges.MaxAttempts} failed attempts.",
-                            stoppingToken);
-                        // The subscriber hears of it too, as with a charge that fails at Vipps.
-                        if (sub.FailedChargeAttempts < SubscriptionCharges.MaxAttempts)
+                        // A 400 or 404 can come from the access token or from the request as well as from the agreement,
+                        // so the agreement decides. One that has ended can never be charged, and the subscription stops
+                        // at once. Otherwise nothing is counted and the key stays, so the period is never charged twice.
+                        var ended = await SubscriptionAgreementStops.EndedStatusAsync(vipps, sub, _logger);
+                        if (ended != null)
                         {
-                            try { await email.SendChargeFailedAsync(sub.Id); }
-                            catch (Exception mailEx) { _logger.LogError(mailEx, "Charge-failed email failed for subscription {SubscriptionId}", sub.Id); }
+                            sub.Status = SubscriptionStatus.Stopped;
+                            sub.UpdatedAt = DateTime.UtcNow;
+                            await db.SaveChangesAsync(stoppingToken);
+                            _logger.LogWarning(ex, "ChargeScheduler: stopped subscription {SubId}, its Vipps agreement is {Status}", sub.Id, ended);
+                            await AlertAdminsAsync(notifier, db, sub, "agreement-ended", key, amountInOre, dueDate,
+                                $"Its agreement is {ended} at Vipps, so the subscription is stopped.", stoppingToken);
+                        }
+                        else
+                        {
+                            _logger.LogError(ex, "ChargeScheduler: Vipps refused the charge for subscription {SubId} due {DueDate}, its agreement has not ended",
+                                sub.Id, dueDate);
+                            await AlertAdminsAsync(notifier, db, sub, "refused", key, amountInOre, dueDate,
+                                "Its agreement has not ended at Vipps, so it is not counted against the subscriber and the same charge is tried again with the next daily run. Check the error in the log and the agreement in the Vipps portal.",
+                                stoppingToken);
                         }
                     }
                     catch (Exception ex)
@@ -136,13 +137,13 @@ namespace garge_api.Services
                         // accept. It is not counted, and the next run posts it again with the same key.
                         _logger.LogError(ex, "ChargeScheduler: failed to post charge for subscription {SubId} due {DueDate}",
                             sub.Id, dueDate);
-                        await AlertAdminsAsync(notifier, db, sub, key, amountInOre, dueDate,
+                        await AlertAdminsAsync(notifier, db, sub, "failed", key, amountInOre, dueDate,
                             "It is tried again with the next daily run. Check the agreement in the Vipps portal if it keeps failing.",
                             stoppingToken);
                     }
                 }
 
-                // After the charges, so a subscription that just reached the attempt limit is stopped in this run.
+                // Subscriptions that reached the attempt limit through charges that failed at Vipps.
                 await StopUnpaidAsync(db, vipps, email, stoppingToken);
             }
             catch (OperationCanceledException) { }
@@ -152,31 +153,34 @@ namespace garge_api.Services
             }
         }
 
-        // Tells the admins, so a charge Vipps does not take is not only in the log. Each charge key is reported
-        // once: a refusal moves on to a new key, and a charge that keeps failing with its key is not reported
-        // again with every run.
-        private async Task AlertAdminsAsync(ISecurityNotifier notifier, ApplicationDbContext db, Subscription sub,
-            string key, int amountInOre, DateTime dueDate, string next, CancellationToken ct)
+        // Tells the admins, so a charge Vipps does not take is not only in the log. Each kind of failure is reported
+        // once for each charge key, so a failure that keeps coming back is not reported again with every run.
+        private Task AlertAdminsAsync(ISecurityNotifier notifier, ApplicationDbContext db, Subscription sub,
+            string kind, string key, int amountInOre, DateTime dueDate, string next, CancellationToken ct) =>
+            AlertOnceAsync(notifier, db, $"{kind}:{key}", "Vipps refused a charge",
+                $"Vipps did not take the charge of {MoneyFormat.Nok(amountInOre)} kr due {LocalTime.Format(dueDate, "yyyy-MM-dd")} for subscription #{sub.Id} ({sub.Product?.Name}). {next}",
+                $"garge-charge-refused-{sub.Id}", sub.Id, ct);
+
+        // Sends the alert unless one with this key already reached an admin. One that reached nobody is sent again.
+        private async Task AlertOnceAsync(ISecurityNotifier notifier, ApplicationDbContext db, string alertKey,
+            string title, string message, string tag, int subscriptionId, CancellationToken ct)
         {
-            if (_alertedKeys.Contains(key)) return;
+            if (_alertedKeys.Contains(alertKey)) return;
             try
             {
-                var reached = await notifier.NotifyAdminsAsync(db, "Vipps refused a charge",
-                    $"Vipps did not take the charge of {MoneyFormat.Nok(amountInOre)} kr due {LocalTime.Format(dueDate, "yyyy-MM-dd")} for subscription #{sub.Id} ({sub.Product?.Name}). {next}",
-                    $"garge-charge-refused-{sub.Id}", ct);
-                if (reached)
-                    _alertedKeys.Add(key);
+                if (await notifier.NotifyAdminsAsync(db, title, message, tag, ct))
+                    _alertedKeys.Add(alertKey);
                 else
-                    _logger.LogError("ChargeScheduler: the refused charge for subscription {SubId} reached no admin", sub.Id);
+                    _logger.LogError("ChargeScheduler: the alert for subscription {SubId} reached no admin", subscriptionId);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ChargeScheduler: could not tell the admins about the refused charge for subscription {SubId}", sub.Id);
+                _logger.LogError(ex, "ChargeScheduler: could not tell the admins about subscription {SubId}", subscriptionId);
             }
         }
 
-        // Only a 400 or a 404 counts. A 401 or a 403 means credentials or merchant settings Vipps does not accept,
-        // which the subscriber cannot fix and must not be stopped for.
+        // A 400 or a 404 may mean the agreement has ended, which the agreement itself then has to confirm. A 401 or a
+        // 403 means credentials or merchant settings Vipps does not accept, which the subscriber is never stopped for.
         internal static bool IsChargeRefusal(Exception ex) =>
             ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.NotFound };
 
@@ -190,15 +194,7 @@ namespace garge_api.Services
             foreach (var sub in unpaid)
             {
                 if (!_vippsOpts.IsConfigured(sub.IsTest)) continue;
-                try
-                {
-                    await vipps.CancelAgreementAsync(sub.VippsAgreementId, $"cancel-{sub.Id}", sub.IsTest);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "ChargeScheduler: cancel failed for unpaid subscription {SubId}", sub.Id);
-                    continue;
-                }
+                if (!await SubscriptionAgreementStops.StopOneAsync(vipps, sub, _logger)) continue;
                 sub.Status = SubscriptionStatus.Stopped;
                 sub.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(stoppingToken);
