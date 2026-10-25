@@ -45,7 +45,7 @@ namespace garge_api.Services
                 case VippsEvents.AgreementActivated when subscription.Status == SubscriptionStatus.Stopped:
                     // A stopped subscription, for example of a deleted account, is not started again. Its agreement
                     // is stopped in Vipps instead, by the charge scheduler.
-                    subscription.AgreementStopRequestedAt ??= DateTime.UtcNow;
+                    subscription.AgreementStopRequestedAt = DateTime.UtcNow;
                     logger.LogWarning("Webhook: agreement {AgreementId} activated for stopped subscription {SubscriptionId}, stopping it",
                         payload.AgreementId, subscription.Id);
                     break;

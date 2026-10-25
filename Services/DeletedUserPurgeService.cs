@@ -43,7 +43,8 @@ namespace garge_api.Services
                         .GetRequiredService<AppKitDailyStats<ApplicationDbContext, DailyStatSnapshot>>()
                         .FreezeMissingDaysAsync(db, stoppingToken);
 
-                    var purged = await PurgeAsync(db, stoppingToken);
+                    var vipps = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<VippsSettings>>().Value;
+                    var purged = await PurgeAsync(db, stoppingToken, vipps);
                     if (purged > 0)
                         _logger.LogInformation("Purged {Count} soft-deleted user(s) past their retention window", purged);
                 }
@@ -63,7 +64,7 @@ namespace garge_api.Services
         /// one SaveChanges; an unexpected failure (e.g. a missing FK case) propagates to the caller's
         /// logger after the users already purged are committed. Returns the number of users purged.
         /// </summary>
-        public static async Task<int> PurgeAsync(ApplicationDbContext db, CancellationToken ct = default)
+        public static async Task<int> PurgeAsync(ApplicationDbContext db, CancellationToken ct = default, VippsSettings? vipps = null)
         {
             var now = DateTime.UtcNow;
             var deletedUserIds = await db.Users
@@ -74,11 +75,16 @@ namespace garge_api.Services
             var purged = 0;
             foreach (var userId in deletedUserIds)
             {
-                // A Vipps agreement still to be stopped keeps its subscription, so a late activation finds it. A mark
-                // older than 30 days, for example in an environment without credentials, which the admins were told
-                // of, no longer holds the purge back.
+                // A Vipps agreement still to be stopped keeps its subscription, so a late activation finds it. The hold
+                // lasts until the stop is confirmed. Only in an environment without credentials, where nothing here can
+                // stop it and the admins were told, does a mark older than 30 days stop holding the purge back. Without
+                // settings every environment counts as one with credentials.
                 var markedSince = now - SubscriptionAgreementStops.MarkHoldsPurge;
-                if (await db.Subscriptions.AnyAsync(s => s.UserId == userId && s.AgreementStopRequestedAt > markedSince, ct)) continue;
+                var marks = await db.Subscriptions
+                    .Where(s => s.UserId == userId && s.AgreementStopRequestedAt != null)
+                    .Select(s => new { s.IsTest, s.AgreementStopRequestedAt })
+                    .ToListAsync(ct);
+                if (marks.Any(m => vipps == null || vipps.IsConfigured(m.IsTest) || m.AgreementStopRequestedAt > markedSince)) continue;
 
                 var orderIds = await db.Orders.Where(o => o.UserId == userId).Select(o => o.Id).ToListAsync(ct);
                 var subIds = await db.Subscriptions.Where(s => s.UserId == userId).Select(s => s.Id).ToListAsync(ct);

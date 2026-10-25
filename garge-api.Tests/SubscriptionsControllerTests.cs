@@ -454,6 +454,32 @@ public class SubscriptionsControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task Webhook_EachActivationOfAStoppedSubscription_GivesAFreshMark()
+    {
+        using var db = CreateDbContext();
+        var old = DateTime.UtcNow.AddDays(-40);
+        db.Subscriptions.Add(new Subscription
+        {
+            UserId = "user-1", ProductId = 1, VippsAgreementId = "agr_again", Status = SubscriptionStatus.Stopped,
+            AgreementStopRequestedAt = old
+        });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var before = DateTime.UtcNow;
+
+        var ctrl = CreateWebhook(db, settings: new AppSettings { Id = 1, VippsSubscriptionWebhookSecret = "secret" });
+        SetupValidWebhookRequest(ctrl, JsonSerializer.Serialize(new
+        {
+            agreementId = "agr_again", msn = "msn-prod", eventId = "evt-again",
+            eventType = "recurring.agreement-activated.v1", occurred = DateTime.UtcNow
+        }));
+        Assert.Equal(200, await ctrl.Webhook());
+
+        var mark = (await db.Subscriptions.SingleAsync(TestContext.Current.CancellationToken)).AgreementStopRequestedAt;
+        Assert.NotNull(mark);
+        Assert.True(mark >= before, $"{mark} should be after {before}");
+    }
+
+    [Fact]
     public async Task Webhook_Activated_VippsReturnsAddress_PopulatesBillingAddress()
     {
         using var db = CreateDbContext();
