@@ -57,6 +57,7 @@ namespace garge_api.Models
         public DbSet<PushSubscription> PushSubscriptions { get; set; }
         public DbSet<SensorOfflineNotification> SensorOfflineNotifications { get; set; }
         public DbSet<AppSettings> AppSettings { get; set; }
+        public DbSet<OutsideSalesMonth> OutsideSalesMonths { get; set; }
         public DbSet<Product> Products { get; set; }
         public DbSet<Subscription.Subscription> Subscriptions { get; set; }
         public DbSet<Subscription.PriceChange> PriceChanges { get; set; }

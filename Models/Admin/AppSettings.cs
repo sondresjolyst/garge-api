@@ -85,14 +85,14 @@ namespace garge_api.Models.Admin
 
         public bool VippsTestMode { get; set; }
 
-        /// <summary>Sales outside garge-api in the last 12 months, in øre, counted toward the VAT threshold.</summary>
-        [Range(0, long.MaxValue)]
-        public long OtherTurnoverInOre { get; set; }
-
         /// <summary>The highest VAT threshold warning sent to the admins: 0, 80, 90, or 100 once passed.</summary>
         public int VatThresholdWarnedPercent { get; set; }
 
-        /// <summary>The sale that passed the VAT threshold, once found. VAT is owed from it on until VAT is on.</summary>
+        /// <summary>
+        /// When turnover passed the VAT threshold, once found, and the sale that passed it. VAT is owed from
+        /// then on until VAT is on. The sale is empty when sales outside garge-api passed it, and the time is
+        /// then the start of that day in Norway.
+        /// </summary>
         public int? VatCrossingInvoiceId { get; set; }
         public DateTime? VatCrossedAt { get; set; }
     }

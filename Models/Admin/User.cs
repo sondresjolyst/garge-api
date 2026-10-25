@@ -22,7 +22,7 @@ public class User : IdentityUser, IPasswordResetUser, IEmailVerificationUser, IA
     public DateTime? DeletedAt { get; set; }
 
     public DateTime? TermsAcceptedAt { get; set; }
-    [MaxLength(20)]
+    [MaxLength(40)]
     public string? TermsVersion { get; set; }
     [MaxLength(45)]
     public string? TermsAcceptedIp { get; set; }

@@ -1,22 +1,30 @@
+using System.Globalization;
 using garge_api.Constants;
 using garge_api.Helpers;
 using garge_api.Models;
+using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
+using SjolystInnovation.AppKit.VatThreshold;
 
 namespace garge_api.Services
 {
     /// <summary>A sale made after turnover passed the VAT threshold, before VAT registration.</summary>
     public sealed record VatOwedSale(int InvoiceId, DateTime IssuedAt, int AmountInOre, int VatInOre, DateTime? CorrectedAt, int? CreditNoteId, int? ReplacementInvoiceId);
 
+    /// <summary>
+    /// Turnover for the 12 months up to today, with each month that period overlaps, oldest first. The
+    /// crossing invoice is empty when sales outside garge-api passed the threshold.
+    /// </summary>
     public sealed record VatThresholdStatus(
         long TurnoverInOre,
-        long OtherTurnoverInOre,
         long ThresholdInOre,
         bool VatEnabled,
         int? CrossingInvoiceId,
         DateTime? CrossedAt,
-        IReadOnlyList<VatOwedSale> Owed);
+        IReadOnlyList<VatOwedSale> Owed,
+        IReadOnlyList<VatTurnoverMonth> Months);
 
     public interface IVatThresholdService
     {
@@ -27,15 +35,23 @@ namespace garge_api.Services
         /// 90 % of it, or passes it.
         /// </summary>
         Task CheckAsync(DateTime now, CancellationToken ct = default);
+
+        /// <summary>
+        /// Stores the sales outside garge-api for one month and checks the threshold. Zero removes the
+        /// month. Answers why, and stores nothing, for a month that has not started or is more than
+        /// <see cref="VatThresholdService.OutsideMonthsBack"/> months back. Answers null once stored.
+        /// </summary>
+        Task<string?> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default);
     }
 
     /// <summary>
-    /// Tracks turnover against the 50 000 kr VAT registration threshold. Registration is required once
-    /// turnover over any 12 months passes the threshold. VAT is owed on the sale that passes it and on
+    /// Tracks turnover against the 50 000 kr VAT registration threshold with the rule in
+    /// SjolystInnovation.AppKit.VatThreshold. Registration is required once turnover over any 12 months
+    /// passes the threshold, counted in Norwegian days. VAT is owed on the sale that passes it and on
     /// every sale after it, and for sales to consumers it is taken out of the price paid.
-    /// Turnover counts invoiced sales less refunds: captured orders and captured subscription charges.
-    /// Test sales are left out. Sales outside garge-api come from the setting, which covers the last
-    /// 12 months, so it only counts toward windows that end in the last 12 months.
+    /// Turnover counts invoiced sales, captured orders and captured subscription charges, from the day
+    /// they were invoiced. A refund lowers it from the day of its credit note. Test sales are left out.
+    /// Sales outside garge-api are entered per month and count in every 12 months the month overlaps.
     /// </summary>
     public class VatThresholdService(
         ApplicationDbContext db,
@@ -43,85 +59,173 @@ namespace garge_api.Services
         IAppSettingsCache settingsCache,
         ILogger<VatThresholdService> logger) : IVatThresholdService
     {
-        public const long ThresholdInOre = 5_000_000;
+        public const long ThresholdInOre = VatRegistrationThreshold.LimitInOre;
         public static readonly int[] WarnPercents = [80, 90];
 
         /// <summary>Below this share of the threshold, the 80 % and 90 % warnings can be sent again.</summary>
         public const int RearmPercent = 70;
 
+        /// <summary>How many months before the current month outside sales can be entered for.</summary>
+        public const int OutsideMonthsBack = 36;
+
         // One check at a time in this process, so a warning is sent once and the crossing is recorded once.
         private static readonly SemaphoreSlim Gate = new(1, 1);
 
-        private sealed record Sale(int Id, DateTime IssuedAt, int AmountInOre, int VatPercentage, DateTime? CorrectedAt);
+        private sealed record Sale(int Id, DateTime IssuedAt, int AmountInOre, int VatPercentage, DateTime? CorrectedAt, List<VatRefund> Refunds)
+        {
+            public int KeptInOre => (int)Math.Max(0, AmountInOre - Refunds.Sum(r => r.AmountInOre));
 
-        private async Task<List<Sale>> SalesAsync(DateTime since, CancellationToken ct) =>
-            await db.Invoices.AsNoTracking()
+            public VatSale ToVatSale() => new(Id.ToString(CultureInfo.InvariantCulture), IssuedAt, AmountInOre, Refunds);
+        }
+
+        // Every sale, since the first 12 months that passed the threshold can lie any time back.
+        private async Task<List<Sale>> SalesAsync(DateTime now, CancellationToken ct)
+        {
+            var invoices = await db.Invoices.AsNoTracking()
                 // Credit notes and the invoices that replace corrected ones are not new sales.
-                .Where(i => i.IssuedAt > since
-                            && i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null
-                            && (i.Order == null || (!i.Order.IsTest && i.Order.Status != OrderStatus.Refunded))
+                .Where(i => i.Kind == InvoiceKind.Invoice && i.ReplacesInvoiceId == null
+                            && (i.Order == null || !i.Order.IsTest)
                             && (i.Subscription == null || !i.Subscription.IsTest))
                 .OrderBy(i => i.IssuedAt).ThenBy(i => i.Id)
-                .Select(i => new Sale(
-                    i.Id, i.IssuedAt,
-                    Math.Max(0, i.AmountInOre - (i.Order == null ? i.RefundedInOre : i.Order.RefundedInOre)),
-                    i.VatPercentage, i.VatCorrectedAt))
+                .Select(i => new
+                {
+                    i.Id, i.IssuedAt, i.AmountInOre, i.VatPercentage, i.VatCorrectedAt,
+                    Refunded = i.Order == null ? i.RefundedInOre : i.Order.RefundedInOre,
+                    OrderUpdatedAt = i.Order == null ? (DateTime?)null : i.Order.UpdatedAt
+                })
                 .ToListAsync(ct);
+
+            // A refund credit note credits the sale, or the invoice that replaced it after a VAT correction.
+            // The retry job can make a note long after the refund. Garge keeps no dated refund record, and the
+            // stored webhook events name no order, so an order's refund counts from the earlier of its note and
+            // the order's last change, which every refund sets. A subscription charge has no such time, so its
+            // note's date is used.
+            var replaced = await db.Invoices.AsNoTracking()
+                .Where(i => i.ReplacesInvoiceId != null)
+                .Select(i => new { i.Id, Of = i.ReplacesInvoiceId!.Value })
+                .ToDictionaryAsync(i => i.Id, i => i.Of, ct);
+            var notes = (await db.Invoices.AsNoTracking()
+                    .Where(i => i.ForRefund && i.CreditsInvoiceId != null)
+                    .Select(i => new { Of = i.CreditsInvoiceId!.Value, i.IssuedAt, i.AmountInOre })
+                    .ToListAsync(ct))
+                .ToLookup(n => replaced.GetValueOrDefault(n.Of, n.Of), n => new VatRefund(n.IssuedAt, -(long)n.AmountInOre));
+
+            return invoices.Select(i =>
+            {
+                var refunds = notes[i.Id]
+                    .Select(r => i.OrderUpdatedAt is { } changed && changed < r.AtUtc ? r with { AtUtc = changed } : r)
+                    .ToList();
+                // A refund whose credit note is not made yet counts from when the order last changed, which
+                // a refund does, or from now for a subscription charge, until the retry job makes the note.
+                var uncredited = i.Refunded - refunds.Sum(r => r.AmountInOre);
+                if (uncredited > 0) refunds.Add(new VatRefund(i.OrderUpdatedAt ?? now, uncredited));
+                return new Sale(i.Id, i.IssuedAt, i.AmountInOre, i.VatPercentage, i.VatCorrectedAt, refunds);
+            }).ToList();
+        }
+
+        private async Task<Dictionary<DateOnly, long>> OutsideSalesAsync(CancellationToken ct) =>
+            await db.OutsideSalesMonths.AsNoTracking().ToDictionaryAsync(m => m.Month, m => m.AmountInOre, ct);
 
         private static bool AtOrAfter(Sale s, DateTime issuedAt, int id) =>
             s.IssuedAt > issuedAt || (s.IssuedAt == issuedAt && s.Id >= id);
 
-        // The first sale where the 12 months up to and including it pass the threshold. The sales are
-        // in order, so a running window is kept with two pointers.
-        private static Sale? FindCrossing(List<Sale> sales, long other, DateTime now)
+        private static DateOnly MonthOf(DateTime utc)
         {
-            long window = 0;
-            var start = 0;
-            foreach (var sale in sales)
-            {
-                window += sale.AmountInOre;
-                while (sales[start].IssuedAt <= sale.IssuedAt.AddMonths(-12))
-                    window -= sales[start++].AmountInOre;
-                var withOther = sale.IssuedAt > now.AddMonths(-12) ? window + other : window;
-                if (withOther > ThresholdInOre) return sale;
-            }
-            return null;
+            var day = VatRegistrationThreshold.DayOf(utc, LocalTime.Zone);
+            return new DateOnly(day.Year, day.Month, 1);
         }
 
         public async Task<VatThresholdStatus> GetStatusAsync(DateTime now, CancellationToken ct = default)
         {
             var settings = await settingsCache.GetAsync();
-            var other = settings.OtherTurnoverInOre;
+            var sales = await SalesAsync(now, ct);
+            var outside = await OutsideSalesAsync(ct);
+            var vatSales = sales.Select(s => s.ToVatSale()).ToList();
+            var today = VatRegistrationThreshold.DayOf(now, LocalTime.Zone);
+            var turnover = VatRegistrationThreshold.TurnoverOn(today, vatSales, outside, LocalTime.Zone);
 
-            // Two years back covers the 12 months before every sale in the last 12 months.
-            var recent = await SalesAsync(now.AddMonths(-24), ct);
-            var turnover = other + recent.Where(s => s.IssuedAt > now.AddMonths(-12)).Sum(s => (long)s.AmountInOre);
-
+            // A crossing once recorded at a sale stays, since VAT is owed from it. One from outside sales alone
+            // is found again until VAT is on, so correcting a mistaken month takes it back.
             int? crossingId = settings.VatCrossingInvoiceId;
             DateTime? crossedAt = settings.VatCrossedAt;
-            if (crossingId == null && FindCrossing(recent, other, now) is { } found)
-                (crossingId, crossedAt) = (found.Id, found.IssuedAt);
+            if (crossingId == null && !settings.VatEnabled) crossedAt = null;
+            if (crossedAt == null && VatRegistrationThreshold.FindCrossing(vatSales, outside, LocalTime.Zone, today) is { } found)
+            {
+                crossingId = found.Sale is { } sale ? int.Parse(sale.Reference, CultureInfo.InvariantCulture) : null;
+                crossedAt = found.Sale?.AtUtc ?? LocalTime.ToUtc(found.Day.ToDateTime(TimeOnly.MinValue));
+            }
 
             List<VatOwedSale> owed = [];
-            if (crossingId != null)
+            if (crossedAt is { } from)
             {
-                var since = crossedAt!.Value.AddTicks(-1);
-                var sales = (await SalesAsync(since, ct))
-                    .Where(s => s.VatPercentage == 0 && AtOrAfter(s, crossedAt.Value, crossingId.Value))
+                var owing = sales
+                    .Where(s => s.VatPercentage == 0 && s.KeptInOre > 0
+                                && (crossingId is { } id ? AtOrAfter(s, from, id) : s.IssuedAt >= from))
                     .ToList();
-                var ids = sales.Select(s => s.Id).ToList();
+                var ids = owing.Select(s => s.Id).ToList();
                 var documents = await db.Invoices.AsNoTracking()
                     .Where(i => (!i.ForRefund && i.CreditsInvoiceId != null && ids.Contains(i.CreditsInvoiceId.Value)) || (i.ReplacesInvoiceId != null && ids.Contains(i.ReplacesInvoiceId.Value)))
                     .Select(i => new { i.Id, i.CreditsInvoiceId, i.ReplacesInvoiceId })
                     .ToListAsync(ct);
-                owed = sales.Select(s => new VatOwedSale(
-                        s.Id, s.IssuedAt, s.AmountInOre, Pricing.Split(s.AmountInOre, Pricing.VatPercent).Vat, s.CorrectedAt,
+                owed = owing.Select(s => new VatOwedSale(
+                        s.Id, s.IssuedAt, s.KeptInOre, Pricing.Split(s.KeptInOre, Pricing.VatPercent).Vat, s.CorrectedAt,
                         documents.FirstOrDefault(d => d.CreditsInvoiceId == s.Id)?.Id,
                         documents.FirstOrDefault(d => d.ReplacesInvoiceId == s.Id)?.Id))
                     .ToList();
             }
 
-            return new VatThresholdStatus(turnover, other, ThresholdInOre, settings.VatEnabled, crossingId, crossedAt, owed);
+            return new VatThresholdStatus(turnover.TotalInOre, ThresholdInOre, settings.VatEnabled, crossingId, crossedAt, owed, turnover.Months);
+        }
+
+        public async Task<string?> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default)
+        {
+            month = new DateOnly(month.Year, month.Month, 1);
+            var current = MonthOf(now);
+            if (month > current) return "The month has not started yet.";
+            if (month < current.AddMonths(-OutsideMonthsBack))
+                return $"The month is more than {OutsideMonthsBack} months back.";
+
+            // Saves of the same month in this process wait for each other, so the first row is added once.
+            await Gate.WaitAsync(ct);
+            try
+            {
+                try
+                {
+                    await UpsertOutsideMonthAsync(month, amountInOre, now, ct);
+                }
+                catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                {
+                    // Another instance added the month first, so this save updates it.
+                    db.ChangeTracker.Clear();
+                    await UpsertOutsideMonthAsync(month, amountInOre, now, ct);
+                }
+            }
+            finally
+            {
+                Gate.Release();
+            }
+
+            await CheckAsync(now, ct);
+            return null;
+        }
+
+        private async Task UpsertOutsideMonthAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct)
+        {
+            var row = await db.OutsideSalesMonths.FirstOrDefaultAsync(m => m.Month == month, ct);
+            if (amountInOre == 0)
+            {
+                if (row != null) db.OutsideSalesMonths.Remove(row);
+            }
+            else if (row == null)
+            {
+                db.OutsideSalesMonths.Add(new OutsideSalesMonth { Month = month, AmountInOre = amountInOre, UpdatedAt = now });
+            }
+            else
+            {
+                row.AmountInOre = amountInOre;
+                row.UpdatedAt = now;
+            }
+            await db.SaveChangesAsync(ct);
         }
 
         public async Task CheckAsync(DateTime now, CancellationToken ct = default)
@@ -134,15 +238,19 @@ namespace garge_api.Services
 
                 var status = await GetStatusAsync(now, ct);
                 var changed = false;
-                if (settings.VatCrossingInvoiceId == null && status.CrossingInvoiceId != null)
+                if (settings.VatCrossingInvoiceId == null && settings.VatCrossedAt != status.CrossedAt)
                 {
+                    // A crossing from outside sales alone that is no longer found was a mistaken month, so
+                    // the warnings start over.
+                    if (settings.VatCrossedAt != null && status.CrossedAt == null)
+                        settings.VatThresholdWarnedPercent = 0;
                     settings.VatCrossingInvoiceId = status.CrossingInvoiceId;
                     settings.VatCrossedAt = status.CrossedAt;
                     changed = true;
                 }
 
-                var level = status.CrossingInvoiceId != null ? 100
-                    : WarnPercents.Where(p => status.TurnoverInOre * 100 >= ThresholdInOre * p).DefaultIfEmpty(0).Max();
+                var level = status.CrossedAt != null ? 100
+                    : VatRegistrationThreshold.WarningLevel(status.TurnoverInOre, WarnPercents);
                 if (level == 0 && settings.VatThresholdWarnedPercent is > 0 and < 100
                     && status.TurnoverInOre * 100 < ThresholdInOre * RearmPercent)
                 {
@@ -173,8 +281,9 @@ namespace garge_api.Services
         private async Task<bool> NotifyAdminsAsync(int level, VatThresholdStatus status, CancellationToken ct)
         {
             var (title, message) = level == 100
-                ? ("Register for VAT",
-                   $"Turnover passed the 50 000 kr VAT threshold with invoice #{status.CrossingInvoiceId:D4} on {LocalTime.Format(status.CrossedAt!.Value, "yyyy-MM-dd")}. Register for VAT. VAT is owed on that sale and every sale after it, taken out of the price paid. Turn VAT on in the admin settings once registered.")
+                ? ("Register for VAT", status.CrossingInvoiceId is { } invoiceId
+                    ? $"Turnover passed the 50 000 kr VAT threshold with invoice #{invoiceId:D4} on {LocalTime.Format(status.CrossedAt!.Value, "yyyy-MM-dd")}. Register for VAT. VAT is owed on that sale and every sale after it, taken out of the price paid. Turn VAT on in the admin settings once registered."
+                    : $"Turnover passed the 50 000 kr VAT threshold with sales outside garge on {LocalTime.Format(status.CrossedAt!.Value, "yyyy-MM-dd")}. Register for VAT. VAT is owed on every sale from that day, taken out of the price paid. Turn VAT on in the admin settings once registered.")
                 : ("VAT threshold",
                    $"Turnover over the last 12 months is {MoneyFormat.Nok((int)Math.Min(status.TurnoverInOre, int.MaxValue))} kr, {level} % of the 50 000 kr VAT registration threshold.");
 

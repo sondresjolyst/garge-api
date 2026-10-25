@@ -19,41 +19,56 @@ namespace garge_api.Controllers
         IInvoiceService invoices,
         IAppSettingsCache settingsCache) : ControllerBase
     {
-        /// <summary>Turnover against the VAT registration threshold, and the sales that owe VAT from before registration.</summary>
+        /// <summary>
+        /// Turnover against the VAT registration threshold, with the months it covers, and the sales that owe
+        /// VAT from before registration.
+        /// </summary>
         [HttpGet("threshold")]
-        public async Task<ActionResult<VatThresholdDto>> GetThreshold(CancellationToken ct)
+        public async Task<ActionResult<VatThresholdDto>> GetThreshold(CancellationToken ct) =>
+            ToDto(await vat.GetStatusAsync(DateTime.UtcNow, ct));
+
+        /// <summary>
+        /// Sets the sales made outside garge-api in one month that has started and is at most 36 months
+        /// back, and answers the threshold as it then stands. Zero removes the month.
+        /// </summary>
+        [HttpPut("outside-sales")]
+        public async Task<ActionResult<VatThresholdDto>> SetOutsideSales([FromBody] UpdateOutsideSalesDto dto, CancellationToken ct)
         {
-            var status = await vat.GetStatusAsync(DateTime.UtcNow, ct);
-            return new VatThresholdDto
+            if (!UpdateOutsideSalesDto.TryParseMonth(dto.Month, out var month))
             {
-                TurnoverInOre = status.TurnoverInOre,
-                OtherTurnoverInOre = status.OtherTurnoverInOre,
-                ThresholdInOre = status.ThresholdInOre,
-                VatEnabled = status.VatEnabled,
-                CrossingInvoiceId = status.CrossingInvoiceId,
-                CrossedAt = status.CrossedAt,
-                OwedVatInOre = status.Owed.Sum(o => (long)o.VatInOre),
-                Owed = status.Owed.Select(o => new VatOwedSaleDto
-                {
-                    InvoiceId = o.InvoiceId, IssuedAt = o.IssuedAt, AmountInOre = o.AmountInOre,
-                    VatInOre = o.VatInOre, CorrectedAt = o.CorrectedAt,
-                    CreditNoteId = o.CreditNoteId, ReplacementInvoiceId = o.ReplacementInvoiceId
-                }).ToList()
-            };
+                ModelState.AddModelError(nameof(UpdateOutsideSalesDto.Month), "Use a month as yyyy-MM.");
+                return ValidationProblem(ModelState);
+            }
+            var now = DateTime.UtcNow;
+            if (await vat.SetOutsideSalesAsync(month, dto.AmountInOre, now, ct) is { } refused)
+            {
+                ModelState.AddModelError(nameof(UpdateOutsideSalesDto.Month), refused);
+                return ValidationProblem(ModelState);
+            }
+            return ToDto(await vat.GetStatusAsync(now, ct));
         }
 
-        /// <summary>Sets the sales made outside garge-api in the last 12 months.</summary>
-        [HttpPut("other-turnover")]
-        public async Task<IActionResult> SetOtherTurnover([FromBody] UpdateOtherTurnoverDto dto, CancellationToken ct)
+        private static VatThresholdDto ToDto(VatThresholdStatus status) => new()
         {
-            var settings = await db.AppSettings.FindAsync([1], ct);
-            if (settings == null) return NotFound();
-            settings.OtherTurnoverInOre = dto.OtherTurnoverInOre;
-            await db.SaveChangesAsync(ct);
-            settingsCache.Invalidate();
-            await vat.CheckAsync(DateTime.UtcNow, ct);
-            return NoContent();
-        }
+            TurnoverInOre = status.TurnoverInOre,
+            ThresholdInOre = status.ThresholdInOre,
+            VatEnabled = status.VatEnabled,
+            CrossingInvoiceId = status.CrossingInvoiceId,
+            CrossedAt = status.CrossedAt,
+            OwedVatInOre = status.Owed.Sum(o => (long)o.VatInOre),
+            Owed = status.Owed.Select(o => new VatOwedSaleDto
+            {
+                InvoiceId = o.InvoiceId, IssuedAt = o.IssuedAt, AmountInOre = o.AmountInOre,
+                VatInOre = o.VatInOre, CorrectedAt = o.CorrectedAt,
+                CreditNoteId = o.CreditNoteId, ReplacementInvoiceId = o.ReplacementInvoiceId
+            }).ToList(),
+            Months = status.Months.Select(m => new VatMonthDto
+            {
+                Month = m.Month.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                SalesInOre = m.SalesInOre,
+                OutsideInOre = m.OutsideInOre
+            }).ToList()
+        };
 
         /// <summary>
         /// For each sale that owes VAT from before registration, makes a credit note and a new invoice
