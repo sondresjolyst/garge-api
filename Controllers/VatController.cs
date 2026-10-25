@@ -28,8 +28,8 @@ namespace garge_api.Controllers
             ToDto(await vat.GetStatusAsync(DateTime.UtcNow, ct));
 
         /// <summary>
-        /// Sets the sales made outside garge-api in one month that has started, and answers the threshold
-        /// as it then stands. Zero removes the month.
+        /// Sets the sales made outside garge-api in one month that has started and is at most 36 months
+        /// back, and answers the threshold as it then stands. Zero removes the month.
         /// </summary>
         [HttpPut("outside-sales")]
         public async Task<ActionResult<VatThresholdDto>> SetOutsideSales([FromBody] UpdateOutsideSalesDto dto, CancellationToken ct)
@@ -40,9 +40,9 @@ namespace garge_api.Controllers
                 return ValidationProblem(ModelState);
             }
             var now = DateTime.UtcNow;
-            if (!await vat.SetOutsideSalesAsync(month, dto.AmountInOre, now, ct))
+            if (await vat.SetOutsideSalesAsync(month, dto.AmountInOre, now, ct) is { } refused)
             {
-                ModelState.AddModelError(nameof(UpdateOutsideSalesDto.Month), "The month has not started yet.");
+                ModelState.AddModelError(nameof(UpdateOutsideSalesDto.Month), refused);
                 return ValidationProblem(ModelState);
             }
             return ToDto(await vat.GetStatusAsync(now, ct));

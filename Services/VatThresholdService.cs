@@ -5,6 +5,7 @@ using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Models.Shop;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SjolystInnovation.AppKit.VatThreshold;
 
 namespace garge_api.Services
@@ -37,9 +38,10 @@ namespace garge_api.Services
 
         /// <summary>
         /// Stores the sales outside garge-api for one month and checks the threshold. Zero removes the
-        /// month. Answers false, and stores nothing, for a month that has not started.
+        /// month. Answers why, and stores nothing, for a month that has not started or is more than
+        /// <see cref="VatThresholdService.OutsideMonthsBack"/> months back. Answers null once stored.
         /// </summary>
-        Task<bool> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default);
+        Task<string?> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default);
     }
 
     /// <summary>
@@ -62,6 +64,9 @@ namespace garge_api.Services
 
         /// <summary>Below this share of the threshold, the 80 % and 90 % warnings can be sent again.</summary>
         public const int RearmPercent = 70;
+
+        /// <summary>How many months before the current month outside sales can be entered for.</summary>
+        public const int OutsideMonthsBack = 36;
 
         // One check at a time in this process, so a warning is sent once and the crossing is recorded once.
         private static readonly SemaphoreSlim Gate = new(1, 1);
@@ -91,6 +96,10 @@ namespace garge_api.Services
                 .ToListAsync(ct);
 
             // A refund credit note credits the sale, or the invoice that replaced it after a VAT correction.
+            // The retry job can make a note long after the refund. Garge keeps no dated refund record, and the
+            // stored webhook events name no order, so an order's refund counts from the earlier of its note and
+            // the order's last change, which every refund sets. A subscription charge has no such time, so its
+            // note's date is used.
             var replaced = await db.Invoices.AsNoTracking()
                 .Where(i => i.ReplacesInvoiceId != null)
                 .Select(i => new { i.Id, Of = i.ReplacesInvoiceId!.Value })
@@ -103,7 +112,9 @@ namespace garge_api.Services
 
             return invoices.Select(i =>
             {
-                var refunds = notes[i.Id].ToList();
+                var refunds = notes[i.Id]
+                    .Select(r => i.OrderUpdatedAt is { } changed && changed < r.AtUtc ? r with { AtUtc = changed } : r)
+                    .ToList();
                 // A refund whose credit note is not made yet counts from when the order last changed, which
                 // a refund does, or from now for a subscription charge, until the retry job makes the note.
                 var uncredited = i.Refunded - refunds.Sum(r => r.AmountInOre);
@@ -133,9 +144,11 @@ namespace garge_api.Services
             var today = VatRegistrationThreshold.DayOf(now, LocalTime.Zone);
             var turnover = VatRegistrationThreshold.TurnoverOn(today, vatSales, outside, LocalTime.Zone);
 
-            // A crossing once recorded stays, since VAT is owed from it.
+            // A crossing once recorded at a sale stays, since VAT is owed from it. One from outside sales alone
+            // is found again until VAT is on, so correcting a mistaken month takes it back.
             int? crossingId = settings.VatCrossingInvoiceId;
             DateTime? crossedAt = settings.VatCrossedAt;
+            if (crossingId == null && !settings.VatEnabled) crossedAt = null;
             if (crossedAt == null && VatRegistrationThreshold.FindCrossing(vatSales, outside, LocalTime.Zone, today) is { } found)
             {
                 crossingId = found.Sale is { } sale ? int.Parse(sale.Reference, CultureInfo.InvariantCulture) : null;
@@ -164,11 +177,40 @@ namespace garge_api.Services
             return new VatThresholdStatus(turnover.TotalInOre, ThresholdInOre, settings.VatEnabled, crossingId, crossedAt, owed, turnover.Months);
         }
 
-        public async Task<bool> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default)
+        public async Task<string?> SetOutsideSalesAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct = default)
         {
             month = new DateOnly(month.Year, month.Month, 1);
-            if (month > MonthOf(now)) return false;
+            var current = MonthOf(now);
+            if (month > current) return "The month has not started yet.";
+            if (month < current.AddMonths(-OutsideMonthsBack))
+                return $"The month is more than {OutsideMonthsBack} months back.";
 
+            // Saves of the same month in this process wait for each other, so the first row is added once.
+            await Gate.WaitAsync(ct);
+            try
+            {
+                try
+                {
+                    await UpsertOutsideMonthAsync(month, amountInOre, now, ct);
+                }
+                catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                {
+                    // Another instance added the month first, so this save updates it.
+                    db.ChangeTracker.Clear();
+                    await UpsertOutsideMonthAsync(month, amountInOre, now, ct);
+                }
+            }
+            finally
+            {
+                Gate.Release();
+            }
+
+            await CheckAsync(now, ct);
+            return null;
+        }
+
+        private async Task UpsertOutsideMonthAsync(DateOnly month, long amountInOre, DateTime now, CancellationToken ct)
+        {
             var row = await db.OutsideSalesMonths.FirstOrDefaultAsync(m => m.Month == month, ct);
             if (amountInOre == 0)
             {
@@ -183,10 +225,7 @@ namespace garge_api.Services
                 row.AmountInOre = amountInOre;
                 row.UpdatedAt = now;
             }
-
             await db.SaveChangesAsync(ct);
-            await CheckAsync(now, ct);
-            return true;
         }
 
         public async Task CheckAsync(DateTime now, CancellationToken ct = default)
@@ -199,8 +238,12 @@ namespace garge_api.Services
 
                 var status = await GetStatusAsync(now, ct);
                 var changed = false;
-                if (settings.VatCrossedAt == null && status.CrossedAt != null)
+                if (settings.VatCrossingInvoiceId == null && settings.VatCrossedAt != status.CrossedAt)
                 {
+                    // A crossing from outside sales alone that is no longer found was a mistaken month, so
+                    // the warnings start over.
+                    if (settings.VatCrossedAt != null && status.CrossedAt == null)
+                        settings.VatThresholdWarnedPercent = 0;
                     settings.VatCrossingInvoiceId = status.CrossingInvoiceId;
                     settings.VatCrossedAt = status.CrossedAt;
                     changed = true;

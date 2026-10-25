@@ -398,7 +398,7 @@ public class VatThresholdServiceTests
     }
 
     [Fact]
-    public async Task TheCrossingFoundWhenOutsideSalesPassedIt_IsKept()
+    public async Task TheCrossingFoundWhenOutsideSalesPassedIt_IsFoundAgainBeforeVatIsOn()
     {
         var h = await BuildAsync(outsideThisMonth: 5_100_000);
         await h.Service.CheckAsync(Now, TestContext.Current.CancellationToken);
@@ -407,7 +407,7 @@ public class VatThresholdServiceTests
 
         var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
 
-        Assert.Equal(new DateTime(2026, 9, 30, 22, 0, 0, DateTimeKind.Utc), status.CrossedAt);
+        Assert.Null(status.CrossedAt);
     }
 
     [Fact]
@@ -416,12 +416,12 @@ public class VatThresholdServiceTests
         var h = await BuildAsync();
         var ct = TestContext.Current.CancellationToken;
 
-        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 120_000, Now, ct));
-        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 30_000, Now, ct));
-        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 150_000, Now, ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 120_000, Now, ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 30_000, Now, ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 150_000, Now, ct));
         Assert.Equal(180_000, (await h.Service.GetStatusAsync(Now, ct)).TurnoverInOre);
 
-        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 0, Now, ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 0, Now, ct));
         var row = Assert.Single(await h.Db.OutsideSalesMonths.AsNoTracking().ToListAsync(ct));
         Assert.Equal((new DateOnly(2026, 9, 1), 150_000L, Now), (row.Month, row.AmountInOre, row.UpdatedAt));
     }
@@ -434,9 +434,148 @@ public class VatThresholdServiceTests
         var ct = TestContext.Current.CancellationToken;
         var lateOctober = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Utc);
 
-        Assert.False(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, lateOctober, ct));
+        Assert.Equal("The month has not started yet.", await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, lateOctober, ct));
         Assert.Empty(await h.Db.OutsideSalesMonths.ToListAsync(ct));
-        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, new DateTime(2026, 10, 31, 23, 30, 0, DateTimeKind.Utc), ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, new DateTime(2026, 10, 31, 23, 30, 0, DateTimeKind.Utc), ct));
+    }
+
+    [Fact]
+    public async Task SetOutsideSales_RefusesAMonthMoreThan36MonthsBack()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        Assert.Equal("The month is more than 36 months back.", await h.Service.SetOutsideSalesAsync(new DateOnly(2023, 9, 1), 10_000, Now, ct));
+        Assert.Empty(await h.Db.OutsideSalesMonths.ToListAsync(ct));
+        Assert.Null(await h.Service.SetOutsideSalesAsync(new DateOnly(2023, 10, 1), 10_000, Now, ct));
+    }
+
+    [Fact]
+    public async Task SavesOfTheSameMonthAtTheSameTime_AddItOnce()
+    {
+        var h = await BuildAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseInMemoryDatabase(h.DbName).Options;
+        var cache = new Mock<IAppSettingsCache>();
+        cache.Setup(c => c.GetAsync()).ReturnsAsync(() => new ApplicationDbContext(options).AppSettings.AsNoTracking().Single(s => s.Id == 1));
+
+        var answers = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        {
+            using var db = new ApplicationDbContext(options);
+            return await new VatThresholdService(db, h.Notifier.Object, cache.Object, NullLogger<VatThresholdService>.Instance)
+                .SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 10_000 + i, Now);
+        })));
+
+        Assert.All(answers, Assert.Null);
+        Assert.Single(await h.Db.OutsideSalesMonths.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task ACrossingFromOutsideSalesAlone_IsTakenBackWhenTheMonthIsCorrected()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await h.SaleAsync(4_100_000, Now.AddDays(-3));
+
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 5_100_000, Now, ct);
+        var crossed = await h.SettingsAsync();
+        Assert.Equal((null, new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), 100), (crossed.VatCrossingInvoiceId, crossed.VatCrossedAt, crossed.VatThresholdWarnedPercent));
+
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 0, Now, ct);
+
+        var cleared = await h.SettingsAsync();
+        Assert.Equal((null, null), (cleared.VatCrossingInvoiceId, cleared.VatCrossedAt));
+        var status = await h.Service.GetStatusAsync(Now, ct);
+        Assert.Null(status.CrossedAt);
+        Assert.Empty(status.Owed);
+        // The warnings start over, so the 80 % warning for the 41 000 kr left goes out.
+        Assert.Equal(80, cleared.VatThresholdWarnedPercent);
+    }
+
+    [Fact]
+    public async Task ACrossingFromOutsideSalesAlone_StaysOnceVatIsOn()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 5_100_000, Now, ct);
+        var settings = await h.SettingsAsync();
+        settings.VatEnabled = true;
+        h.Db.OutsideSalesMonths.RemoveRange(h.Db.OutsideSalesMonths);
+        await h.Db.SaveChangesAsync(ct);
+
+        Assert.Equal(new DateTime(2026, 8, 31, 22, 0, 0, DateTimeKind.Utc), (await h.Service.GetStatusAsync(Now, ct)).CrossedAt);
+    }
+
+    [Fact]
+    public async Task ACrossingAtASale_StaysWhenTheOutsideSalesThatHelpedAreCorrected()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 4_000_000, Now, ct);
+        var sale = await h.SaleAsync(1_100_000, Now.AddDays(-2));
+        await h.Service.CheckAsync(Now, ct);
+        Assert.Equal(sale.Id, (await h.SettingsAsync()).VatCrossingInvoiceId);
+
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 0, Now, ct);
+
+        Assert.Equal((sale.Id, sale.IssuedAt), ((await h.SettingsAsync()).VatCrossingInvoiceId, (await h.SettingsAsync()).VatCrossedAt));
+        Assert.Equal(sale.Id, (await h.Service.GetStatusAsync(Now, ct)).CrossingInvoiceId);
+    }
+
+    [Fact]
+    public async Task ARefundCreditedWeeksLate_CountsFromWhenTheOrderWasRefunded()
+    {
+        // Refunded on day -40, the note made by the retry job on day -5. The second sale on day -10 comes
+        // after the refund, so the threshold is not passed.
+        var h = await BuildAsync();
+        var first = await h.SaleAsync(3_000_000, Now.AddDays(-60));
+        await h.RefundAsync(first, 3_000_000, Now.AddDays(-5));
+        var order = await h.Db.Orders.SingleAsync(o => o.Id == first.OrderId, TestContext.Current.CancellationToken);
+        order.UpdatedAt = Now.AddDays(-40);
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await h.SaleAsync(2_500_000, Now.AddDays(-10));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Null(status.CrossedAt);
+        Assert.Equal(2_500_000, status.TurnoverInOre);
+    }
+
+    [Fact]
+    public async Task ARefundOnTime_KeepsTheDateOfItsNote_WhenTheOrderChangedLater()
+    {
+        var h = await BuildAsync();
+        var first = await h.SaleAsync(3_000_000, Now.AddDays(-60));
+        await h.RefundAsync(first, 3_000_000, Now.AddDays(-40));
+        var order = await h.Db.Orders.SingleAsync(o => o.Id == first.OrderId, TestContext.Current.CancellationToken);
+        order.UpdatedAt = Now.AddDays(-1);
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await h.SaleAsync(2_500_000, Now.AddDays(-10));
+
+        Assert.Null((await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken)).CrossedAt);
+    }
+
+    [Fact]
+    public async Task ARefundCreditedInParts_IsNeverCountedTwice()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var sale = await h.SaleAsync(3_000_000, Now.AddDays(-30));
+        var order = await h.Db.Orders.SingleAsync(o => o.Id == sale.OrderId, ct);
+        order.RefundedInOre = 1_000_000;
+        order.UpdatedAt = Now.AddDays(-20);
+        h.Db.Invoices.Add(new Invoice { Kind = InvoiceKind.CreditNote, ForRefund = true, CreditsInvoiceId = sale.Id, AmountInOre = -400_000, IssuedAt = Now.AddDays(-20), PdfData = [1] });
+        await h.Db.SaveChangesAsync(ct);
+
+        // 4 000 kr credited, 6 000 kr refunded without a note yet.
+        var status = await h.Service.GetStatusAsync(Now, ct);
+        Assert.Equal(2_000_000, status.TurnoverInOre);
+        Assert.Equal(2_000_000, Assert.Single(status.Months, m => m.SalesInOre != 0).SalesInOre);
+
+        // The retry job credits the rest.
+        h.Db.Invoices.Add(new Invoice { Kind = InvoiceKind.CreditNote, ForRefund = true, CreditsInvoiceId = sale.Id, AmountInOre = -600_000, IssuedAt = Now.AddDays(-2), PdfData = [1] });
+        await h.Db.SaveChangesAsync(ct);
+
+        Assert.Equal(2_000_000, (await h.Service.GetStatusAsync(Now, ct)).TurnoverInOre);
     }
 
     [Fact]

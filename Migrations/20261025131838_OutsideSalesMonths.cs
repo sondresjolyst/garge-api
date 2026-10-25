@@ -19,7 +19,10 @@ namespace garge_api.Migrations
             WHERE "Id" = 1 AND "OtherTurnoverInOre" <> 0;
             """;
 
-        /// <summary>Puts the months back together as one figure.</summary>
+        /// <summary>
+        /// Puts the months back together as one figure. Every month is summed, also those older than 12
+        /// months, since the old figure has no months.
+        /// </summary>
         internal const string MoveBackSql = """
             UPDATE "AppSettings"
             SET "OtherTurnoverInOre" = (SELECT coalesce(sum("AmountInOre"), 0) FROM "OutsideSalesMonths")
@@ -66,6 +69,7 @@ namespace garge_api.Migrations
                 column: "OtherTurnoverInOre",
                 value: 0L);
 
+            // Sums all months back into the old figure.
             migrationBuilder.Sql(MoveBackSql);
 
             migrationBuilder.DropTable(

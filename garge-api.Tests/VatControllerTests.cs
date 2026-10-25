@@ -60,7 +60,7 @@ public class VatControllerTests
     public async Task SetOutsideSales_StoresTheMonthAndAnswersTheThreshold()
     {
         var vat = new Mock<IVatThresholdService>();
-        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
         vat.Setup(v => v.GetStatusAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status());
         var ctrl = new VatController(Db(), vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object);
 
@@ -71,17 +71,19 @@ public class VatControllerTests
         Assert.Equal(2, dto.Months.Count);
     }
 
-    [Fact]
-    public async Task SetOutsideSales_AMonthThatHasNotStarted_Answers400OnTheMonth()
+    [Theory]
+    [InlineData("The month has not started yet.")]
+    [InlineData("The month is more than 36 months back.")]
+    public async Task SetOutsideSales_AMonthTheServiceRefuses_Answers400WithItsReasonOnTheMonth(string reason)
     {
         var vat = new Mock<IVatThresholdService>();
-        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(reason);
         var ctrl = WithHttpContext(new VatController(Db(), vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object));
 
         var result = (await ctrl.SetOutsideSales(new() { Month = "2099-01", AmountInOre = 10_000 }, CancellationToken.None)).Result;
 
         var problem = Assert.IsType<ValidationProblemDetails>(Assert.IsType<BadRequestObjectResult>(result).Value);
-        Assert.Equal(["The month has not started yet."], problem.Errors["Month"]);
+        Assert.Equal([reason], problem.Errors["Month"]);
     }
 
     [Theory]
