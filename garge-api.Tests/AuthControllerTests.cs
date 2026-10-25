@@ -1,6 +1,7 @@
 using garge_api.Dtos.Auth;
 using garge_api.Models.Auth;
 using SjolystInnovation.AppKit.Auth;
+using SjolystInnovation.AppKit.SiteSettings;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using SignInResult = Microsoft.AspNetCore.Identity.SignInResult;
@@ -210,6 +211,120 @@ public class AuthControllerTests : ControllerTestBase
 
         Assert.NotNull(captured);
         Assert.Equal(expected, captured!.TermsAcceptedIp);
+    }
+
+    // The version the legal page answers for a page saved at this time.
+    private const string TermsVersion = "2026-10-19T12:34:56.123456Z";
+
+    private garge_api.Models.ApplicationDbContext DbWithTerms(string locale = "en")
+    {
+        var db = CreateDbContext();
+        db.LegalPages.Add(new LegalPage
+        {
+            Key = "terms", Locale = locale, Title = "Terms of Service", BodyMarkdown = "Terms.",
+            UpdatedAt = new DateTime(2026, 10, 19, 12, 34, 56, DateTimeKind.Utc).AddTicks(1_234_560)
+        });
+        db.LegalPages.Add(new LegalPage { Key = "privacy", Locale = locale, Title = "Privacy Policy", UpdatedAt = DateTime.UtcNow });
+        db.SaveChanges();
+        return db;
+    }
+
+    private void SetUpSuccessfulRegistration(Action<User>? created = null)
+    {
+        MockUserManager.Setup(m => m.FindByEmailAsync(It.IsAny<string>())).ReturnsAsync((User?)null);
+        MockUserManager.Setup(m => m.AddToRoleAsync(It.IsAny<User>(), It.IsAny<string>())).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.UpdateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+        MockUserManager.Setup(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
+            .Callback<User, string>((u, _) => created?.Invoke(u))
+            .ReturnsAsync(IdentityResult.Success);
+        MockMapper.Setup(m => m.Map<User>(It.IsAny<RegisterUserDto>()))
+            .Returns((RegisterUserDto src) => new User
+            {
+                Id = "new-user", UserName = src.UserName, Email = src.Email,
+                FirstName = src.FirstName, LastName = src.LastName
+            });
+    }
+
+    [Fact]
+    public async Task Register_WithTheCurrentTermsVersion_StoresIt()
+    {
+        User? captured = null;
+        SetUpSuccessfulRegistration(u => captured = u);
+        var dto = MakeRegisterDto();
+        dto.TermsVersion = TermsVersion;
+
+        var result = await CreateAuthController(DbWithTerms()).Register(dto, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(TermsVersion, captured!.TermsVersion);
+    }
+
+    [Theory]
+    [InlineData("2026-10-19T12:34:56.123455Z")]
+    [InlineData("v1-test")]
+    [InlineData("")]
+    public async Task Register_WithOtherTermsThanTheCurrent_Answers409TermsChanged(string version)
+    {
+        SetUpSuccessfulRegistration();
+        var dto = MakeRegisterDto();
+        dto.TermsVersion = version;
+
+        var result = await CreateAuthController(DbWithTerms()).Register(dto, TestContext.Current.CancellationToken);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result);
+        Assert.Equal("termsChanged", conflict.Value!.GetType().GetProperty("code")!.GetValue(conflict.Value));
+        Assert.Equal("The terms have changed. Read the new terms and accept them again.", conflict.Value.GetType().GetProperty("message")!.GetValue(conflict.Value));
+        MockUserManager.Verify(m => m.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
+        MockVerificationEmails.Verify(m => m.SendEmailVerificationAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Register_WithTermsOnlyInAnotherLanguage_ChecksTheFallback()
+    {
+        // Garge's pages are English. Terms saved under another language are not garge's terms.
+        SetUpSuccessfulRegistration();
+        var dto = MakeRegisterDto();
+        dto.TermsVersion = "v1-test";
+
+        var result = await CreateAuthController(DbWithTerms(locale: "no")).Register(dto, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task Register_WithNoTermsPage_AcceptsTheVersionSent()
+    {
+        User? captured = null;
+        SetUpSuccessfulRegistration(u => captured = u);
+        var dto = MakeRegisterDto();
+        dto.TermsVersion = "v1-test";
+
+        var result = await CreateAuthController(CreateDbContext()).Register(dto, TestContext.Current.CancellationToken);
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal("v1-test", captured!.TermsVersion);
+    }
+
+    [Theory]
+    [InlineData(27, true)]
+    [InlineData(40, true)]
+    [InlineData(41, false)]
+    public void RegisterUserDto_TermsVersionHoldsUpTo40Characters(int length, bool valid)
+    {
+        var dto = MakeRegisterDto();
+        dto.Password = "password1";
+        dto.TermsVersion = new string('x', length);
+
+        Assert.Equal(valid, System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            dto, new System.ComponentModel.DataAnnotations.ValidationContext(dto), null, validateAllProperties: true));
+    }
+
+    [Fact]
+    public void User_TermsVersionColumnHolds40Characters()
+    {
+        using var db = CreateDbContext();
+
+        Assert.Equal(40, db.Model.FindEntityType(typeof(User))!.FindProperty(nameof(User.TermsVersion))!.GetMaxLength());
     }
 
     [Fact]

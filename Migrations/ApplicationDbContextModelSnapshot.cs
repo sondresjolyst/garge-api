@@ -401,8 +401,8 @@ namespace garge_api.Migrations
                         .HasColumnType("character varying(45)");
 
                     b.Property<string>("TermsVersion")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<bool>("TwoFactorEnabled")
                         .HasColumnType("boolean");

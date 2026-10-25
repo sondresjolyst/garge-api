@@ -1,4 +1,5 @@
 ﻿using MapsterMapper;
+using garge_api.Constants;
 using garge_api.Dtos.Auth;
 using garge_api.Helpers;
 using garge_api.Models;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SjolystInnovation.AppKit.Auth;
 using SjolystInnovation.AppKit.Hosting;
+using SjolystInnovation.AppKit.SiteSettings;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace garge_api.Controllers
@@ -56,7 +58,7 @@ namespace garge_api.Controllers
         [SwaggerOperation(Summary = "Registers a new user.")]
         [SwaggerResponse(200, "User registered successfully.")]
         [SwaggerResponse(400, "Invalid request.")]
-        [SwaggerResponse(409, "Email is already registered.")]
+        [SwaggerResponse(409, "The terms have changed since the user read them.")]
         public async Task<IActionResult> Register([FromBody] RegisterUserDto registerUserDto, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Register called");
@@ -77,6 +79,19 @@ namespace garge_api.Controllers
             {
                 _logger.LogWarning("Register failed: terms not accepted");
                 return BadRequest(new { message = "You must accept the Terms of Service to register." });
+            }
+
+            // The user accepted the terms they read. Terms saved since then must be read first.
+            var currentTerms = await _context.GetCurrentLegalPageVersionAsync(
+                LegalSeedText.TermsKey, LegalSeedText.Locale, LegalSeedText.Locales, cancellationToken);
+            if (currentTerms != null && registerUserDto.TermsVersion != currentTerms)
+            {
+                _logger.LogWarning("Register failed: the terms changed since they were read");
+                return Conflict(new
+                {
+                    code = "termsChanged",
+                    message = "The terms have changed. Read the new terms and accept them again."
+                });
             }
 
             const string genericResponse = "If the email is available, an account has been created. Check your inbox to confirm.";

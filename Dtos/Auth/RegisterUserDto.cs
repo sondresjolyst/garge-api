@@ -31,8 +31,9 @@ namespace garge_api.Dtos.Auth
         [Required]
         public bool AcceptTerms { get; set; }
 
+        /// <summary>The version of the terms the user read, as the legal page answered it.</summary>
         [Required]
-        [StringLength(20)]
+        [StringLength(40)]
         public required string TermsVersion { get; set; }
     }
 }

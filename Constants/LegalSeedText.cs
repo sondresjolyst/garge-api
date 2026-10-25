@@ -12,9 +12,14 @@ namespace garge_api.Constants
         /// <summary>Garge writes its legal pages in English only.</summary>
         public const string Locale = "en";
 
+        /// <summary>The languages of the legal pages. The first is the fallback.</summary>
+        public static readonly string[] Locales = [Locale];
+
+        public const string TermsKey = "terms";
+
         public static readonly LegalPageSeed[] All =
         [
-            new("terms", Locale, "Terms of Service", Terms),
+            new(TermsKey, Locale, "Terms of Service", Terms),
             new("privacy", Locale, "Privacy Policy", Privacy),
             new("cookies", Locale, "Cookie Policy", Cookies),
         ];
@@ -22,7 +27,7 @@ namespace garge_api.Constants
         /// <summary>The options for <c>MapAppKitLegalPages</c>: English only, and editing needs the Admin policy.</summary>
         public static void Configure(AppKitLegalPagesOptions options)
         {
-            options.Locales = [Locale];
+            options.Locales = Locales;
             options.Policy = RoleNames.Admin;
         }
 
