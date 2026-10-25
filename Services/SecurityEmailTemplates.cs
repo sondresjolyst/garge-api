@@ -22,6 +22,23 @@ namespace garge_api.Services
             }, body);
         }
 
+        public static string SensorOffline(AppSettings s, string? firstName, string sensorName, int thresholdHours)
+        {
+            var greeting = string.IsNullOrWhiteSpace(firstName) ? "Hi there," : $"Hi {H(firstName)},";
+
+            var body = $$"""
+                <h1>Sensor offline</h1>
+                <p>{{greeting}}</p>
+                <p>{{H(sensorName)}} has not reported in over {{thresholdHours}}h.</p>
+                """;
+
+            return EmailLayout.Render(s, new EmailLayout.Meta
+            {
+                Number = "ALERT",
+                Subtitle = $"SENSOR OFFLINE  ·  {LocalTime.Format(DateTime.UtcNow)}"
+            }, body);
+        }
+
         private static string H(string? v) => HttpUtility.HtmlEncode(v ?? string.Empty);
     }
 }

@@ -1,5 +1,6 @@
 using garge_api.Constants;
 using garge_api.Models;
+using garge_api.Models.Admin;
 using garge_api.Models.Push;
 using Microsoft.EntityFrameworkCore;
 
@@ -45,9 +46,11 @@ namespace garge_api.Services
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             var push = scope.ServiceProvider.GetRequiredService<IWebPushService>();
+            var email = scope.ServiceProvider.GetRequiredService<IEmailService>();
 
             var users = await db.UserProfiles
-                .Where(up => up.PushNotificationsEnabled)
+                .Include(up => up.User)
+                .Where(up => up.PushNotificationsEnabled || up.EmailNotificationsEnabled)
                 .ToListAsync(ct);
 
             if (users.Count == 0) return;
@@ -91,20 +94,36 @@ namespace garge_api.Services
                         var sensor = await db.Sensors.FindAsync([sensorId], ct);
                         var name = customName ?? sensor?.DefaultName ?? $"Sensor #{sensorId}";
 
-                        bool sent;
-                        try
+                        var sent = false;
+                        if (user.PushNotificationsEnabled)
                         {
-                            sent = await push.SendAsync(
-                                user.Id,
-                                "Sensor offline",
-                                $"{name} has not reported in over {user.OfflineAlertThresholdHours}h.",
-                                $"garge-offline-{sensorId}",
-                                ct);
+                            try
+                            {
+                                sent = await push.SendAsync(
+                                    user.Id,
+                                    "Sensor offline",
+                                    $"{name} has not reported in over {user.OfflineAlertThresholdHours}h.",
+                                    $"garge-offline-{sensorId}",
+                                    ct);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogError(ex, "Push failed for sensor {SensorId} user {UserId}", sensorId, user.Id);
+                            }
                         }
-                        catch (Exception ex)
+
+                        if (user.EmailNotificationsEnabled && !string.IsNullOrWhiteSpace(user.User.Email))
                         {
-                            logger.LogError(ex, "Push failed for sensor {SensorId} user {UserId}", sensorId, user.Id);
-                            continue;
+                            try
+                            {
+                                var settings = await db.AppSettings.FindAsync([1], ct) ?? new AppSettings();
+                                var html = SecurityEmailTemplates.SensorOffline(settings, user.User.FirstName, name, user.OfflineAlertThresholdHours);
+                                sent |= await email.SendEmailAsync(user.User.Email, "Sensor offline", html);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogError(ex, "Offline email failed for sensor {SensorId} user {UserId}", sensorId, user.Id);
+                            }
                         }
 
                         if (sent)
