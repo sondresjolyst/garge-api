@@ -6,7 +6,8 @@ namespace garge_api.Services
     /// </summary>
     public static class LocalTime
     {
-        private static readonly TimeZoneInfo Zone = Resolve();
+        /// <summary>Norwegian time, or UTC when the host carries no timezone database.</summary>
+        public static readonly TimeZoneInfo Zone = Resolve();
 
         /// <summary>Times keep a "UTC" suffix when the timezone database is missing, rather than reading an hour or two wrong with no warning.</summary>
         public static string Format(DateTime utc, string format = "yyyy-MM-dd HH:mm")

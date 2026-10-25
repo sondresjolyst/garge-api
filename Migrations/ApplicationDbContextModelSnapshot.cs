@@ -17,7 +17,7 @@ namespace garge_api.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.12")
+                .HasAnnotation("ProductVersion", "10.0.13")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -499,9 +499,6 @@ namespace garge_api.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
-                    b.Property<long>("OtherTurnoverInOre")
-                        .HasColumnType("bigint");
-
                     b.Property<string>("PostalCode")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -585,7 +582,6 @@ namespace garge_api.Migrations
                             ContactRecipientEmail = "sondresjoelyst@gmail.com",
                             CookieBannerEnabled = true,
                             OrgNumber = "938 517 789",
-                            OtherTurnoverInOre = 0L,
                             PostalCode = "4347",
                             PublicEmail = "sondresjoelyst@gmail.com",
                             PublicPhone = "",
@@ -626,6 +622,22 @@ namespace garge_api.Migrations
                         .IsUnique();
 
                     b.ToTable("DailyStatSnapshots");
+                });
+
+            modelBuilder.Entity("garge_api.Models.Admin.OutsideSalesMonth", b =>
+                {
+                    b.Property<DateOnly>("Month")
+                        .HasColumnType("date");
+
+                    b.Property<long>("AmountInOre")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Month");
+
+                    b.ToTable("OutsideSalesMonths");
                 });
 
             modelBuilder.Entity("garge_api.Models.Admin.RolePermission", b =>

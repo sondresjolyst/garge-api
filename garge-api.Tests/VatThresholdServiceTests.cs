@@ -43,15 +43,36 @@ public class VatThresholdServiceTests
             return invoice;
         }
 
+        /// <summary>Pays back part of a sale and makes its refund credit note, as InvoiceService does.</summary>
+        public async Task<Invoice> RefundAsync(Invoice sale, int amountInOre, DateTime at, int? creditsInvoiceId = null)
+        {
+            if (sale.OrderId is { } orderId)
+                (await Db.Orders.SingleAsync(o => o.Id == orderId)).RefundedInOre += amountInOre;
+            else
+                sale.RefundedInOre += amountInOre;
+            var note = new Invoice { Kind = InvoiceKind.CreditNote, ForRefund = true, CreditsInvoiceId = creditsInvoiceId ?? sale.Id, AmountInOre = -amountInOre, IssuedAt = at, PdfData = [1] };
+            Db.Invoices.Add(note);
+            await Db.SaveChangesAsync();
+            return note;
+        }
+
+        public async Task OutsideAsync(int year, int month, long amountInOre)
+        {
+            Db.OutsideSalesMonths.Add(new OutsideSalesMonth { Month = new DateOnly(year, month, 1), AmountInOre = amountInOre });
+            await Db.SaveChangesAsync();
+        }
+
         public async Task<AppSettings> SettingsAsync() => (await Db.AppSettings.FindAsync(1))!;
     }
 
-    private static async Task<Harness> BuildAsync(long otherTurnover = 0, bool vatEnabled = false)
+    private static async Task<Harness> BuildAsync(long outsideThisMonth = 0, bool vatEnabled = false)
     {
         var dbName = Guid.NewGuid().ToString();
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(dbName).Options);
-        db.AppSettings.Add(new AppSettings { Id = 1, OtherTurnoverInOre = otherTurnover, VatEnabled = vatEnabled });
+        db.AppSettings.Add(new AppSettings { Id = 1, VatEnabled = vatEnabled });
+        if (outsideThisMonth != 0)
+            db.OutsideSalesMonths.Add(new OutsideSalesMonth { Month = new DateOnly(Now.Year, Now.Month, 1), AmountInOre = outsideThisMonth });
         db.Users.Add(new User { Id = "buyer", UserName = "buyer@example.com", Email = "buyer@example.com", FirstName = "B", LastName = "C" });
         db.Roles.Add(new IdentityRole { Id = "role-admin", Name = "Admin", NormalizedName = "ADMIN" });
         db.UserRoles.AddRange(new IdentityUserRole<string> { UserId = "admin-1", RoleId = "role-admin" },
@@ -71,15 +92,16 @@ public class VatThresholdServiceTests
     }
 
     [Fact]
-    public async Task Turnover_CountsTheLast12MonthsOfRealSalesAndTheOtherTurnover()
+    public async Task Turnover_CountsTheLast12MonthsOfRealSalesAndTheOutsideSales()
     {
-        var h = await BuildAsync(otherTurnover: 100_000);
+        var h = await BuildAsync(outsideThisMonth: 100_000);
         await h.SaleAsync(1_000_000, Now.AddMonths(-11));
         await h.ChargeAsync(37_375, Now.AddDays(-3));
         await h.SaleAsync(500_000, Now.AddMonths(-13));                        // older than 12 months
         await h.SaleAsync(700_000, Now.AddDays(-1), isTest: true);             // test sale
         await h.ChargeAsync(700_000, Now.AddDays(-1), isTest: true);           // test charge
-        await h.SaleAsync(800_000, Now.AddDays(-2), status: OrderStatus.Refunded);
+        var refunded = await h.SaleAsync(800_000, Now.AddDays(-2), status: OrderStatus.Refunded);
+        await h.RefundAsync(refunded, 800_000, Now.AddDays(-1));
 
         var status = await h.Service.GetStatusAsync(Now);
 
@@ -158,9 +180,9 @@ public class VatThresholdServiceTests
     }
 
     [Fact]
-    public async Task OtherTurnover_CountsTowardPassingTheThreshold()
+    public async Task OutsideSales_CountTowardPassingTheThreshold()
     {
-        var h = await BuildAsync(otherTurnover: 4_900_000);
+        var h = await BuildAsync(outsideThisMonth: 4_900_000);
         var sale = await h.SaleAsync(200_000, Now.AddDays(-1));
 
         Assert.Equal(sale.Id, (await h.Service.GetStatusAsync(Now)).CrossingInvoiceId);
@@ -214,25 +236,224 @@ public class VatThresholdServiceTests
     }
 
     [Fact]
-    public async Task PartialRefunds_AreTakenOffTurnoverAndTheVatOwed()
+    public async Task PartialRefunds_AreTakenOffTurnoverAndTheVatOwed_ButNotOffAnEarlierCrossing()
     {
+        // The sale passed the threshold on its own day. The refund the day after lowers turnover from then on.
         var h = await BuildAsync();
         var sale = await h.SaleAsync(5_200_000, Now.AddDays(-3));
-        var order = await h.Db.Orders.SingleAsync(o => o.Id == sale.OrderId, TestContext.Current.CancellationToken);
-        order.RefundedInOre = 300_000;
-        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await h.RefundAsync(sale, 300_000, Now.AddDays(-2));
 
-        var status = await h.Service.GetStatusAsync(Now);
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
 
         Assert.Equal(4_900_000, status.TurnoverInOre);
+        Assert.Equal(sale.Id, status.CrossingInvoiceId);
+        var owed = Assert.Single(status.Owed);
+        Assert.Equal(4_900_000, owed.AmountInOre);
+        Assert.Equal(980_000, owed.VatInOre);
+    }
+
+    [Fact]
+    public async Task ARefundBeforeTheNextSale_KeepsTurnoverUnderTheThreshold()
+    {
+        var h = await BuildAsync();
+        var first = await h.SaleAsync(3_000_000, Now.AddDays(-20));
+        await h.RefundAsync(first, 3_000_000, Now.AddDays(-10));
+        await h.SaleAsync(2_500_000, Now.AddDays(-5));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2_500_000, status.TurnoverInOre);
+        Assert.Null(status.CrossingInvoiceId);
+        Assert.Null(status.CrossedAt);
+    }
+
+    [Fact]
+    public async Task AFullyRefundedOrder_CountsUntilTheDayOfItsRefund()
+    {
+        var h = await BuildAsync();
+        var first = await h.SaleAsync(3_000_000, Now.AddDays(-20), status: OrderStatus.Refunded);
+        var second = await h.SaleAsync(2_500_000, Now.AddDays(-5));
+        await h.RefundAsync(first, 3_000_000, Now.AddDays(-2));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2_500_000, status.TurnoverInOre);
+        Assert.Equal(second.Id, status.CrossingInvoiceId);
+        Assert.Equal([second.Id], status.Owed.Select(o => o.InvoiceId));
+    }
+
+    [Fact]
+    public async Task ARefundOfTheInvoiceThatReplacedASale_CountsAgainstTheSale()
+    {
+        var h = await BuildAsync();
+        var sale = await h.SaleAsync(3_000_000, Now.AddDays(-20));
+        var replacement = new Invoice { ReplacesInvoiceId = sale.Id, AmountInOre = 3_000_000, VatPercentage = 25, IssuedAt = Now.AddDays(-15), PdfData = [1] };
+        h.Db.Invoices.Add(replacement);
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await h.RefundAsync(sale, 1_000_000, Now.AddDays(-10), creditsInvoiceId: replacement.Id);
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2_000_000, status.TurnoverInOre);
+    }
+
+    [Fact]
+    public async Task ARefundWithoutItsCreditNoteYet_CountsFromWhenTheOrderChanged()
+    {
+        var h = await BuildAsync();
+        var sale = await h.SaleAsync(4_000_000, Now.AddDays(-20));
+        var order = await h.Db.Orders.SingleAsync(o => o.Id == sale.OrderId, TestContext.Current.CancellationToken);
+        order.RefundedInOre = 1_000_000;
+        order.UpdatedAt = Now.AddDays(-10);
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        await h.SaleAsync(1_500_000, Now.AddDays(-5));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(4_500_000, status.TurnoverInOre);
         Assert.Null(status.CrossingInvoiceId);
     }
 
     [Fact]
-    public async Task OtherTurnover_DoesNotCountTowardOlderWindows()
+    public async Task TheWindowIsWholeNorwegianDays()
     {
-        // 45 000 kr of other sales covers the last 12 months only. Sales 18 months ago stay below.
-        var h = await BuildAsync(otherTurnover: 4_500_000);
+        // The 12 months up to 10 October 2026 start on 11 October 2025 in Norway. 22:30 UTC on 10 October
+        // is past midnight in Norway, 13:00 UTC is not.
+        var h = await BuildAsync();
+        await h.SaleAsync(100_000, new DateTime(2025, 10, 10, 13, 0, 0, DateTimeKind.Utc));
+        await h.SaleAsync(20_000, new DateTime(2025, 10, 10, 22, 30, 0, DateTimeKind.Utc));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(20_000, status.TurnoverInOre);
+    }
+
+    [Fact]
+    public async Task Status_ListsEachMonthTheWindowOverlaps_WithItsSalesAndOutsideSales()
+    {
+        var h = await BuildAsync(outsideThisMonth: 50_000);
+        await h.OutsideAsync(2025, 12, 70_000);
+        await h.SaleAsync(30_000, new DateTime(2025, 12, 5, 12, 0, 0, DateTimeKind.Utc));
+        var refunded = await h.SaleAsync(10_000, new DateTime(2025, 12, 6, 12, 0, 0, DateTimeKind.Utc));
+        await h.RefundAsync(refunded, 4_000, Now.AddDays(-1));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(13, status.Months.Count);
+        Assert.Equal(new DateOnly(2025, 10, 1), status.Months[0].Month);
+        Assert.Equal(new DateOnly(2026, 10, 1), status.Months[^1].Month);
+        var december = Assert.Single(status.Months, m => m.Month == new DateOnly(2025, 12, 1));
+        Assert.Equal((36_000L, 70_000L), (december.SalesInOre, december.OutsideInOre));
+        Assert.Equal(50_000, status.Months[^1].OutsideInOre);
+        Assert.Equal(156_000, status.TurnoverInOre);
+    }
+
+    [Fact]
+    public async Task OutsideSalesAlone_PassTheThreshold_FromTheFirstDayOfTheirMonth()
+    {
+        var h = await BuildAsync(outsideThisMonth: 5_100_000);
+        await h.SaleAsync(10_000, new DateTime(2026, 9, 30, 21, 0, 0, DateTimeKind.Utc));   // 30 September in Norway
+        var sale = await h.SaleAsync(10_000, Now.AddDays(-1));
+
+        await h.Service.CheckAsync(Now, TestContext.Current.CancellationToken);
+
+        var settings = await h.SettingsAsync();
+        Assert.Null(settings.VatCrossingInvoiceId);
+        Assert.Equal(new DateTime(2026, 9, 30, 22, 0, 0, DateTimeKind.Utc), settings.VatCrossedAt);   // 1 October in Norway
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+        Assert.Null(status.CrossingInvoiceId);
+        Assert.Equal([sale.Id], status.Owed.Select(o => o.InvoiceId));
+        h.Notifier.Verify(n => n.NotifyUserAsync("admin-1", "Register for VAT", It.Is<string>(m => m.Contains("sales outside garge on 2026-10-01")), "garge-vat-threshold-100", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ASaleRefundedInFullAfterTheCrossing_OwesNoVat()
+    {
+        var h = await BuildAsync();
+        var crossing = await h.SaleAsync(5_100_000, Now.AddDays(-10));
+        var refunded = await h.SaleAsync(20_000, Now.AddDays(-5));
+        await h.RefundAsync(refunded, 20_000, Now.AddDays(-4));
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal([crossing.Id], status.Owed.Select(o => o.InvoiceId));
+    }
+
+    [Fact]
+    public async Task TheSavedCrossing_WinsOverAnEarlierOneFoundLater()
+    {
+        // Outside sales entered afterwards for August would make the first sale the crossing.
+        var h = await BuildAsync();
+        var first = await h.SaleAsync(3_000_000, new DateTime(2026, 8, 11, 12, 0, 0, DateTimeKind.Utc));
+        var second = await h.SaleAsync(2_100_000, new DateTime(2026, 9, 10, 12, 0, 0, DateTimeKind.Utc));
+        await h.Service.CheckAsync(Now, TestContext.Current.CancellationToken);
+        Assert.Equal(second.Id, (await h.SettingsAsync()).VatCrossingInvoiceId);
+
+        await h.OutsideAsync(2026, 8, 2_500_000);
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(second.Id, status.CrossingInvoiceId);
+        Assert.Equal(second.IssuedAt, status.CrossedAt);
+        Assert.DoesNotContain(status.Owed, o => o.InvoiceId == first.Id);
+    }
+
+    [Fact]
+    public async Task TheCrossingFoundWhenOutsideSalesPassedIt_IsKept()
+    {
+        var h = await BuildAsync(outsideThisMonth: 5_100_000);
+        await h.Service.CheckAsync(Now, TestContext.Current.CancellationToken);
+        h.Db.OutsideSalesMonths.RemoveRange(h.Db.OutsideSalesMonths);
+        await h.Db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var status = await h.Service.GetStatusAsync(Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new DateTime(2026, 9, 30, 22, 0, 0, DateTimeKind.Utc), status.CrossedAt);
+    }
+
+    [Fact]
+    public async Task SetOutsideSales_StoresUpdatesAndRemovesAMonth()
+    {
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+
+        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 120_000, Now, ct));
+        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 30_000, Now, ct));
+        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 150_000, Now, ct));
+        Assert.Equal(180_000, (await h.Service.GetStatusAsync(Now, ct)).TurnoverInOre);
+
+        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 0, Now, ct));
+        var row = Assert.Single(await h.Db.OutsideSalesMonths.AsNoTracking().ToListAsync(ct));
+        Assert.Equal((new DateOnly(2026, 9, 1), 150_000L, Now), (row.Month, row.AmountInOre, row.UpdatedAt));
+    }
+
+    [Fact]
+    public async Task SetOutsideSales_RefusesAMonthThatHasNotStarted()
+    {
+        // 23:30 UTC on 31 October is 1 November in Norway, so November has started.
+        var h = await BuildAsync();
+        var ct = TestContext.Current.CancellationToken;
+        var lateOctober = new DateTime(2026, 10, 31, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, lateOctober, ct));
+        Assert.Empty(await h.Db.OutsideSalesMonths.ToListAsync(ct));
+        Assert.True(await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 11, 1), 10_000, new DateTime(2026, 10, 31, 23, 30, 0, DateTimeKind.Utc), ct));
+    }
+
+    [Fact]
+    public async Task SetOutsideSales_ChecksTheThreshold()
+    {
+        var h = await BuildAsync();
+
+        await h.Service.SetOutsideSalesAsync(new DateOnly(2026, 10, 1), 4_000_000, Now, TestContext.Current.CancellationToken);
+
+        Assert.Equal(80, (await h.SettingsAsync()).VatThresholdWarnedPercent);
+    }
+
+    [Fact]
+    public async Task OutsideSales_DoNotCountTowardOlderWindows()
+    {
+        // 45 000 kr of outside sales this month counts in no window that ends 18 months ago.
+        var h = await BuildAsync(outsideThisMonth: 4_500_000);
         await h.SaleAsync(600_000, Now.AddMonths(-18));
 
         var status = await h.Service.GetStatusAsync(Now);

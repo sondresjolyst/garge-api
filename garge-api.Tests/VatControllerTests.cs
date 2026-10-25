@@ -1,11 +1,15 @@
 using System.Text;
 using garge_api.Controllers;
+using garge_api.Dtos.Admin;
 using garge_api.Models;
 using garge_api.Models.Admin;
 using garge_api.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using SjolystInnovation.AppKit.VatThreshold;
 using Xunit;
 
 namespace garge_api.Tests;
@@ -29,7 +33,18 @@ public class VatControllerTests
     }
 
     private static VatThresholdStatus Status(params VatOwedSale[] owed) =>
-        new(5_100_000, 0, VatThresholdService.ThresholdInOre, false, owed.FirstOrDefault()?.InvoiceId, owed.FirstOrDefault()?.IssuedAt, owed);
+        new(5_100_000, VatThresholdService.ThresholdInOre, false, owed.FirstOrDefault()?.InvoiceId, owed.FirstOrDefault()?.IssuedAt, owed,
+            [new VatTurnoverMonth(new DateOnly(2025, 10, 1), 100_000, 0), new VatTurnoverMonth(new DateOnly(2026, 9, 1), 4_900_000, 100_000)]);
+
+    // ValidationProblem needs the MVC services, as it has in the app.
+    private static VatController WithHttpContext(VatController ctrl)
+    {
+        ctrl.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { RequestServices = new ServiceCollection().AddControllers().Services.BuildServiceProvider() }
+        };
+        return ctrl;
+    }
 
     [Fact]
     public async Task MakeCorrections_WithVatOff_IsRefused()
@@ -42,16 +57,62 @@ public class VatControllerTests
     }
 
     [Fact]
-    public async Task SetOtherTurnover_SavesItAndChecksTheThreshold()
+    public async Task SetOutsideSales_StoresTheMonthAndAnswersTheThreshold()
     {
-        using var db = Db();
         var vat = new Mock<IVatThresholdService>();
-        var ctrl = new VatController(db, vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object);
+        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        vat.Setup(v => v.GetStatusAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status());
+        var ctrl = new VatController(Db(), vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object);
 
-        Assert.IsType<NoContentResult>(await ctrl.SetOtherTurnover(new() { OtherTurnoverInOre = 1_234_500 }, CancellationToken.None));
+        var dto = (await ctrl.SetOutsideSales(new() { Month = "2026-09", AmountInOre = 1_234_500 }, CancellationToken.None)).Value!;
 
-        Assert.Equal(1_234_500, (await db.AppSettings.SingleAsync(TestContext.Current.CancellationToken)).OtherTurnoverInOre);
-        vat.Verify(v => v.CheckAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+        vat.Verify(v => v.SetOutsideSalesAsync(new DateOnly(2026, 9, 1), 1_234_500, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(5_100_000, dto.TurnoverInOre);
+        Assert.Equal(2, dto.Months.Count);
+    }
+
+    [Fact]
+    public async Task SetOutsideSales_AMonthThatHasNotStarted_Answers400OnTheMonth()
+    {
+        var vat = new Mock<IVatThresholdService>();
+        vat.Setup(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var ctrl = WithHttpContext(new VatController(Db(), vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object));
+
+        var result = (await ctrl.SetOutsideSales(new() { Month = "2099-01", AmountInOre = 10_000 }, CancellationToken.None)).Result;
+
+        var problem = Assert.IsType<ValidationProblemDetails>(Assert.IsType<BadRequestObjectResult>(result).Value);
+        Assert.Equal(["The month has not started yet."], problem.Errors["Month"]);
+    }
+
+    [Theory]
+    [InlineData("2026-13")]
+    [InlineData("2026-9")]
+    [InlineData("1999-12")]
+    [InlineData("2026-09-01")]
+    public async Task SetOutsideSales_NotAMonth_IsRefusedWithoutStoring(string month)
+    {
+        var vat = new Mock<IVatThresholdService>();
+        var ctrl = WithHttpContext(new VatController(Db(), vat.Object, new Mock<IInvoiceService>().Object, Cache(false).Object));
+        var dto = new UpdateOutsideSalesDto { Month = month, AmountInOre = 10_000 };
+
+        var result = (await ctrl.SetOutsideSales(dto, CancellationToken.None)).Result;
+
+        Assert.IsType<ValidationProblemDetails>(Assert.IsType<BadRequestObjectResult>(result).Value);
+        Assert.NotEmpty(dto.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(dto)));
+        vat.Verify(v => v.SetOutsideSalesAsync(It.IsAny<DateOnly>(), It.IsAny<long>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(1_000_000_000, true)]
+    [InlineData(1_000_000_001, false)]
+    public void UpdateOutsideSalesDto_AmountIsZeroUpTo10MillionKroner(long amount, bool valid)
+    {
+        var dto = new UpdateOutsideSalesDto { Month = "2026-09", AmountInOre = amount };
+
+        Assert.Equal(valid, System.ComponentModel.DataAnnotations.Validator.TryValidateObject(
+            dto, new System.ComponentModel.DataAnnotations.ValidationContext(dto), null, validateAllProperties: true));
     }
 
     [Fact]
@@ -68,6 +129,8 @@ public class VatControllerTests
         Assert.Equal(44_000, dto.OwedVatInOre);
         Assert.Equal(7, dto.CrossingInvoiceId);
         Assert.Equal([7, 8], dto.Owed.Select(o => o.InvoiceId));
+        Assert.Equal(["2025-10", "2026-09"], dto.Months.Select(m => m.Month));
+        Assert.Equal((4_900_000L, 100_000L), (dto.Months[1].SalesInOre, dto.Months[1].OutsideInOre));
     }
 
     [Fact]
