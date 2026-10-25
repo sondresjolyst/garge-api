@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.21.1](https://github.com/sondresjolyst/garge-api/compare/v2.21.0...v2.21.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **subscriptions:** end subscriptions on account deletion and stop charges on ended agreements ([#533](https://github.com/sondresjolyst/garge-api/issues/533)) ([dce7a3a](https://github.com/sondresjolyst/garge-api/commit/dce7a3a8e8a501a28573b0619b62cf4a3e48ada2))
+
 ## [2.21.0](https://github.com/sondresjolyst/garge-api/compare/v2.20.1...v2.21.0) (2026-10-25)
 
 
