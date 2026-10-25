@@ -3,6 +3,7 @@ using garge_api.Models;
 using garge_api.Models.Subscription;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using SjolystInnovation.AppKit.Vipps;
 
 namespace garge_api.Services
 {
@@ -13,6 +14,8 @@ namespace garge_api.Services
         private readonly ILogger<SubscriptionChargeSchedulerService> _logger;
         private static readonly TimeSpan Interval = TimeSpan.FromDays(1);
         private static readonly TimeSpan Lookahead = TimeSpan.FromDays(7);
+        // The retryDays the Vipps client sends with a charge when the request leaves it out.
+        private const int ChargeRetryDays = 5;
         // The alerts the admins got, by kind and charge key or subscription, so a failure that keeps coming back is
         // reported once. Sweeps run one at a time.
         private readonly HashSet<string> _alertedKeys = [];
@@ -55,6 +58,11 @@ namespace garge_api.Services
                         $"Subscription #{sub.Id} is stopped, but its Vipps agreement is in the {(sub.IsTest ? "test" : "production")} environment, which has no credentials here. Stop it in the Vipps portal.",
                         $"garge-stop-unconfigured-{sub.Id}", sub.Id, stoppingToken);
                 await SubscriptionAgreementStops.StopAsync(db, vipps, _vippsOpts, stops, _logger, stoppingToken);
+                var failingSince = DateTime.UtcNow - SubscriptionAgreementStops.StopFailingAlertAfter;
+                foreach (var sub in stops.Where(s => s.AgreementStopRequestedAt < failingSince && _vippsOpts.IsConfigured(s.IsTest)))
+                    await AlertOnceAsync(notifier, db, $"stop-failing:{sub.Id}", "A Vipps agreement cannot be stopped",
+                        $"Subscription #{sub.Id} is stopped, but stopping its Vipps agreement has failed since {LocalTime.Format(sub.AgreementStopRequestedAt!.Value, "yyyy-MM-dd")}. It is tried again every day. Check the log and the agreement in the Vipps portal.",
+                        $"garge-stop-failing-{sub.Id}", sub.Id, stoppingToken);
 
                 var due = await db.Subscriptions
                     .Include(s => s.Product)
@@ -90,7 +98,11 @@ namespace garge_api.Services
                     var dueDate = sub.NextChargeDate.Value;
                     // A failed attempt needs a new charge with its own key. Reusing a key returns the failed charge.
                     var key = SubscriptionCharges.Key(sub.Id, dueDate, sub.FailedChargeAttempts);
-                    if (sub.LastChargeKey == key) continue;
+                    if (sub.LastChargeKey == key)
+                    {
+                        await StopIfPostedChargeWentQuietAsync(vipps, notifier, db, sub, key, dueDate, stoppingToken);
+                        continue;
+                    }
                     var amountInOre = SubscriptionPricing.UnitPriceFor(sub, notices, dueDate) * sub.Quantity;
                     try
                     {
@@ -182,7 +194,26 @@ namespace garge_api.Services
         // A 400 or a 404 may mean the agreement has ended, which the agreement itself then has to confirm. A 401 or a
         // 403 means credentials or merchant settings Vipps does not accept, which the subscriber is never stopped for.
         internal static bool IsChargeRefusal(Exception ex) =>
-            ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.NotFound };
+            ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest or System.Net.HttpStatusCode.NotFound }
+            && ex is not VippsAccessTokenException;
+
+        // A posted charge is captured or fails by its due date plus its retry days, and a webhook says which. When
+        // neither came two days after that, the agreement may have been stopped with its webhook lost. The posted
+        // key then holds the subscription forever, so an agreement that has ended stops the subscription here.
+        private async Task StopIfPostedChargeWentQuietAsync(IVippsService vipps, ISecurityNotifier notifier, ApplicationDbContext db,
+            Subscription sub, string key, DateTime dueDate, CancellationToken ct)
+        {
+            if (dueDate.AddDays(ChargeRetryDays + 2) > DateTime.UtcNow) return;
+            var ended = await SubscriptionAgreementStops.EndedStatusAsync(vipps, sub, _logger);
+            if (ended == null) return;
+            sub.Status = SubscriptionStatus.Stopped;
+            sub.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            _logger.LogWarning("ChargeScheduler: stopped subscription {SubId}, its posted charge got no answer and its Vipps agreement is {Status}", sub.Id, ended);
+            await AlertOnceAsync(notifier, db, $"quiet-ended:{key}", "A subscription was stopped",
+                $"Subscription #{sub.Id} ({sub.Product?.Name}) had a charge due {LocalTime.Format(dueDate, "yyyy-MM-dd")} that Vipps never reported on, and its agreement is {ended} at Vipps, so the subscription is stopped.",
+                $"garge-quiet-ended-{sub.Id}", sub.Id, ct);
+        }
 
         // Active subscriptions whose last charge attempt failed, where the webhook could not cancel the agreement.
         private async Task StopUnpaidAsync(ApplicationDbContext db, IVippsService vipps, ISubscriptionEmailService email, CancellationToken stoppingToken)

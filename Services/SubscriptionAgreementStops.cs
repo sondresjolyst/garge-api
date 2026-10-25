@@ -2,6 +2,7 @@ using System.Net;
 using garge_api.Models;
 using garge_api.Models.Subscription;
 using Microsoft.EntityFrameworkCore;
+using SjolystInnovation.AppKit.Vipps;
 
 namespace garge_api.Services
 {
@@ -10,6 +11,9 @@ namespace garge_api.Services
     {
         /// <summary>How long a mark keeps a deleted account from being purged when its agreement cannot be stopped.</summary>
         public static readonly TimeSpan MarkHoldsPurge = TimeSpan.FromDays(30);
+
+        /// <summary>How long a stop may keep failing before the admins are told.</summary>
+        public static readonly TimeSpan StopFailingAlertAfter = TimeSpan.FromDays(3);
 
         /// <summary>
         /// Stops each marked agreement and clears the mark. When Vipps refuses the stop, the mark is cleared only if
@@ -42,9 +46,9 @@ namespace garge_api.Services
                 logger.LogInformation("Stopped the Vipps agreement of subscription {SubscriptionId}", sub.Id);
                 return true;
             }
-            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound)
+            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound && ex is not VippsAccessTokenException)
             {
-                // A 400 can also come from the access token or the request, so the agreement itself decides.
+                // A 400 can also come from the request, so the agreement itself decides.
                 var ended = await EndedStatusAsync(vipps, sub, logger);
                 if (ended != null)
                 {
@@ -73,7 +77,8 @@ namespace garge_api.Services
                 var status = (await vipps.GetAgreementAsync(sub.VippsAgreementId, sub.IsTest))?.Status;
                 return status is "STOPPED" or "EXPIRED" ? status : null;
             }
-            catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            // Only a 404 from the agreement call itself. One from the access token says nothing about the agreement.
+            catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound && ex is not VippsAccessTokenException)
             {
                 return "UNKNOWN";
             }

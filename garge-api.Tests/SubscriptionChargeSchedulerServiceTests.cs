@@ -778,4 +778,123 @@ public class SubscriptionChargeSchedulerServiceTests
         await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
         Assert.NotNull(sub.AgreementStopRequestedAt);
     }
+
+    private static SjolystInnovation.AppKit.Vipps.VippsAccessTokenException TokenFailure(System.Net.HttpStatusCode status) =>
+        new("no token", null, status);
+
+    [Fact]
+    public async Task Scheduler_A404FromTheAccessToken_NeverStopsASubscription()
+    {
+        // A wrong base URL answers 404 to the token request, before any agreement is asked about.
+        var (svc, vipps, db) = BuildHarness();
+        var sub = await AddDueSubAsync(db);
+        SetupCreate(vipps, Refused());
+        vipps.Setup(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>())).ThrowsAsync(TokenFailure(System.Net.HttpStatusCode.NotFound));
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, sub.Status);
+    }
+
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.BadRequest)]
+    [InlineData(System.Net.HttpStatusCode.NotFound)]
+    public async Task Scheduler_ATokenFailureOnTheCharge_IsNotReadAsARefusal(System.Net.HttpStatusCode status)
+    {
+        var (svc, vipps, db) = BuildHarness();
+        var sub = await AddDueSubAsync(db);
+        SetupCreate(vipps, TokenFailure(status));
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, sub.Status);
+    }
+
+    [Theory]
+    [InlineData(4, 1)]
+    [InlineData(1, 0)]
+    public async Task Scheduler_AConfiguredStopFailingForThreeDays_TellsTheAdminsOnce(int daysMarked, int alerts)
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db);
+        var sub = await AddDueSubAsync(db);
+        sub.Status = SubscriptionStatus.Stopped;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow.AddDays(-daysMarked);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()))
+            .ThrowsAsync(new HttpRequestException("down", null, System.Net.HttpStatusCode.ServiceUnavailable));
+        SetupNotifier();
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        Notifier.Verify(n => n.NotifyUserAsync("admin-1", "A Vipps agreement cannot be stopped", It.Is<string>(m => m.Contains("has failed since")), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Exactly(alerts));
+    }
+
+    [Fact]
+    public async Task Scheduler_ATokenFailureOnAStop_KeepsTheMark()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        var sub = await AddDueSubAsync(db);
+        sub.Status = SubscriptionStatus.Stopped;
+        sub.AgreementStopRequestedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        vipps.Setup(v => v.CancelAgreementAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>())).ThrowsAsync(TokenFailure(System.Net.HttpStatusCode.NotFound));
+        vipps.Setup(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>())).ThrowsAsync(TokenFailure(System.Net.HttpStatusCode.NotFound));
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(sub.AgreementStopRequestedAt);
+    }
+
+    private async Task<Subscription> AddPostedChargeAsync(ApplicationDbContext db, int daysAgo)
+    {
+        await db.Products.AddAsync(MakePrimaryProduct(), TestContext.Current.CancellationToken);
+        var due = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(-daysAgo), DateTimeKind.Utc);
+        var sub = new Subscription { UserId = "user-1", ProductId = 1, UnitPriceInOre = 29900, VippsAgreementId = "agr_sched", Status = SubscriptionStatus.Active, NextChargeDate = due };
+        await db.Subscriptions.AddAsync(sub, TestContext.Current.CancellationToken);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        sub.LastChargeKey = SubscriptionCharges.Key(sub.Id, due, 0);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        return sub;
+    }
+
+    [Theory]
+    [InlineData("STOPPED", SubscriptionStatus.Stopped)]
+    [InlineData("EXPIRED", SubscriptionStatus.Stopped)]
+    [InlineData("ACTIVE", SubscriptionStatus.Active)]
+    public async Task Scheduler_APostedChargeThatWentQuiet_StopsTheSubscriptionOnlyWhenTheAgreementEnded(string agreement, SubscriptionStatus expected)
+    {
+        var (svc, vipps, db) = BuildHarness();
+        await AddAdminAsync(db);
+        var sub = await AddPostedChargeAsync(db, daysAgo: 8);
+        SetupAgreement(vipps, agreement);
+        SetupNotifier();
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(expected, sub.Status);
+        vipps.Verify(v => v.CreateChargeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+        Notifier.Verify(n => n.NotifyUserAsync("admin-1", "A subscription was stopped", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            expected == SubscriptionStatus.Stopped ? Times.Once() : Times.Never());
+    }
+
+    [Fact]
+    public async Task Scheduler_APostedChargeStillWithinItsRetryDays_IsLeftAlone()
+    {
+        var (svc, vipps, db) = BuildHarness();
+        var sub = await AddPostedChargeAsync(db, daysAgo: 6);
+        SetupAgreement(vipps, "STOPPED");
+
+        await svc.ScheduleDueChargesAsync(CancellationToken.None);
+
+        vipps.Verify(v => v.GetAgreementAsync(It.IsAny<string>(), It.IsAny<bool?>()), Times.Never);
+        await db.Entry(sub).ReloadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(SubscriptionStatus.Active, sub.Status);
+    }
 }

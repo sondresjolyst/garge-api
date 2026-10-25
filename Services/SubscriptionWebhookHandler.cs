@@ -205,6 +205,20 @@ namespace garge_api.Services
         // admins are told, so a captured charge can be refunded by hand. Nothing is refunded here.
         private async Task AlertStoppedAsync(Subscription subscription, VippsRecurringEvent payload)
         {
+            // An activation after a stop that went through needs no one. The alert goes out when the agreement is
+            // active at Vipps, or cannot be read.
+            if (payload.EventType == VippsEvents.AgreementActivated)
+            {
+                try
+                {
+                    var status = (await vipps.GetAgreementAsync(subscription.VippsAgreementId, subscription.IsTest))?.Status;
+                    if (status is not null and not "ACTIVE") return;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Reading the agreement of stopped subscription {SubscriptionId} failed", subscription.Id);
+                }
+            }
             var amount = payload.AmountCaptured ?? payload.Amount;
             var message = payload.EventType == VippsEvents.ChargeCaptured
                 ? $"Vipps captured {(amount is int ore ? $"{MoneyFormat.Nok(ore)} kr" : "a charge")} for subscription #{subscription.Id}, which is stopped. Check whether it has to be refunded."
