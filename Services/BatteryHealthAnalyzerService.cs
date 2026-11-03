@@ -215,10 +215,11 @@ namespace garge_api.Services
             var history = ApplyCharges(db, sensor.Id, stored, final, detection.Charges);
             if (samples.Count == 0) return;
 
-            // Charges stay stored across owners, but health shows a new owner only their own.
+            // Charges stay stored across owners. Health starts at the earliest current
+            // owner, so history only drops away when the owners who hold it have left.
             var ownerStart = await db.SensorOwnershipPeriods
                 .CurrentOwnerPeriods(db, sensor.Id)
-                .OrderByDescending(p => p.StartedAt)
+                .OrderBy(p => p.StartedAt)
                 .Select(p => (DateTime?)p.StartedAt)
                 .FirstOrDefaultAsync(ct);
             var ownedHistory = ownerStart == null ? history : history.Where(e => e.StartedAt >= ownerStart.Value).ToList();

@@ -128,17 +128,19 @@ reading. `RestingMedian` and `VoltageMin24h` are null in that row, because no re
 ## Health across owners
 
 A sensor can change owner. Charges are detected and stored across the whole sensor history, but a new health
-row shows the current owner only their own charges and rests.
+row uses only charges and rests from the time the current owners have held the sensor.
 
 `Status`, `DailyDropPctPerWeek`, `LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d` and
-`SelfDischargePctPerWeek` use only charges that started at or after the start of the current owner's period in
-`SensorOwnershipPeriods`. This is the same boundary `GET /api/battery-health/name/{sensorName}/events` applies.
-A new owner therefore starts at `learning` with no last full charge, until their own charges exist. The period
-of a sensor's first owner covers all its earlier readings, so they keep that history.
+`SelfDischargePctPerWeek` use only charges that started at or after the earliest start among the current owners'
+periods in `SensorOwnershipPeriods`. This is the same boundary `GET /api/battery-health/name/{sensorName}/events` applies.
+After a sale with no owner left from before, the new owner therefore starts at `learning` with no last full
+charge, until their own charges exist. The period of a sensor's first owner covers all its earlier readings, so they keep that history.
 
 - **A charge that started before the claim** belongs to the earlier period, even if it ends after the claim.
 - **A share recipient** also holds a period but is not an owner, so a share changes nothing here.
-- **Several current owners:** the latest period start applies, so no owner sees charges from before they claimed.
+- **Several current owners:** the earliest period start applies, so a new owner on a sensor with an owner still
+  present sees status derived from that earlier history. Once the earlier owner's period ends, the next run limits
+  to the remaining owner's start.
 - **No current owner:** nothing limits the row, so it uses the whole history. After a sale only admins can read
   such a row, since it falls outside the ended period and before any later claim. On a sensor that has never
   had an owner, the first owner can read it, and that history is theirs.
@@ -148,7 +150,7 @@ limited this way.
 
 ## Status
 
-Status uses full charges with a settled voltage inside the current owner's period, oldest first. These are
+Status uses full charges with a settled voltage inside the current owners' time, as described above, oldest first. These are
 called anchors below.
 
 - **Fewer than 2 anchors:** `learning`.
@@ -167,7 +169,7 @@ The status limits are starting values. They have not yet been tested on a failin
 `SelfDischargePctPerWeek` is for information only and never affects status.
 
 It measures the latest rest of at least 15 days (`SelfDischargeMinRestDays`) after a full charge inside the
-current owner's period. A rest ends
+current owners' time. A rest ends
 at the next charge start or at the latest reading. Day 0 is 36 hours after the charge ended
 (`SettledEndHours`). A rest after a partial charge is skipped, since the battery did not start from the same
 state of charge.
@@ -218,7 +220,7 @@ If a replay finds that a later reading changes the final charge, or the reading 
 replays the whole history instead. This can happen after the service was down past the 5-day limit.
 
 `LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d`, status and slope come from the stored full
-charges plus this run, limited to the current owner, so history older than the readings read is kept.
+charges plus this run, limited to the current owners, so history older than the readings read is kept.
 
 A run that resumes must give the same charges as one full replay. `IncrementalRuns_EqualOneFullReplay` tests
 this on real-shaped traces under `garge-api.Tests/Fixtures/Battery`. Readings that arrive late, with a time

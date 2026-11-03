@@ -35,7 +35,8 @@ namespace garge_api.Helpers
 
         /// <summary>
         /// The open periods of a sensor's current owners. A share recipient also holds an open period,
-        /// but does not own the sensor, so it is left out.
+        /// but does not own the sensor, so it is left out. Battery health derives from the earliest of
+        /// these starts, so a second owner keeps the history of an owner who is still present.
         /// </summary>
         public static IQueryable<SensorOwnershipPeriod> CurrentOwnerPeriods(
             this IQueryable<SensorOwnershipPeriod> periods, ApplicationDbContext db, int sensorId)
