@@ -93,8 +93,8 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
         db.Sensors.Add(MakeSensor(1));
         db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = U, SensorId = 1, StartedAt = Jan, EndedAt = Jan.AddDays(10) });
         db.BatteryChargeEvents.AddRange(
-            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(-2), EndedAt = Jan.AddDays(-1), PeakVoltage = 13, RestingAtTime = 12, PeakRatio = 1.08f, DurationMinutes = 60 },
-            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(3), EndedAt = Jan.AddDays(3), PeakVoltage = 13, RestingAtTime = 12, PeakRatio = 1.08f, DurationMinutes = 60 });
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(-2), EndedAt = Jan.AddDays(-1), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 },
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(3), EndedAt = Jan.AddDays(3), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var result = await db.BatteryChargeEvents.WithinSensorOwnership(db, U).ToListAsync(TestContext.Current.CancellationToken);

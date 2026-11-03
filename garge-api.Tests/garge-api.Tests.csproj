@@ -26,6 +26,10 @@
     <Using Include="SjolystInnovation.AppKit.Vipps" />
   </ItemGroup>
   <ItemGroup>
+    <None Update="Fixtures\**\*.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\garge-api.csproj" />
   </ItemGroup>
 

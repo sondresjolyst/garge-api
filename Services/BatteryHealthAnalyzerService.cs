@@ -10,9 +10,9 @@ namespace garge_api.Services
     /// Server-side battery-health analyzer. Replaces the firmware's NVS
     /// state machine. On new <c>SensorData</c> inserts for a voltage
     /// sensor, at most once per <see cref="ReadingAnalysisInterval"/>,
-    /// recompute health metrics from the voltage stream and upsert a new
-    /// <c>BatteryHealth</c> row plus any newly-detected
-    /// <c>BatteryChargeEvents</c>.
+    /// replay charge detection, bring <c>BatteryChargeEvents</c> in line with
+    /// the result and add a new <c>BatteryHealth</c> row. The rules are
+    /// described in docs/battery-health.md.
     ///
     /// Trigger: piggybacks on the existing <c>sensordata_change_trigger</c>
     /// Postgres NOTIFY plumbing that <see cref="PostgresNotificationService"/>
@@ -27,46 +27,34 @@ namespace garge_api.Services
     {
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<BatteryHealthAnalyzerService> _logger;
+        private readonly TimeProvider _time;
         private static readonly TimeSpan FallbackInterval = TimeSpan.FromHours(1);
         private static readonly TimeSpan StalenessThreshold = TimeSpan.FromMinutes(90);
-        // Each run reads up to 90 days of readings, and readings arrive every
-        // minute. The health metrics move over days, so analyzing every reading
-        // only repeats the same heavy query.
+        // Readings arrive far more often than the health metrics move, so
+        // analyzing every reading only repeats the same query.
         private static readonly TimeSpan ReadingAnalysisInterval = TimeSpan.FromMinutes(15);
         private readonly PerKeyThrottle _readingThrottle = new(ReadingAnalysisInterval);
 
-        // Long window: smooths historical lows. Used for peakResting daily
-        // checkpoints, slope checkpoints, and charge-event detection baseline.
-        private static readonly TimeSpan RestingWindow = TimeSpan.FromDays(14);
-        // Short window: tracks the battery's *current* rested voltage. The 14d
-        // window can include prior deep-discharge dips the battery has since
-        // recovered from, so "on charger now" and "drop from peak" need a
-        // recent-only stat to avoid false alarms.
-        private static readonly TimeSpan CurrentRestingWindow = TimeSpan.FromDays(3);
-        private static readonly TimeSpan PeakRestingRollingWindow = TimeSpan.FromDays(90);
-        private static readonly TimeSpan ChargeEventLookback = TimeSpan.FromDays(90);
+        // A stored charge that ended this long ago no longer changes, so a run
+        // replays from its end instead of from the start of the history. Longer
+        // than SlowClimbHours, the furthest a later reading can reach back.
+        internal static readonly TimeSpan FinalAfter = TimeSpan.FromDays(5);
+        // A sensor this quiet is offline. It gets no new health row, and its last one stands.
+        internal static readonly TimeSpan OfflineAfter = TimeSpan.FromDays(3);
         private static readonly TimeSpan FullChargeCountWindow = TimeSpan.FromDays(30);
 
-        // Post-charge settle window: skip 12h of surface-charge decay, then
-        // take the median resting voltage between 12h and 36h after the
-        // charge event ended. This is the canonical "same SOC" anchor for
-        // cycle-over-cycle capacity tracking.
-        private static readonly TimeSpan PostChargeSettleStart = TimeSpan.FromHours(12);
-        private static readonly TimeSpan PostChargeSettleEnd = TimeSpan.FromHours(36);
-        // Minimum cycle anchors before S2 slope is meaningful — below this,
-        // we cannot tell a one-off event from a real declining trend.
-        private const int S2MinAnchors = 3;
-
-        // OnChargerNow threshold: voltage above the sensor's 90d best rested
-        // state. Per-sensor ratio so calibration drift between sensors is fine.
-        private const float OnChargerRatio = 1.02f;
+        // A replay rewrites a sensor's charge rows, so runs from the notification
+        // handler, the sweep and the admin endpoints take turns.
+        private readonly SemaphoreSlim _runGate = new(1, 1);
 
         public BatteryHealthAnalyzerService(
             IServiceScopeFactory scopeFactory,
-            ILogger<BatteryHealthAnalyzerService> logger)
+            ILogger<BatteryHealthAnalyzerService> logger,
+            TimeProvider time)
         {
             _scopeFactory = scopeFactory;
             _logger = logger;
+            _time = time;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -103,91 +91,142 @@ namespace garge_api.Services
         }
 
         /// <summary>
-        /// Analyze a single sensor now. Used by the admin reanalyze endpoints.
+        /// Analyze a single sensor now, replaying from its latest final charge.
         /// </summary>
-        public async Task AnalyzeSensorAsync(int sensorId, CancellationToken ct)
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var sensor = await db.Sensors.FindAsync(new object?[] { sensorId }, ct);
-            if (sensor == null || !sensor.Type.Equals(SensorTypes.Voltage, StringComparison.OrdinalIgnoreCase))
-                return;
+        public Task AnalyzeSensorAsync(int sensorId, CancellationToken ct) => RunInScopeAsync(sensorId, rebuild: false, ct);
 
-            await RunForSensorAsync(db, sensor, ct);
-            await db.SaveChangesAsync(ct);
+        /// <summary>
+        /// Rebuild a single sensor from its whole reading history, replacing its
+        /// charge events. Used by the admin reanalyze endpoints.
+        /// </summary>
+        public Task ReanalyzeSensorAsync(int sensorId, CancellationToken ct) => RunInScopeAsync(sensorId, rebuild: true, ct);
+
+        private async Task RunInScopeAsync(int sensorId, bool rebuild, CancellationToken ct)
+        {
+            await _runGate.WaitAsync(ct);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                var sensor = await db.Sensors.FindAsync(new object?[] { sensorId }, ct);
+                if (sensor == null || !sensor.Type.Equals(SensorTypes.Voltage, StringComparison.OrdinalIgnoreCase))
+                    return;
+
+                await RunForSensorAsync(db, sensor, rebuild, ct);
+                await db.SaveChangesAsync(ct);
+            }
+            finally
+            {
+                _runGate.Release();
+            }
         }
 
-        private async Task SweepStaleSensorsAsync(CancellationToken ct)
+        internal async Task SweepStaleSensorsAsync(CancellationToken ct)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            List<int> staleSensorIds = new();
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            var voltageSensors = await db.Sensors
-                .Where(s => s.Type == SensorTypes.Voltage)
-                .ToListAsync(ct);
+                var voltageSensorIds = await db.Sensors
+                    .Where(s => s.Type == SensorTypes.Voltage)
+                    .Select(s => s.Id)
+                    .ToListAsync(ct);
 
-            var cutoff = DateTime.UtcNow - StalenessThreshold;
-            foreach (var sensor in voltageSensors)
+                var cutoff = _time.GetUtcNow().UtcDateTime - StalenessThreshold;
+                foreach (var sensorId in voltageSensorIds)
+                {
+                    if (ct.IsCancellationRequested) return;
+                    var latest = await db.BatteryHealthData
+                        .Where(bh => bh.SensorId == sensorId)
+                        .OrderByDescending(bh => bh.Timestamp)
+                        .Select(bh => (DateTime?)bh.Timestamp)
+                        .FirstOrDefaultAsync(ct);
+                    if (latest != null && latest >= cutoff) continue;
+                    staleSensorIds.Add(sensorId);
+                }
+            }
+
+            // Each sensor saves on its own, so one failure leaves the others untouched.
+            foreach (var sensorId in staleSensorIds)
             {
                 if (ct.IsCancellationRequested) return;
-                var latest = await db.BatteryHealthData
-                    .Where(bh => bh.SensorId == sensor.Id)
-                    .OrderByDescending(bh => bh.Timestamp)
-                    .Select(bh => (DateTime?)bh.Timestamp)
-                    .FirstOrDefaultAsync(ct);
-                if (latest != null && latest >= cutoff) continue;
-                await RunForSensorAsync(db, sensor, ct);
+                try
+                {
+                    await AnalyzeSensorAsync(sensorId, ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "BatteryHealthAnalyzer: sweep failed for sensor {SensorId}", sensorId);
+                }
             }
-
-            await db.SaveChangesAsync(ct);
         }
 
-        private async Task RunForSensorAsync(ApplicationDbContext db, Sensor sensor, CancellationToken ct)
+        private async Task RunForSensorAsync(ApplicationDbContext db, Sensor sensor, bool rebuild, CancellationToken ct)
         {
-            var now = DateTime.UtcNow;
-            var rangeStart = now - PeakRestingRollingWindow;
+            var now = _time.GetUtcNow().UtcDateTime;
+            var offlineCutoff = now - OfflineAfter;
 
-            var rawSamples = await db.SensorData
-                .Where(sd => sd.SensorId == sensor.Id && sd.Timestamp >= rangeStart)
-                .OrderBy(sd => sd.Timestamp)
-                .Select(sd => new { sd.Timestamp, sd.Value })
+            // Checked before reading any history, so the hourly sweep stays
+            // cheap for a sensor that stopped reporting.
+            if (!rebuild)
+            {
+                var latestReading = await db.SensorData
+                    .Where(sd => sd.SensorId == sensor.Id && sd.Timestamp <= now)
+                    .OrderByDescending(sd => sd.Timestamp)
+                    .Select(sd => (DateTime?)sd.Timestamp)
+                    .FirstOrDefaultAsync(ct);
+                if (latestReading == null || latestReading < offlineCutoff)
+                {
+                    _logger.LogDebug("BatteryHealthAnalyzer: sensor {SensorId} has no recent reading", sensor.Id);
+                    return;
+                }
+            }
+
+            var stored = await db.BatteryChargeEvents
+                .Where(e => e.SensorId == sensor.Id)
+                .OrderBy(e => e.StartedAt)
                 .ToListAsync(ct);
 
-            if (rawSamples.Count == 0)
+            // Only a replay from the start can rebuild a charge the readings no
+            // longer continue from. This is also the path with no final charge yet.
+            var final = rebuild ? null : stored.LastOrDefault(e => e.EndedAt < now - FinalAfter);
+            var samples = await ReadValidSamplesAsync(db, sensor.Id, final?.EndedAt, now, ct);
+            var detection = BatteryHealthMath.DetectCharges(samples, final?.EndedAt);
+            if (detection.ResumePointChanged)
             {
-                _logger.LogDebug("BatteryHealthAnalyzer: no samples for sensor {SensorId}", sensor.Id);
+                _logger.LogInformation("BatteryHealthAnalyzer: sensor {SensorId} readings do not continue from the final charge, replaying the whole history", sensor.Id);
+                final = null;
+                samples = await ReadValidSamplesAsync(db, sensor.Id, null, now, ct);
+                detection = BatteryHealthMath.DetectCharges(samples);
+            }
+
+            var latestIsRecent = samples.Count > 0 && samples[^1].Timestamp >= offlineCutoff;
+            if (!latestIsRecent && !rebuild)
+            {
+                _logger.LogDebug("BatteryHealthAnalyzer: sensor {SensorId} has no recent valid reading", sensor.Id);
                 return;
             }
 
-            // Drop unphysical readings. 12 V lead-acid systems never produce
-            // readings below ~5 V (sensor init artifacts, disconnects) or above
-            // ~20 V (charger overvoltage, wiring shorts). Including them poisons
-            // bottom-quartile resting-median and the slope built from it.
-            const float MinPlausibleVolt = 5.0f;
-            const float MaxPlausibleVolt = 20.0f;
-            var samples = new List<BatteryHealthMath.VoltageSample>(rawSamples.Count);
-            foreach (var s in rawSamples)
+            if (final != null) final.SettledVoltage = detection.ResumeSettledVoltage;
+            var history = ApplyCharges(db, sensor.Id, stored, final, detection.Charges);
+            if (!latestIsRecent)
             {
-                if (!float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
-                if (v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
-                samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
+                _logger.LogInformation("BatteryHealthAnalyzer: sensor {SensorId} rebuilt {Count} charges, offline so no new health row", sensor.Id, history.Count);
+                return;
             }
-            if (samples.Count == 0) return;
 
-            // 14d bottom-25 median: historical low, used for charge-event
-            // baseline and slope checkpoints (smooth long-term trend).
-            var restingMedian = BatteryHealthMath.ComputeRestingMedian(samples, now, RestingWindow);
-            // 3d bottom-25 median: current rested state, used for OnChargerNow
-            // and drop-from-peak (so a recovered battery isn't flagged on the
-            // basis of an old dip still inside the 14d window).
-            var currentResting = BatteryHealthMath.ComputeRestingMedian(samples, now, CurrentRestingWindow);
-            var peakResting = BatteryHealthMath.ComputePeakResting(samples, now, PeakRestingRollingWindow, RestingWindow);
-
-            var currentVoltage = samples[^1].Value;
-            // Compare current voltage to the 90d best rested state. A charger
-            // pushes voltage measurably above any rested level for that sensor.
-            var onChargerNow = peakResting > 0
-                && samples.TakeLast(3).All(s => s.Value >= peakResting * OnChargerRatio);
+            var anchors = history
+                .Where(e => e.IsFull && e.SettledVoltage.HasValue)
+                .Select(e => new BatteryHealthMath.VoltageSample(e.EndedAt, e.SettledVoltage!.Value))
+                .ToList();
+            var classification = BatteryHealthMath.ClassifyStatus(anchors);
+            var fullCharges = history.Where(e => e.IsFull).ToList();
+            var lastFull = fullCharges.LastOrDefault();
+            var openCharge = detection.Charges.FirstOrDefault(c => c.IsOpen);
+            var restingVoltage = BatteryHealthMath.ComputeRestingVoltage(samples, detection.Charges, now);
+            var selfDischarge = await ComputeSelfDischargeAsync(db, sensor.Id, history, openCharge, samples[^1].Timestamp, now, ct);
 
             var voltageMin24h = samples
                 .Where(s => s.Timestamp >= now.AddHours(-24))
@@ -195,102 +234,111 @@ namespace garge_api.Services
                 .DefaultIfEmpty(null)
                 .Min();
 
-            var detected = BatteryHealthMath.DetectChargeEvents(samples, restingMedian);
-            await UpsertChargeEventsAsync(db, sensor.Id, detected, ct);
-
-            // Cycle-anchored slope: one anchor per detected charge event,
-            // taken from the post-charge settle window. Each anchor is a
-            // same-SOC measurement, so anchor-to-anchor drift reflects
-            // capacity loss rather than state-of-charge variation. A
-            // calendar-time slope of raw bottom-25 medians (the prior
-            // approach) could not distinguish a transient deep-discharge
-            // event from real degradation — both showed as a negative slope.
-            var anchors = detected
-                .Select(e => new
-                {
-                    e.EndedAt,
-                    Resting = BatteryHealthMath.PostChargeResting(
-                        samples,
-                        e.EndedAt,
-                        PostChargeSettleStart,
-                        PostChargeSettleEnd)
-                })
-                .Where(a => a.Resting.HasValue)
-                .OrderBy(a => a.EndedAt)
-                .Select(a => new BatteryHealthMath.VoltageSample(a.EndedAt, a.Resting!.Value))
-                .ToList();
-            var cycleSlopePctWeek = BatteryHealthMath.ComputeCycleSlopePercentPerWeek(anchors, S2MinAnchors);
-
-            var recentEvents = detected.Where(e => e.EndedAt >= now - ChargeEventLookback).ToList();
-            var fullChargesLast30d = detected.Count(e => e.EndedAt >= now - FullChargeCountWindow);
-            var lastEvent = detected.OrderByDescending(e => e.EndedAt).FirstOrDefault();
-            float? acceptance = recentEvents.Count > 0 ? recentEvents.Max(e => e.PeakRatio) : null;
-
-            var daysOfData = (int)Math.Round((now - samples[0].Timestamp).TotalDays);
-            // Drop reflects how far the *current* rested state sits below the 90d
-            // best rested state. Using currentResting (3d) instead of the 14d
-            // restingMedian keeps a recovered-from deep-discharge dip from
-            // permanently penalizing the battery once voltage is back up.
-            var dropPct = peakResting > 0
-                ? Math.Max(0f, (peakResting - currentResting) / peakResting * 100f)
-                : 0f;
-            var hasRecentCharge = recentEvents.Count > 0;
-            var classification = BatteryHealthMath.ClassifyHealth(dropPct, cycleSlopePctWeek, acceptance, daysOfData, hasRecentCharge);
-
             db.BatteryHealthData.Add(new BatteryHealth
             {
                 SensorId = sensor.Id,
                 Status = classification.Status,
-                CurrentVoltage = currentVoltage,
-                // Persist the short-window value: UI labels this "Resting
-                // voltage" and users expect it to reflect the battery's
-                // present resting state, not its 14d low-water mark.
-                RestingMedian = currentResting,
-                PeakResting = peakResting,
-                OnChargerNow = onChargerNow,
-                LastFullChargeAt = lastEvent?.EndedAt,
-                LastFullChargePeak = lastEvent?.PeakVoltage,
+                CurrentVoltage = samples[^1].Value,
+                RestingMedian = restingVoltage,
+                OnChargerNow = openCharge != null,
+                LastFullChargeAt = lastFull?.EndedAt,
+                LastFullChargePeak = lastFull?.PeakVoltage,
                 VoltageMin24h = voltageMin24h,
-                FullChargesLast30d = fullChargesLast30d,
-                DailyDropPctPerWeek = cycleSlopePctWeek,
-                ChargeAcceptanceRatio = acceptance,
+                FullChargesLast30d = fullCharges.Count(e => e.EndedAt >= now - FullChargeCountWindow),
+                DailyDropPctPerWeek = classification.SlopePctPerWeek,
+                SelfDischargePctPerWeek = selfDischarge,
                 Timestamp = now,
             });
 
             _logger.LogInformation(
-                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} currentResting={CurrentResting:F3} restingMedian14d={Resting:F3} peakResting={PeakResting:F3} drop={Drop:F2}% cycleSlope={Slope} anchors={Anchors}/{MinAnchors} onCharger={OnCharger} fullCharges30d={Count}",
-                sensor.Id, classification.Status, currentResting, restingMedian, peakResting, dropPct,
-                cycleSlopePctWeek.HasValue ? $"{cycleSlopePctWeek.Value:F3}%/wk" : "null",
-                anchors.Count, S2MinAnchors, onChargerNow, fullChargesLast30d);
+                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} reason={Reason} resting={Resting} anchors={Anchors} onCharger={OnCharger} selfDischarge={SelfDischarge} replayedFrom={ReplayedFrom} readings={Readings}",
+                sensor.Id, classification.Status, classification.Reason, restingVoltage, anchors.Count, openCharge != null, selfDischarge, final?.EndedAt, samples.Count);
         }
 
-        private static async Task UpsertChargeEventsAsync(
+        // Readings from a point in time, or all of them, with unphysical ones
+        // dropped. 12 V lead-acid systems never produce readings below ~5 V
+        // (sensor init artifacts, disconnects) or above ~20 V (charger
+        // overvoltage, wiring shorts).
+        private static async Task<List<BatteryHealthMath.VoltageSample>> ReadValidSamplesAsync(
             ApplicationDbContext db,
             int sensorId,
-            IReadOnlyList<BatteryHealthMath.ChargeWindow> detected,
+            DateTime? from,
+            DateTime to,
             CancellationToken ct)
         {
-            if (detected.Count == 0) return;
-            var startTimes = detected.Select(d => d.StartedAt).ToList();
-            var existing = await db.BatteryChargeEvents
-                .Where(e => e.SensorId == sensorId && startTimes.Contains(e.StartedAt))
-                .Select(e => e.StartedAt)
+            const float MinPlausibleVolt = 5.0f;
+            const float MaxPlausibleVolt = 20.0f;
+            var query = db.SensorData.Where(sd => sd.SensorId == sensorId && sd.Timestamp <= to);
+            if (from != null) query = query.Where(sd => sd.Timestamp >= from.Value);
+            var rawSamples = await query
+                .OrderBy(sd => sd.Timestamp)
+                .ThenBy(sd => sd.Id)
+                .Select(sd => new { sd.Timestamp, sd.Value })
                 .ToListAsync(ct);
-            var existingSet = existing.ToHashSet();
-            foreach (var d in detected)
+
+            var samples = new List<BatteryHealthMath.VoltageSample>(rawSamples.Count);
+            foreach (var s in rawSamples)
             {
-                if (existingSet.Contains(d.StartedAt)) continue;
-                db.BatteryChargeEvents.Add(new BatteryChargeEvent
-                {
-                    SensorId = sensorId,
-                    StartedAt = d.StartedAt,
-                    EndedAt = d.EndedAt,
-                    PeakVoltage = d.PeakVoltage,
-                    RestingAtTime = d.RestingAtTime,
-                    PeakRatio = d.PeakRatio,
-                    DurationMinutes = d.DurationMinutes,
-                });
+                if (!float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
+                if (v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
+                samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
             }
+            return samples;
+        }
+
+        // Makes the rows after the final charge match the replay, matching on
+        // start time, so a charge whose start moved leaves no row behind. Returns
+        // the whole finished history, oldest first.
+        private static List<BatteryChargeEvent> ApplyCharges(
+            ApplicationDbContext db,
+            int sensorId,
+            List<BatteryChargeEvent> stored,
+            BatteryChargeEvent? final,
+            IReadOnlyList<BatteryHealthMath.ChargeWindow> charges)
+        {
+            var history = final == null ? new List<BatteryChargeEvent>() : stored.Where(e => e.StartedAt <= final.StartedAt).ToList();
+            var replaced = stored.Skip(history.Count).ToDictionary(e => e.StartedAt);
+
+            foreach (var charge in charges.Where(c => !c.IsOpen))
+            {
+                if (!replaced.Remove(charge.StartedAt, out var row))
+                {
+                    row = new BatteryChargeEvent { SensorId = sensorId, StartedAt = charge.StartedAt };
+                    db.BatteryChargeEvents.Add(row);
+                }
+                row.EndedAt = charge.EndedAt!.Value;
+                row.PeakVoltage = charge.PeakVoltage;
+                row.RestingAtTime = charge.RestingAtTime;
+                row.DurationMinutes = (int)Math.Round((charge.EndedAt.Value - charge.StartedAt).TotalMinutes);
+                row.IsFull = charge.IsFull;
+                row.SettledVoltage = charge.SettledVoltage;
+                history.Add(row);
+            }
+
+            db.BatteryChargeEvents.RemoveRange(replaced.Values);
+            return history;
+        }
+
+        // The measured rest can be older than the readings this run replays, so
+        // its readings are read on their own.
+        private static async Task<float?> ComputeSelfDischargeAsync(
+            ApplicationDbContext db,
+            int sensorId,
+            List<BatteryChargeEvent> history,
+            BatteryHealthMath.ChargeWindow? openCharge,
+            DateTime latestReading,
+            DateTime now,
+            CancellationToken ct)
+        {
+            var spans = history.Select(e => new BatteryHealthMath.ChargeSpan(e.StartedAt, e.EndedAt, e.IsFull)).ToList();
+            var chargeEnd = BatteryHealthMath.FindSelfDischargeRest(spans, openCharge?.StartedAt, latestReading);
+            if (chargeEnd == null) return null;
+
+            var day0 = chargeEnd.Value.AddHours(BatteryHealthMath.SettledEndHours);
+            var from = day0.AddDays(BatteryHealthMath.SelfDischargeStartFromDay);
+            var to = day0.AddDays(BatteryHealthMath.SelfDischargeEndToDay);
+            var samples = await ReadValidSamplesAsync(db, sensorId, from, to < now ? to : now, ct);
+            return BatteryHealthMath.ComputeSelfDischarge(samples, chargeEnd.Value);
         }
     }
 }

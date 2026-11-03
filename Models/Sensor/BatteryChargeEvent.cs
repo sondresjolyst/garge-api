@@ -4,12 +4,11 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace garge_api.Models.Sensor
 {
     /// <summary>
-    /// One detected charge event for a voltage sensor: a contiguous window
-    /// where voltage stayed elevated above the sensor's own resting median
-    /// long enough and high enough to count as a real charge cycle.
+    /// One finished charge for a voltage sensor. Together these rows are the
+    /// saved charge history. A charge still open at the latest reading is not stored.
     ///
-    /// Detected by <c>BatteryHealthAnalyzerService</c> from <c>SensorData</c>;
-    /// de-duplicated by <c>(SensorId, StartedAt)</c>.
+    /// Detected by <c>BatteryHealthAnalyzerService</c> from <c>SensorData</c>,
+    /// unique by <c>(SensorId, StartedAt)</c>. See docs/battery-health.md.
     /// </summary>
     public class BatteryChargeEvent
     {
@@ -31,14 +30,18 @@ namespace garge_api.Models.Sensor
         [Required]
         public float PeakVoltage { get; set; }
 
+        // The baseline that was frozen when the charge started.
         [Required]
         public float RestingAtTime { get; set; }
 
-        // peak / restingAtTime — health uses this for "charge acceptance" signal.
-        [Required]
-        public float PeakRatio { get; set; }
-
         [Required]
         public int DurationMinutes { get; set; }
+
+        // Held near its plateau long enough to count as a full charge.
+        [Required]
+        public bool IsFull { get; set; }
+
+        // Median 12 to 36 hours after the end. Null with too few readings.
+        public float? SettledVoltage { get; set; }
     }
 }

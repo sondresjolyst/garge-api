@@ -1235,8 +1235,8 @@ namespace garge_api.Migrations
                     b.Property<DateTime>("EndedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<float>("PeakRatio")
-                        .HasColumnType("real");
+                    b.Property<bool>("IsFull")
+                        .HasColumnType("boolean");
 
                     b.Property<float>("PeakVoltage")
                         .HasColumnType("real");
@@ -1246,6 +1246,9 @@ namespace garge_api.Migrations
 
                     b.Property<int>("SensorId")
                         .HasColumnType("integer");
+
+                    b.Property<float?>("SettledVoltage")
+                        .HasColumnType("real");
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -1266,9 +1269,6 @@ namespace garge_api.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<float?>("ChargeAcceptanceRatio")
-                        .HasColumnType("real");
-
                     b.Property<float>("CurrentVoltage")
                         .HasColumnType("real");
 
@@ -1287,10 +1287,10 @@ namespace garge_api.Migrations
                     b.Property<bool>("OnChargerNow")
                         .HasColumnType("boolean");
 
-                    b.Property<float>("PeakResting")
+                    b.Property<float?>("RestingMedian")
                         .HasColumnType("real");
 
-                    b.Property<float>("RestingMedian")
+                    b.Property<float?>("SelfDischargePctPerWeek")
                         .HasColumnType("real");
 
                     b.Property<int>("SensorId")
