@@ -184,7 +184,10 @@ public class BatteryHealthAnalyzerServiceTests
     [InlineData("4.99")]
     [InlineData("20.01")]
     [InlineData("not-a-number")]
-    public async Task Analyze_InvalidReading_IsDropped(string bad)
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    public async Task Analyze_InvalidLatestReading_IsDropped(string bad)
     {
         var trace = ChargesWithRest((24, 12.7f));
         var h = new Harness(NowAfter(trace));
@@ -200,6 +203,49 @@ public class BatteryHealthAnalyzerServiceTests
         var row = await h.LatestHealth();
         Assert.Equal(12.7f, row.CurrentVoltage);
         Assert.Equal(12.7f, row.VoltageMin24h);
+    }
+
+    [Theory]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("-Infinity")]
+    public async Task Analyze_NonFiniteMiddleReading_ChangesNothing(string bad)
+    {
+        var trace = ChargesWithRest((24, 12.7f), (24, 12.7f));
+        var clean = new Harness(NowAfter(trace));
+        await clean.Seed(trace.Samples);
+        await clean.Analyze();
+
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await h.WithDb(async db =>
+        {
+            // One during the charge, where it could reach the peak and the plateau, and one at rest.
+            db.SensorData.Add(new SensorData { SensorId = SensorId, Value = bad, Timestamp = T0.AddHours(80.5) });
+            db.SensorData.Add(new SensorData { SensorId = SensorId, Value = bad, Timestamp = T0.AddHours(150.5) });
+            return await db.SaveChangesAsync(Ct);
+        });
+        await h.Analyze();
+
+        Assert.Equal(Comparable(await clean.Events()), Comparable(await h.Events()));
+        Assert.Equal((await clean.LatestHealth()).Status, (await h.LatestHealth()).Status);
+        Assert.Equal((await clean.LatestHealth()).RestingMedian, (await h.LatestHealth()).RestingMedian);
+    }
+
+    [Fact]
+    public async Task Reanalyze_OnlyNonFiniteReadings_AddsNoRow()
+    {
+        var h = new Harness(T0.AddDays(1));
+        await h.Seed(Array.Empty<Sample>());
+        await h.WithDb(async db =>
+        {
+            db.SensorData.Add(new SensorData { SensorId = SensorId, Value = "NaN", Timestamp = T0 });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        await h.Reanalyze();
+
+        Assert.Empty(await h.Health());
     }
 
     [Theory]
@@ -471,16 +517,38 @@ public class BatteryHealthAnalyzerServiceTests
     }
 
     [Fact]
-    public async Task Reanalyze_OfflineSensor_RebuildsEventsButAddsNoRow()
+    public async Task Reanalyze_OfflineSensor_RebuildsEventsAndAddsARow()
     {
-        var trace = ChargesWithRest((24, 12.7f));
+        var trace = ChargesWithRest((24, 12.7f), (24, 12.7f));
         var h = new Harness(trace.Samples[^1].Timestamp.AddDays(30));
         await h.Seed(trace.Samples);
 
         await h.Reanalyze();
 
-        Assert.Single(await h.Events());
-        Assert.Empty(await h.Health());
+        var events = await h.Events();
+        Assert.Equal(2, events.Count);
+        var row = Assert.Single(await h.Health());
+        Assert.Equal(h.Clock.Now, row.Timestamp);
+        Assert.Equal("good", row.Status);
+        Assert.Null(row.RestingMedian);
+        Assert.Null(row.VoltageMin24h);
+        Assert.Equal(12.7f, row.CurrentVoltage);
+        Assert.Equal(events[^1].EndedAt, row.LastFullChargeAt);
+    }
+
+    [Fact]
+    public async Task Reanalyze_OfflineSensor_LaterAutomaticRunsAddNoRow()
+    {
+        var trace = ChargesWithRest((24, 12.7f));
+        var h = new Harness(trace.Samples[^1].Timestamp.AddDays(30));
+        await h.Seed(trace.Samples);
+        await h.Reanalyze();
+
+        h.Clock.Now = h.Clock.Now.AddHours(2);
+        await h.Analyzer.SweepStaleSensorsAsync(Ct);
+        await h.Analyze();
+
+        Assert.Single(await h.Health());
     }
 
     [Fact]
@@ -720,6 +788,317 @@ public class BatteryHealthAnalyzerServiceTests
         var updated = Assert.Single(await h.Events());
         Assert.Equal(row.Id, updated.Id);
         Assert.Equal(Comparable(row), Comparable(updated));
+    }
+
+    // Health across owners.
+
+    private static async Task Own(Harness h, string userId, DateTime start, DateTime? end = null, bool isOwner = true)
+    {
+        await h.WithDb(async db =>
+        {
+            db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = userId, SensorId = SensorId, StartedAt = start, EndedAt = end });
+            if (end == null) db.UserSensors.Add(new UserSensor { UserId = userId, SensorId = SensorId, IsOwner = isOwner });
+            return await db.SaveChangesAsync(Ct);
+        });
+    }
+
+    // Two full charges by the first owner, then a sale. No charge after it yet.
+    private static BatteryTrace TwoChargesThenSold() => ChargesWithRest((24, 12.9f), (24, 12.9f));
+
+    [Fact]
+    public async Task NewOwner_StartsAtLearningWithNoLastFullCharge()
+    {
+        var trace = TwoChargesThenSold();
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(-30);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+
+        await h.Analyze();
+
+        var row = await h.LatestHealth();
+        Assert.Equal("learning", row.Status);
+        Assert.Null(row.LastFullChargeAt);
+        Assert.Null(row.LastFullChargePeak);
+        Assert.Equal(0, row.FullChargesLast30d);
+        Assert.Null(row.DailyDropPctPerWeek);
+        Assert.Null(row.SelfDischargePctPerWeek);
+        // Charges stay stored across owners.
+        Assert.Equal(2, (await h.Events()).Count);
+    }
+
+    [Fact]
+    public async Task NewOwner_ReanalyzeLimitsHealthAndStillStoresEveryCharge()
+    {
+        var trace = TwoChargesThenSold();
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(-30);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+
+        await h.Reanalyze();
+
+        Assert.Equal("learning", (await h.LatestHealth()).Status);
+        Assert.Equal(2, (await h.Events()).Count);
+    }
+
+    [Fact]
+    public async Task NewOwner_HealthComesFromTheirOwnChargesOnly()
+    {
+        // The first owner's charges settle at 14 V, far above the 12.8 V of the new owner's.
+        var trace = new BatteryTrace().Hold(72, 12.4f)
+            .Hold(24, 15f).Hold(200, 14f)
+            .Hold(24, 15f).Hold(200, 14f);
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(30);
+        trace.Hold(100, 12.8f).Hold(24, 15f).Hold(200, 12.8f).Hold(24, 15f).Hold(200, 12.8f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+
+        await h.Analyze();
+
+        var events = await h.Events();
+        Assert.Equal(4, events.Count);
+        var row = await h.LatestHealth();
+        Assert.Equal("good", row.Status);
+        Assert.Equal(2, row.FullChargesLast30d);
+        Assert.Equal(events[^1].EndedAt, row.LastFullChargeAt);
+        Assert.Null(row.DailyDropPctPerWeek);
+    }
+
+    [Fact]
+    public async Task NewOwner_PeakOfLastFullChargeIsTheirs()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 15f).Hold(100, 13f);
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(30);
+        trace.Hold(100, 12.8f).Hold(24, 14.4f).Hold(100, 12.8f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+
+        await h.Analyze();
+
+        Assert.Equal(14.4f, (await h.LatestHealth()).LastFullChargePeak);
+    }
+
+    [Fact]
+    public async Task NewOwner_SelfDischargeFromTheEarlierPeriodIsExcluded()
+    {
+        // A rest of 25 days under the first owner, sold during it. The new owner's own
+        // charge has only 2 days of rest so far.
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Ramp(600, 13f, 12.8f);
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(30);
+        trace.Hold(24, 14.4f).Hold(48, 12.9f);
+
+        var unsold = new Harness(NowAfter(trace));
+        await unsold.Seed(trace.Samples);
+        await Own(unsold, "seller", SensorOwnershipPeriod.FirstOwnerStart);
+        await unsold.Analyze();
+        Assert.NotNull((await unsold.LatestHealth()).SelfDischargePctPerWeek);
+
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+        await h.Analyze();
+
+        Assert.Null((await h.LatestHealth()).SelfDischargePctPerWeek);
+        Assert.Equal(2, (await h.Events()).Count);
+    }
+
+    [Fact]
+    public async Task NewOwner_SelfDischargeFromTheirOwnRestCounts()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Hold(100, 13f);
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(30);
+        trace.Hold(24, 14.4f).Ramp(600, 13f, 12.8f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, sold);
+        await Own(h, "buyer", sold);
+
+        await h.Analyze();
+
+        var events = await h.Events();
+        var expected = BatteryHealthMath.ComputeSelfDischarge(trace.Samples, events[^1].EndedAt);
+        Assert.NotNull(expected);
+        Assert.Equal(expected, (await h.LatestHealth()).SelfDischargePctPerWeek);
+    }
+
+    [Fact]
+    public async Task NewOwner_ChargeStartedBeforeTheClaimIsNotTheirs()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Hold(100, 12.8f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, T0.AddHours(80));
+        await Own(h, "buyer", T0.AddHours(80));
+
+        await h.Analyze();
+
+        Assert.Null((await h.LatestHealth()).LastFullChargeAt);
+    }
+
+    [Fact]
+    public async Task NewOwner_ChargeStartingAtTheClaimIsTheirs()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Hold(100, 12.8f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "buyer", T0.AddHours(72));
+
+        await h.Analyze();
+
+        Assert.NotNull((await h.LatestHealth()).LastFullChargeAt);
+    }
+
+    [Fact]
+    public async Task ResumedRun_NewOwnerStillExcludesEarlierStoredCharges()
+    {
+        var trace = TwoChargesThenSold();
+        var sold = trace.Samples[^1].Timestamp.AddMinutes(-30);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart);
+        await h.Analyze();
+        Assert.Equal("good", (await h.LatestHealth()).Status);
+
+        await h.WithDb(async db =>
+        {
+            var period = await db.SensorOwnershipPeriods.SingleAsync(Ct);
+            period.EndedAt = sold;
+            db.UserSensors.RemoveRange(db.UserSensors);
+            return await db.SaveChangesAsync(Ct);
+        });
+        await Own(h, "buyer", sold);
+        h.Clock.Now = h.Clock.Now.AddMinutes(30);
+        await h.Analyze();
+
+        Assert.Equal("learning", (await h.LatestHealth()).Status);
+    }
+
+    [Fact]
+    public async Task ShareRecipient_DoesNotLimitHealth()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", SensorOwnershipPeriod.FirstOwnerStart);
+        await Own(h, "viewer", h.Clock.Now.AddMinutes(-1), isOwner: false);
+
+        await h.Analyze();
+
+        var row = await h.LatestHealth();
+        Assert.Equal("good", row.Status);
+        Assert.NotNull(row.LastFullChargeAt);
+    }
+
+    [Fact]
+    public async Task OwnerPeriodOfAnotherSensor_DoesNotLimitHealth()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", SensorOwnershipPeriod.FirstOwnerStart);
+        await h.WithDb(async db =>
+        {
+            db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "other", SensorId = 2, StartedAt = h.Clock.Now.AddMinutes(-1) });
+            db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 2, IsOwner = true });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        await h.Analyze();
+
+        Assert.Equal("good", (await h.LatestHealth()).Status);
+    }
+
+    [Fact]
+    public async Task ShareRecipientWhoOwnsAnotherSensor_DoesNotLimitHealth()
+    {
+        // This user owns another sensor and only has a share of this one.
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", SensorOwnershipPeriod.FirstOwnerStart);
+        await Own(h, "viewer", h.Clock.Now.AddMinutes(-1), isOwner: false);
+        await h.WithDb(async db =>
+        {
+            db.UserSensors.Add(new UserSensor { UserId = "viewer", SensorId = 2, IsOwner = true });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        await h.Analyze();
+
+        Assert.Equal("good", (await h.LatestHealth()).Status);
+    }
+
+    [Fact]
+    public async Task OwnersEndedPeriod_IsNotTheCurrentOne()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", SensorOwnershipPeriod.FirstOwnerStart);
+        await h.WithDb(async db =>
+        {
+            db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "owner", SensorId = SensorId, StartedAt = h.Clock.Now.AddMinutes(-2), EndedAt = h.Clock.Now.AddMinutes(-1) });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        await h.Analyze();
+
+        Assert.Equal("good", (await h.LatestHealth()).Status);
+    }
+
+    [Fact]
+    public async Task OwnersLaterPeriodOnAnotherSensor_DoesNotLimitHealth()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", SensorOwnershipPeriod.FirstOwnerStart);
+        await h.WithDb(async db =>
+        {
+            db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "owner", SensorId = 2, StartedAt = h.Clock.Now.AddMinutes(-1) });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        await h.Analyze();
+
+        Assert.Equal("good", (await h.LatestHealth()).Status);
+    }
+
+    [Fact]
+    public async Task NoCurrentOwner_UsesTheWholeHistory()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "seller", SensorOwnershipPeriod.FirstOwnerStart, h.Clock.Now.AddMinutes(-1));
+
+        await h.Analyze();
+
+        var row = await h.LatestHealth();
+        Assert.Equal("good", row.Status);
+        Assert.NotNull(row.LastFullChargeAt);
+    }
+
+    [Fact]
+    public async Task SeveralCurrentOwners_TheLatestStartApplies()
+    {
+        var trace = TwoChargesThenSold();
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await Own(h, "first", SensorOwnershipPeriod.FirstOwnerStart);
+        await Own(h, "second", h.Clock.Now.AddMinutes(-1));
+
+        await h.Analyze();
+
+        Assert.Equal("learning", (await h.LatestHealth()).Status);
     }
 
     // Status from stored history.

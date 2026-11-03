@@ -133,9 +133,9 @@ namespace garge_api.Controllers
         /// <summary>
         /// Admin: rebuild every voltage sensor from its whole reading history.
         /// Replaces each sensor's charge events with a full replay and bypasses
-        /// the 90-min staleness gate. A sensor with a recent reading also gets a
-        /// new health row, an offline sensor does not. The same readings always
-        /// give the same charge events.
+        /// the 90-min staleness gate. Every sensor with a valid reading gets a new
+        /// health row, also when it is offline. The same readings always give the
+        /// same charge events.
         /// </summary>
         [HttpPost("admin/reanalyze")]
         [Authorize(Policy = "Admin")]
@@ -171,7 +171,7 @@ namespace garge_api.Controllers
         /// <summary>
         /// Admin: rebuild one voltage sensor from its whole reading history.
         /// Replaces its charge events with a full replay. The sensor gets a new
-        /// health row unless it is offline.
+        /// health row if it has a valid reading, also when it is offline.
         /// </summary>
         [HttpPost("admin/reanalyze/{sensorId:int}")]
         [Authorize(Policy = "Admin")]

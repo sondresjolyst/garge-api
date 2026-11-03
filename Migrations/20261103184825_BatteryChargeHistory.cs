@@ -18,9 +18,10 @@ namespace garge_api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Charge events are derived from readings. They are deleted so the first
-            // analyzer run for each sensor rebuilds them from its whole reading history
-            // with IsFull and SettledVoltage filled in.
+            // Charge events are derived from readings. They are deleted so they can be
+            // rebuilt from each sensor's whole reading history with IsFull and
+            // SettledVoltage filled in. An online sensor rebuilds on its first analyzer
+            // run. An offline sensor rebuilds on an admin reanalyze or when it reports again.
             migrationBuilder.Sql(DeleteChargeEventsSql);
 
             migrationBuilder.DropColumn(

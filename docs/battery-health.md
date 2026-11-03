@@ -25,13 +25,13 @@ not depend on the voltage level, so a calibration offset does not move them.
 - **On an admin request.** `POST /api/battery-health/admin/reanalyze` handles all voltage sensors and
   `POST /api/battery-health/admin/reanalyze/{sensorId}` handles one. Both rebuild from the whole history.
 
-Each run adds one row to `BatteryHealthData`, unless the sensor is offline. The latest row is what clients
-read.
+Each run adds one row to `BatteryHealthData`. The only exception is an automatic run on an offline sensor.
+The latest row is what clients read.
 
 ## Valid readings
 
-A reading counts when it parses as a number from 5 to 20 V. Anything else comes from sensor start-up,
-disconnects or wiring faults, and analysis ignores it.
+A reading counts when it parses as a finite number from 5 to 20 V. Anything else comes from sensor start-up,
+disconnects or wiring faults, and analysis ignores it. `NaN` and infinite values are not valid.
 
 ## Detecting a charge
 
@@ -115,17 +115,41 @@ exist and is never stored as 0.
 
 ## Offline sensors
 
-A sensor is offline when its latest reading is more than 3 days old (`OfflineAfter`). A run then adds no
-health row and leaves the last one standing, so a quiet sensor keeps its status. Charge rows stay untouched
-too. The check reads only the latest timestamp, so the sweep stays cheap for these sensors.
+A sensor is offline when its latest reading is more than 3 days old (`OfflineAfter`). An automatic run, from
+a new reading or the sweep, then adds no health row and leaves the last one standing, so a quiet sensor keeps
+its status. Charge rows stay untouched too. The check reads only the latest timestamp, so the sweep stays cheap
+for these sensors.
 
 A sensor whose latest readings are all invalid also counts as offline, after a run has read its readings.
 
-An admin rebuild still replaces the charge rows of an offline sensor, but adds no health row.
+An admin rebuild replaces the charge rows of an offline sensor and adds a health row if the sensor has a valid
+reading. `RestingMedian` and `VoltageMin24h` are null in that row, because no readings are that recent.
+
+## Health across owners
+
+A sensor can change owner. Charges are detected and stored across the whole sensor history, but a new health
+row shows the current owner only their own charges and rests.
+
+`Status`, `DailyDropPctPerWeek`, `LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d` and
+`SelfDischargePctPerWeek` use only charges that started at or after the start of the current owner's period in
+`SensorOwnershipPeriods`. This is the same boundary `GET /api/battery-health/name/{sensorName}/events` applies.
+A new owner therefore starts at `learning` with no last full charge, until their own charges exist. The period
+of a sensor's first owner covers all its earlier readings, so they keep that history.
+
+- **A charge that started before the claim** belongs to the earlier period, even if it ends after the claim.
+- **A share recipient** also holds a period but is not an owner, so a share changes nothing here.
+- **Several current owners:** the latest period start applies, so no owner sees charges from before they claimed.
+- **No current owner:** nothing limits the row, so it uses the whole history. After a sale only admins can read
+  such a row, since it falls outside the ended period and before any later claim. On a sensor that has never
+  had an owner, the first owner can read it, and that history is theirs.
+
+`CurrentVoltage`, `RestingMedian`, `OnChargerNow` and `VoltageMin24h` describe the latest readings and are not
+limited this way.
 
 ## Status
 
-Status uses full charges with a settled voltage, oldest first. These are called anchors below.
+Status uses full charges with a settled voltage inside the current owner's period, oldest first. These are
+called anchors below.
 
 - **Fewer than 2 anchors:** `learning`.
 - **S1, drop:** `max(0, (median of earlier settled voltages - latest settled) / that median x 100)`. Up to 2 %
@@ -142,7 +166,8 @@ The status limits are starting values. They have not yet been tested on a failin
 
 `SelfDischargePctPerWeek` is for information only and never affects status.
 
-It measures the latest rest of at least 15 days (`SelfDischargeMinRestDays`) after a full charge. A rest ends
+It measures the latest rest of at least 15 days (`SelfDischargeMinRestDays`) after a full charge inside the
+current owner's period. A rest ends
 at the next charge start or at the latest reading. Day 0 is 36 hours after the charge ended
 (`SettledEndHours`). A rest after a partial charge is skipped, since the battery did not start from the same
 state of charge.
@@ -193,7 +218,7 @@ If a replay finds that a later reading changes the final charge, or the reading 
 replays the whole history instead. This can happen after the service was down past the 5-day limit.
 
 `LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d`, status and slope come from the stored full
-charges plus this run, so history older than the readings read is kept.
+charges plus this run, limited to the current owner, so history older than the readings read is kept.
 
 A run that resumes must give the same charges as one full replay. `IncrementalRuns_EqualOneFullReplay` tests
 this on real-shaped traces under `garge-api.Tests/Fixtures/Battery`. Readings that arrive late, with a time

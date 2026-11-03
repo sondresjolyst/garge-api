@@ -39,7 +39,8 @@ namespace garge_api.Services
         // replays from its end instead of from the start of the history. Longer
         // than SlowClimbHours, the furthest a later reading can reach back.
         internal static readonly TimeSpan FinalAfter = TimeSpan.FromDays(5);
-        // A sensor this quiet is offline. It gets no new health row, and its last one stands.
+        // A sensor this quiet is offline. Only an admin rebuild adds a health row
+        // for it, otherwise its last one stands.
         internal static readonly TimeSpan OfflineAfter = TimeSpan.FromDays(3);
         private static readonly TimeSpan FullChargeCountWindow = TimeSpan.FromDays(30);
 
@@ -97,7 +98,8 @@ namespace garge_api.Services
 
         /// <summary>
         /// Rebuild a single sensor from its whole reading history, replacing its
-        /// charge events. Used by the admin reanalyze endpoints.
+        /// charge events and adding a health row, also when the sensor is offline.
+        /// Used by the admin reanalyze endpoints.
         /// </summary>
         public Task ReanalyzeSensorAsync(int sensorId, CancellationToken ct) => RunInScopeAsync(sensorId, rebuild: true, ct);
 
@@ -211,22 +213,26 @@ namespace garge_api.Services
 
             if (final != null) final.SettledVoltage = detection.ResumeSettledVoltage;
             var history = ApplyCharges(db, sensor.Id, stored, final, detection.Charges);
-            if (!latestIsRecent)
-            {
-                _logger.LogInformation("BatteryHealthAnalyzer: sensor {SensorId} rebuilt {Count} charges, offline so no new health row", sensor.Id, history.Count);
-                return;
-            }
+            if (samples.Count == 0) return;
 
-            var anchors = history
+            // Charges stay stored across owners, but health shows a new owner only their own.
+            var ownerStart = await db.SensorOwnershipPeriods
+                .CurrentOwnerPeriods(db, sensor.Id)
+                .OrderByDescending(p => p.StartedAt)
+                .Select(p => (DateTime?)p.StartedAt)
+                .FirstOrDefaultAsync(ct);
+            var ownedHistory = ownerStart == null ? history : history.Where(e => e.StartedAt >= ownerStart.Value).ToList();
+
+            var anchors = ownedHistory
                 .Where(e => e.IsFull && e.SettledVoltage.HasValue)
                 .Select(e => new BatteryHealthMath.VoltageSample(e.EndedAt, e.SettledVoltage!.Value))
                 .ToList();
             var classification = BatteryHealthMath.ClassifyStatus(anchors);
-            var fullCharges = history.Where(e => e.IsFull).ToList();
+            var fullCharges = ownedHistory.Where(e => e.IsFull).ToList();
             var lastFull = fullCharges.LastOrDefault();
             var openCharge = detection.Charges.FirstOrDefault(c => c.IsOpen);
             var restingVoltage = BatteryHealthMath.ComputeRestingVoltage(samples, detection.Charges, now);
-            var selfDischarge = await ComputeSelfDischargeAsync(db, sensor.Id, history, openCharge, samples[^1].Timestamp, now, ct);
+            var selfDischarge = await ComputeSelfDischargeAsync(db, sensor.Id, ownedHistory, openCharge, samples[^1].Timestamp, now, ct);
 
             var voltageMin24h = samples
                 .Where(s => s.Timestamp >= now.AddHours(-24))
@@ -258,7 +264,8 @@ namespace garge_api.Services
         // Readings from a point in time, or all of them, with unphysical ones
         // dropped. 12 V lead-acid systems never produce readings below ~5 V
         // (sensor init artifacts, disconnects) or above ~20 V (charger
-        // overvoltage, wiring shorts).
+        // overvoltage, wiring shorts). The text "NaN" parses as a float, so
+        // a reading must also be finite.
         private static async Task<List<BatteryHealthMath.VoltageSample>> ReadValidSamplesAsync(
             ApplicationDbContext db,
             int sensorId,
@@ -280,7 +287,7 @@ namespace garge_api.Services
             foreach (var s in rawSamples)
             {
                 if (!float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
-                if (v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
+                if (!float.IsFinite(v) || v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
                 samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
             }
             return samples;
