@@ -131,15 +131,15 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Admin: force-reanalyze every voltage sensor. Bypasses the 90-min
-        /// staleness gate used by the background sweep and the per-sensor
-        /// NOTIFY trigger. Useful after deploying a new analyzer version so
-        /// the UI doesn't show pre-fix data until each sensor publishes its
-        /// next reading. Idempotent.
+        /// Admin: rebuild every voltage sensor from its whole reading history.
+        /// Replaces each sensor's charge events with a full replay and bypasses
+        /// the 90-min staleness gate. Every sensor with a valid reading gets a new
+        /// health row, also when it is offline. The same readings always give the
+        /// same charge events.
         /// </summary>
         [HttpPost("admin/reanalyze")]
         [Authorize(Policy = "Admin")]
-        [SwaggerOperation(Summary = "Admin: re-run the analyzer for all voltage sensors.")]
+        [SwaggerOperation(Summary = "Admin: rebuild charge events and health for all voltage sensors from their whole history.")]
         [SwaggerResponse(200, "Processed counts.")]
         public async Task<IActionResult> ReanalyzeAll(CancellationToken ct)
         {
@@ -154,7 +154,7 @@ namespace garge_api.Controllers
             {
                 try
                 {
-                    await _analyzer.AnalyzeSensorAsync(id, ct);
+                    await _analyzer.ReanalyzeSensorAsync(id, ct);
                     ok++;
                 }
                 catch (Exception ex)
@@ -169,11 +169,13 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Admin: force-reanalyze a single voltage sensor by id.
+        /// Admin: rebuild one voltage sensor from its whole reading history.
+        /// Replaces its charge events with a full replay. The sensor gets a new
+        /// health row if it has a valid reading, also when it is offline.
         /// </summary>
         [HttpPost("admin/reanalyze/{sensorId:int}")]
         [Authorize(Policy = "Admin")]
-        [SwaggerOperation(Summary = "Admin: re-run the analyzer for one voltage sensor.")]
+        [SwaggerOperation(Summary = "Admin: rebuild charge events and health for one voltage sensor from its whole history.")]
         [SwaggerResponse(200, "Reanalyzed.")]
         [SwaggerResponse(404, "Sensor not found or not a voltage sensor.")]
         public async Task<IActionResult> ReanalyzeOne(int sensorId, CancellationToken ct)
@@ -182,7 +184,7 @@ namespace garge_api.Controllers
                 .AnyAsync(s => s.Id == sensorId && s.Type == SensorTypes.Voltage, ct);
             if (!exists) return NotFound(new { message = "Voltage sensor not found." });
 
-            await _analyzer.AnalyzeSensorAsync(sensorId, ct);
+            await _analyzer.ReanalyzeSensorAsync(sensorId, ct);
             return Ok(new { sensorId });
         }
     }

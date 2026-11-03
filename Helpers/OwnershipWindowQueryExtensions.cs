@@ -34,6 +34,16 @@ namespace garge_api.Helpers
                 && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.StartedAt < p.EndedAt)));
 
         /// <summary>
+        /// The open periods of a sensor's current owners. A share recipient also holds an open period,
+        /// but does not own the sensor, so it is left out. Battery health derives from the earliest of
+        /// these starts, so a second owner keeps the history of an owner who is still present.
+        /// </summary>
+        public static IQueryable<SensorOwnershipPeriod> CurrentOwnerPeriods(
+            this IQueryable<SensorOwnershipPeriod> periods, ApplicationDbContext db, int sensorId)
+            => periods.Where(p => p.SensorId == sensorId && p.EndedAt == null
+                && db.UserSensors.Any(us => us.UserId == p.UserId && us.SensorId == sensorId && us.IsOwner));
+
+        /// <summary>
         /// Switch reads have two access paths: a direct <see cref="SwitchOwnershipPeriod"/>, or indirect
         /// access via the discovered-device chain (switch name → DiscoveredDevice.Target, DiscoveredBy →
         /// Sensor.ParentName → an owned sensor's period). Either path bounds the data to the caller's window.
