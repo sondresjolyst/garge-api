@@ -50,17 +50,28 @@ public class BatteryHealthMathTests
     // Synthetic traces of the shapes detection has to tell apart. Expected values are the detection results.
 
     [Fact]
-    public void Fixture_LongRestSlowRamp_ThreeFullChargesWithOneSlowRampAndOneLowPeak()
+    public void Fixture_LongRestSlowRamp_HasASlowRampAfterASpikeAndALowPeak()
     {
         AssertCharges(BatteryFixtures.LongRestSlowRamp,
-            new(981.723, 1109.397, true, 12.829f, 13.521f, 12.289f),
+            new(380.790, 421.797, true, 12.523f, 14.054f, 12.351f),
             // A slow ramp after an early spike stays one charge.
-            new(2216.612, 2625.993, true, 12.830f, 14.124f, 12.307f),
+            new(1135.991, 1488.322, true, 12.493f, 14.297f, 12.273f),
+            new(1549.168, 1585.390, true, 12.482f, 14.053f, 12.477f),
+            new(1630.305, 1672.200, true, 12.482f, 14.056f, 12.464f),
+            new(1933.502, 2015.722, true, 12.464f, 14.055f, 12.418f),
+            new(2207.525, 2355.597, true, 12.478f, 14.055f, 12.420f),
+            new(2706.032, 2766.976, true, 12.453f, 14.053f, 12.377f),
+            new(2947.035, 2973.866, true, 12.450f, 14.053f, 12.420f),
+            new(3128.714, 3143.705, true, 12.437f, 12.904f, 12.445f),
             // A low plateau whose peak stays under 1.08 x rest still counts as full.
-            new(3846.401, 4380.953, true, 12.764f, 13.724f, 12.253f));
+            new(3568.026, 4069.482, true, 12.424f, 13.324f, 12.329f));
         Assert.Equal("good", StatusOf(BatteryFixtures.LongRestSlowRamp));
 
-        var low = BatteryHealthMath.DetectCharges(BatteryFixtures.Samples(BatteryFixtures.LongRestSlowRamp)).Charges[2];
+        var charges = BatteryHealthMath.DetectCharges(BatteryFixtures.Samples(BatteryFixtures.LongRestSlowRamp)).Charges;
+        // The early spike sets the peak but not the plateau, which the ramp reaches 11 days later.
+        Assert.True(charges[1].Plateau < charges[1].PeakVoltage - 0.5f);
+        Assert.True((charges[1].EndedAt!.Value - charges[1].StartedAt).TotalDays > 14);
+        var low = charges[^1];
         Assert.True(low.PeakVoltage < 1.08f * low.SettledVoltage!.Value);
     }
 
@@ -68,27 +79,44 @@ public class BatteryHealthMathTests
     public void Fixture_SuddenDrop_ChargeEndsAtTheDrop()
     {
         AssertCharges(BatteryFixtures.SuddenDrop,
-            new(1391.799, 1488.617, true, 12.750f, 14.542f, 12.295f),
             // The end moves to the sudden drop, and the settled voltage follows it.
-            new(2320.526, 2381.642, true, 12.721f, 14.514f, 12.364f),
-            new(3674.085, 3773.973, true, 12.681f, 14.553f, 12.261f),
-            new(4593.772, 4685.492, true, 12.648f, 14.549f, 12.301f));
+            new(160.974, 243.149, true, 13.191f, 14.752f, 13.240f),
+            new(764.785, 805.631, true, 13.177f, 14.754f, 13.000f),
+            new(1030.201, 1066.147, true, 13.140f, 14.752f, 13.115f),
+            new(1111.083, 1153.588, true, 13.142f, 14.755f, 13.123f),
+            new(1844.365, 1993.998, true, 13.129f, 14.754f, 12.907f),
+            new(2473.543, 2533.448, true, 13.094f, 14.752f, 12.963f),
+            // The same with a longer climb.
+            new(2814.306, 2902.355, true, 13.074f, 14.754f, 13.020f),
+            new(3504.496, 3532.362, true, 13.071f, 14.755f, 12.894f),
+            new(3687.096, 3702.002, true, 13.056f, 13.545f, 13.066f));
         Assert.Equal("good", StatusOf(BatteryFixtures.SuddenDrop));
     }
 
     [Fact]
-    public void Fixture_TwoCloseCharges_StayTwoChargesWithSevenFull()
+    public void Fixture_TwoCloseCharges_StayTwoAndAFirstLongChargeIsFull()
     {
         AssertCharges(BatteryFixtures.TwoCloseCharges,
-            new(506.874, 511.784, false, 13.167f, 14.143f, 11.424f),
-            new(1151.484, 1244.438, true, 12.938f, 13.525f, 12.420f),
-            new(1796.077, 1845.104, true, 13.086f, 14.143f, 12.695f),
-            new(2385.080, 2434.007, true, 13.095f, 14.143f, 12.769f),
-            new(3015.664, 3057.723, true, 13.091f, 14.143f, 12.750f),
-            new(3548.376, 3597.376, true, 13.042f, 14.143f, 12.736f),
-            new(4007.081, 4056.194, true, 13.066f, 14.143f, 12.723f),
-            new(4093.084, 4689.916, true, 13.140f, 14.143f, 13.058f));
+            // Long and full on its own.
+            new(90.956, 126.805, true, 11.968f, 14.357f, 11.877f),
+            // Long, but partial: its time near the plateau is short.
+            new(527.125, 565.056, false, 11.971f, 14.357f, 11.801f),
+            // A pair split by a sharp rise over a day after the end.
+            new(1215.812, 1252.945, true, 11.951f, 14.357f, 11.727f),
+            // The second of the pair.
+            new(1293.071, 1335.974, true, 11.951f, 14.357f, 11.937f),
+            new(1635.427, 1676.413, true, 11.959f, 14.357f, 11.863f),
+            new(2520.415, 2668.325, true, 12.316f, 14.357f, 11.654f),
+            new(2944.209, 3026.348, true, 11.922f, 14.357f, 11.873f),
+            new(3197.477, 3258.407, true, 11.913f, 14.357f, 11.886f),
+            new(3819.262, 3847.073, true, 11.910f, 14.357f, 11.747f),
+            new(4002.913, 4017.944, true, 11.895f, 12.340f, 11.907f));
         Assert.Equal("good", StatusOf(BatteryFixtures.TwoCloseCharges));
+
+        var charges = BatteryHealthMath.DetectCharges(BatteryFixtures.Samples(BatteryFixtures.TwoCloseCharges)).Charges;
+        Assert.True((charges[0].EndedAt!.Value - charges[0].StartedAt).TotalHours > 30);
+        Assert.True(charges[1].HeldHours < BatteryHealthMath.FullHoldHours);
+        Assert.True((charges[1].EndedAt!.Value - charges[1].StartedAt).TotalHours > 30);
     }
 
     [Fact]
@@ -96,15 +124,16 @@ public class BatteryHealthMathTests
     {
         AssertCharges(BatteryFixtures.RegularCycles,
             // A charger that cycles off within a day stays one charge.
-            new(74.884, 183.699, true, 13.112f, 14.001f, 13.071f),
-            new(461.354, 508.404, true, 13.300f, 14.154f, 12.972f),
-            new(1093.719, 1143.188, true, 13.341f, 14.204f, 13.038f),
-            new(1770.901, 1819.411, true, 13.292f, 14.173f, 13.058f),
-            new(1949.770, 2021.036, true, 13.300f, 14.206f, 13.226f),
-            new(2532.709, 2583.494, true, 13.281f, 14.205f, 13.077f),
-            new(3248.785, 3297.816, true, 13.245f, 14.164f, 12.978f),
-            new(3706.304, 3756.960, true, 13.228f, 14.195f, 13.015f),
-            new(4403.358, 4452.315, true, 13.176f, 14.155f, 12.863f));
+            new(211.269, 271.092, true, 12.090f, 13.905f, 11.945f),
+            new(692.144, 732.788, true, 12.104f, 13.903f, 11.944f),
+            new(1357.301, 1393.077, true, 12.062f, 13.905f, 11.888f),
+            new(1444.191, 1486.311, true, 12.071f, 13.904f, 12.039f),
+            // A slow climb into the next stage stays one charge, with a dip and a climb inside it.
+            new(1867.128, 2015.871, true, 12.091f, 13.906f, 11.953f),
+            new(2770.309, 2852.342, true, 12.043f, 13.905f, 11.831f),
+            new(3303.714, 3332.813, true, 12.041f, 13.904f, 11.913f),
+            new(3487.565, 3502.591, true, 12.024f, 12.479f, 12.035f),
+            new(4025.568, 4068.619, true, 12.014f, 13.904f, 11.870f));
         Assert.Equal("good", StatusOf(BatteryFixtures.RegularCycles));
     }
 
@@ -112,8 +141,16 @@ public class BatteryHealthMathTests
     public void Fixture_LongFloat_FourDayChargeIsOneCharge()
     {
         AssertCharges(BatteryFixtures.LongFloat,
-            new(1672.253, 1767.525, true, 14.018f, 15.692f, 13.242f),
-            new(3773.916, 3869.879, true, 13.967f, 15.692f, 13.447f));
+            // A 4-day float under a capped flat top is one charge.
+            new(601.572, 701.563, true, 14.293f, 16.083f, 14.037f),
+            new(1002.389, 1141.183, true, 14.663f, 16.083f, 14.214f),
+            new(2076.320, 2117.195, true, 14.276f, 16.083f, 13.994f),
+            new(2550.811, 2587.829, true, 14.241f, 16.083f, 14.144f),
+            new(2635.881, 2678.635, true, 14.253f, 16.083f, 14.220f),
+            new(3029.186, 3089.331, true, 14.244f, 16.083f, 14.171f),
+            new(3850.173, 3932.069, true, 14.236f, 16.083f, 14.041f),
+            new(4163.653, 4192.109, true, 14.230f, 16.083f, 14.186f),
+            new(4348.089, 4362.165, true, 14.214f, 14.745f, 14.226f));
         Assert.Equal("good", StatusOf(BatteryFixtures.LongFloat));
     }
 

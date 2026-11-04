@@ -2,6 +2,7 @@ using System.Globalization;
 using garge_api.Constants;
 using garge_api.Models;
 using garge_api.Models.Anonymized;
+using garge_api.Models.Sensor;
 using Microsoft.EntityFrameworkCore;
 
 namespace garge_api.Services
@@ -30,6 +31,27 @@ namespace garge_api.Services
         {
             _db = db;
             _logger = logger;
+        }
+
+        private static void ClearValuesFromErasedReadings(
+            BatteryChargeEvent charge,
+            DateTime erasedFrom,
+            DateTime erasedTo,
+            List<BatteryHealthMath.OwnershipPeriod> otherPeriods)
+        {
+            bool Erased(DateTime from, DateTime to) =>
+                from < erasedTo && to >= erasedFrom && !BatteryHealthMath.InsideOnePeriod(otherPeriods, from, to);
+
+            if (Erased(charge.EndedAt.AddHours(BatteryHealthMath.SettleHours), charge.EndedAt.AddHours(BatteryHealthMath.SettledEndHours)))
+                charge.SettledVoltage = null;
+
+            var day0 = charge.EndedAt.AddHours(BatteryHealthMath.SettledEndHours);
+            if (Erased(day0.AddDays(BatteryHealthMath.SelfDischargeStartFromDay), day0.AddDays(BatteryHealthMath.SelfDischargeEndToDay)))
+                charge.SelfDischargePctPerWeek = null;
+
+            // A baseline can come from a reading of any age, so any charge after the period may hold one.
+            if (charge.StartedAt >= erasedFrom)
+                charge.RestingAtTime = null;
         }
 
         public async Task<int> AnonymizeSensorPeriodAsync(int periodId, CancellationToken ct = default)
@@ -100,6 +122,15 @@ namespace garge_api.Services
                         && e.StartedAt >= q.StartedAt && (q.EndedAt == null || e.EndedAt < q.EndedAt)))
                 .ToListAsync(ct);
             _db.BatteryChargeEvents.RemoveRange(chargeEvents);
+
+            // A kept charge can hold values measured from the readings moved above.
+            var otherPeriods = await _db.SensorOwnershipPeriods
+                .Where(q => q.Id != period.Id && q.SensorId == sensorId)
+                .Select(q => new BatteryHealthMath.OwnershipPeriod(q.StartedAt, q.EndedAt))
+                .ToListAsync(ct);
+            var keptCharges = await _db.BatteryChargeEvents.Where(e => e.SensorId == sensorId).ToListAsync(ct);
+            foreach (var charge in keptCharges.Except(chargeEvents))
+                ClearValuesFromErasedReadings(charge, start, end, otherPeriods);
 
             _db.SensorOwnershipPeriods.Remove(period);
             await _db.SaveChangesAsync(ct);

@@ -351,7 +351,8 @@ namespace garge_api.Controllers
                             c.Event.StartedAt,
                             c.Event.EndedAt,
                             c.Event.PeakVoltage,
-                            // Admins only, since the baseline can come from readings of any age.
+                            // The export never holds the baseline, since it can come from readings
+                            // of any age. GET events shows it to admins only.
                             RestingAtTime = (float?)null,
                             c.Event.DurationMinutes,
                             c.Event.IsFull,

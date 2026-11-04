@@ -179,6 +179,138 @@ public class AnonymizationServiceTests : ControllerTestBase
 
     private static readonly DateTime Feb = new(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc);
 
+    // A full charge ending at the given time, with every value measured later or earlier filled in.
+    private static BatteryChargeEvent Measured(DateTime end) =>
+        new() { SensorId = 1, StartedAt = end.AddHours(-20), EndedAt = end, PeakVoltage = 14.4f, RestingAtTime = 12.4f, DurationMinutes = 1200, IsFull = true, SettledVoltage = 12.8f, SelfDischargePctPerWeek = 0.7f };
+
+    private async Task<BatteryChargeEvent> EraseAround(DateTime chargeEnd, DateTime from, DateTime to, params SensorOwnershipPeriod[] others)
+    {
+        var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = from, EndedAt = to };
+        db.SensorOwnershipPeriods.Add(period);
+        db.SensorOwnershipPeriods.AddRange(others);
+        var charge = Measured(chargeEnd);
+        db.BatteryChargeEvents.Add(charge);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        return Assert.Single(db.BatteryChargeEvents);
+    }
+
+    [Theory]
+    [InlineData(12, 13, false)] // Starts 12 hours after the end, on the settled window's first hour.
+    [InlineData(35, 36, false)]
+    [InlineData(36, 37, false)] // Touches the last hour of the window, which is inclusive.
+    [InlineData(37, 38, true)]
+    [InlineData(5, 12, true)] // Ends just as the window starts, and the end of a period is not in it.
+    public async Task AnonymizeSensorPeriod_SettledWindowOverlappingThePeriod_ClearsSettledVoltage(int fromHours, int toHours, bool kept)
+    {
+        var end = Apr;
+        var charge = await EraseAround(end, end.AddHours(fromHours), end.AddHours(toHours));
+        Assert.Equal(kept, charge.SettledVoltage.HasValue);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_SettledWindowCoveredByAnotherPeriod_KeepsSettledVoltage()
+    {
+        var end = Apr;
+        var other = new SensorOwnershipPeriod { UserId = "user-B", SensorId = 1, StartedAt = end, EndedAt = end.AddDays(10) };
+        var charge = await EraseAround(end, end.AddHours(20), end.AddHours(22), other);
+        Assert.Equal(12.8f, charge.SettledVoltage);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_SettledWindowPartlyCoveredByAnotherPeriod_ClearsSettledVoltage()
+    {
+        var end = Apr;
+        var other = new SensorOwnershipPeriod { UserId = "user-B", SensorId = 1, StartedAt = end, EndedAt = end.AddHours(25) };
+        var charge = await EraseAround(end, end.AddHours(20), end.AddHours(22), other);
+        Assert.Null(charge.SettledVoltage);
+    }
+
+    [Theory]
+    [InlineData(2, 2.5, false)]
+    [InlineData(14.5, 15, false)]
+    [InlineData(1, 2, true)] // Ends just as the rest starts, and the end of a period is not in it.
+    [InlineData(1, 2.1, false)]
+    [InlineData(0.5, 1.5, true)]
+    [InlineData(15.5, 16, true)]
+    public async Task AnonymizeSensorPeriod_MeasuredRestOverlappingThePeriod_ClearsSelfDischarge(double fromDay, double toDay, bool kept)
+    {
+        var end = Apr;
+        var day0 = end.AddHours(36);
+        var charge = await EraseAround(end, day0.AddDays(fromDay), day0.AddDays(toDay));
+        Assert.Equal(kept, charge.SelfDischargePctPerWeek.HasValue);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_MeasuredRestCoveredByAnotherPeriod_KeepsSelfDischarge()
+    {
+        var end = Apr;
+        var day0 = end.AddHours(36);
+        var other = new SensorOwnershipPeriod { UserId = "user-B", SensorId = 1, StartedAt = end, EndedAt = day0.AddDays(16) };
+        var charge = await EraseAround(end, day0.AddDays(5), day0.AddDays(6), other);
+        Assert.Equal(0.7f, charge.SelfDischargePctPerWeek);
+    }
+
+    [Theory]
+    [InlineData(-60, -59)] // A baseline can come from a reading of any age.
+    [InlineData(-8, -7)]
+    [InlineData(-8, -6.5)]
+    [InlineData(-1, -0.5)]
+    public async Task AnonymizeSensorPeriod_PeriodBeforeTheChargeStart_ClearsTheBaseline(double fromDays, double toDays)
+    {
+        var end = Apr;
+        var start = end.AddHours(-20);
+        var charge = await EraseAround(end, start.AddDays(fromDays), start.AddDays(toDays));
+        Assert.Null(charge.RestingAtTime);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_PeriodAfterTheChargeStart_KeepsTheBaseline()
+    {
+        var end = Apr;
+        var charge = await EraseAround(end, end.AddHours(20), end.AddHours(22));
+        Assert.Equal(12.4f, charge.RestingAtTime);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_WindowsInsideTheErasedPeriod_AreCleared()
+    {
+        var end = Apr;
+        var charge = await EraseAround(end, end.AddHours(10), end.AddDays(20));
+        Assert.Null(charge.SettledVoltage);
+        Assert.Null(charge.SelfDischargePctPerWeek);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_ChargeOfAnotherSensor_KeepsItsValues()
+    {
+        var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Apr.AddHours(20), EndedAt = Apr.AddHours(22) };
+        db.SensorOwnershipPeriods.Add(period);
+        var other = Measured(Apr);
+        other.SensorId = 2;
+        db.BatteryChargeEvents.Add(other);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(12.8f, other.SettledVoltage);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_OtherPeriodsOfAnotherSensor_DoNotCover()
+    {
+        var end = Apr;
+        var other = new SensorOwnershipPeriod { UserId = "user-B", SensorId = 2, StartedAt = end, EndedAt = end.AddDays(10) };
+        var charge = await EraseAround(end, end.AddHours(20), end.AddHours(22), other);
+        Assert.Null(charge.SettledVoltage);
+    }
+
     [Fact]
     public async Task AnonymizeSensorPeriod_MovesExclusiveReadings_DeletesOriginalsAndDerived()
     {
