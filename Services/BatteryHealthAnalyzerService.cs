@@ -10,9 +10,12 @@ namespace garge_api.Services
     /// Server-side battery-health analyzer. Replaces the firmware's NVS
     /// state machine. On new <c>SensorData</c> inserts for a voltage
     /// sensor, at most once per <see cref="ReadingAnalysisInterval"/>,
-    /// replay charge detection, bring <c>BatteryChargeEvents</c> in line with
-    /// the result and add a new <c>BatteryHealth</c> row. The rules are
-    /// described in docs/battery-health.md.
+    /// replay charge detection across the whole sensor history, bring
+    /// <c>BatteryChargeEvents</c> in line with the result and add a new
+    /// <c>BatteryHealth</c> row of reading facts when a reading has arrived since
+    /// the latest row. Anything that depends on the
+    /// viewer is worked out at read time by <see cref="BatteryHealthReadService"/>.
+    /// The rules are described in docs/battery-health.md.
     ///
     /// Trigger: piggybacks on the existing <c>sensordata_change_trigger</c>
     /// Postgres NOTIFY plumbing that <see cref="PostgresNotificationService"/>
@@ -20,8 +23,9 @@ namespace garge_api.Services
     /// the existing service stays focused.
     ///
     /// Fallback timer: every hour, scan for voltage sensors whose latest
-    /// BatteryHealth row is older than 90 min (or missing) and run the
-    /// analyzer for them. Covers missed notifications.
+    /// BatteryHealth row is older than 90 min (or missing) and that have a
+    /// reading newer than it, and run the analyzer for them. Covers missed
+    /// notifications.
     /// </summary>
     public class BatteryHealthAnalyzerService : BackgroundService
     {
@@ -39,10 +43,8 @@ namespace garge_api.Services
         // replays from its end instead of from the start of the history. Longer
         // than SlowClimbHours, the furthest a later reading can reach back.
         internal static readonly TimeSpan FinalAfter = TimeSpan.FromDays(5);
-        // A sensor this quiet is offline. Only an admin rebuild adds a health row
-        // for it, otherwise its last one stands.
+        // A sensor this quiet is offline. It gets no new health row.
         internal static readonly TimeSpan OfflineAfter = TimeSpan.FromDays(3);
-        private static readonly TimeSpan FullChargeCountWindow = TimeSpan.FromDays(30);
 
         // A replay rewrites a sensor's charge rows, so runs from the notification
         // handler, the sweep and the admin endpoints take turns.
@@ -98,8 +100,8 @@ namespace garge_api.Services
 
         /// <summary>
         /// Rebuild a single sensor from its whole reading history, replacing its
-        /// charge events and adding a health row, also when the sensor is offline.
-        /// Used by the admin reanalyze endpoints.
+        /// charge events. An online sensor with a reading newer than its latest
+        /// health row also gets a row. Used by the admin reanalyze endpoints.
         /// </summary>
         public Task ReanalyzeSensorAsync(int sensorId, CancellationToken ct) => RunInScopeAsync(sensorId, rebuild: true, ct);
 
@@ -145,6 +147,15 @@ namespace garge_api.Services
                         .Select(bh => (DateTime?)bh.Timestamp)
                         .FirstOrDefaultAsync(ct);
                     if (latest != null && latest >= cutoff) continue;
+
+                    // A row is timed by its reading, so a quiet sensor's row stays old.
+                    // With no reading since that row there is nothing to replay.
+                    var latestReading = await db.SensorData
+                        .Where(sd => sd.SensorId == sensorId)
+                        .OrderByDescending(sd => sd.Timestamp)
+                        .Select(sd => (DateTime?)sd.Timestamp)
+                        .FirstOrDefaultAsync(ct);
+                    if (latest != null && latestReading <= latest) continue;
                     staleSensorIds.Add(sensorId);
                 }
             }
@@ -211,30 +222,35 @@ namespace garge_api.Services
                 return;
             }
 
-            if (final != null) final.SettledVoltage = detection.ResumeSettledVoltage;
-            var history = ApplyCharges(db, sensor.Id, stored, final, detection.Charges);
-            if (samples.Count == 0) return;
+            if (final != null)
+            {
+                final.SettledVoltage = detection.ResumeSettledVoltage;
+                final.SelfDischargePctPerWeek = final.IsFull ? detection.ResumeSelfDischarge : null;
+            }
+            ApplyCharges(db, sensor.Id, stored, final, detection.Charges);
+            if (!latestIsRecent)
+            {
+                _logger.LogInformation("BatteryHealthAnalyzer: sensor {SensorId} rebuilt {Count} charges, offline so no new health row", sensor.Id, detection.Charges.Count);
+                return;
+            }
 
-            // Charges stay stored across owners. Health starts at the earliest current
-            // owner, so history only drops away when the owners who hold it have left.
-            var ownerStart = await db.SensorOwnershipPeriods
-                .CurrentOwnerPeriods(db, sensor.Id)
-                .OrderBy(p => p.StartedAt)
-                .Select(p => (DateTime?)p.StartedAt)
+            // A row is timed by the reading it holds, so the ownership filter on
+            // Timestamp keeps a reading from before a viewer's period away from them.
+            // Only a reading newer than the latest row gives a new row, so a rerun adds
+            // no duplicate.
+            var latestRow = await db.BatteryHealthData
+                .Where(bh => bh.SensorId == sensor.Id)
+                .OrderByDescending(bh => bh.Timestamp)
+                .Select(bh => (DateTime?)bh.Timestamp)
                 .FirstOrDefaultAsync(ct);
-            var ownedHistory = ownerStart == null ? history : history.Where(e => e.StartedAt >= ownerStart.Value).ToList();
+            if (latestRow != null && samples[^1].Timestamp <= latestRow)
+            {
+                _logger.LogDebug("BatteryHealthAnalyzer: sensor {SensorId} has no reading since its latest health row", sensor.Id);
+                return;
+            }
 
-            var anchors = ownedHistory
-                .Where(e => e.IsFull && e.SettledVoltage.HasValue)
-                .Select(e => new BatteryHealthMath.VoltageSample(e.EndedAt, e.SettledVoltage!.Value))
-                .ToList();
-            var classification = BatteryHealthMath.ClassifyStatus(anchors);
-            var fullCharges = ownedHistory.Where(e => e.IsFull).ToList();
-            var lastFull = fullCharges.LastOrDefault();
             var openCharge = detection.Charges.FirstOrDefault(c => c.IsOpen);
             var restingVoltage = BatteryHealthMath.ComputeRestingVoltage(samples, detection.Charges, now);
-            var selfDischarge = await ComputeSelfDischargeAsync(db, sensor.Id, ownedHistory, openCharge, samples[^1].Timestamp, now, ct);
-
             var voltageMin24h = samples
                 .Where(s => s.Timestamp >= now.AddHours(-24))
                 .Select(s => (float?)s.Value)
@@ -244,22 +260,16 @@ namespace garge_api.Services
             db.BatteryHealthData.Add(new BatteryHealth
             {
                 SensorId = sensor.Id,
-                Status = classification.Status,
                 CurrentVoltage = samples[^1].Value,
                 RestingMedian = restingVoltage,
                 OnChargerNow = openCharge != null,
-                LastFullChargeAt = lastFull?.EndedAt,
-                LastFullChargePeak = lastFull?.PeakVoltage,
                 VoltageMin24h = voltageMin24h,
-                FullChargesLast30d = fullCharges.Count(e => e.EndedAt >= now - FullChargeCountWindow),
-                DailyDropPctPerWeek = classification.SlopePctPerWeek,
-                SelfDischargePctPerWeek = selfDischarge,
-                Timestamp = now,
+                Timestamp = samples[^1].Timestamp,
             });
 
             _logger.LogInformation(
-                "BatteryHealthAnalyzer: sensor {SensorId} status={Status} reason={Reason} resting={Resting} anchors={Anchors} onCharger={OnCharger} selfDischarge={SelfDischarge} replayedFrom={ReplayedFrom} readings={Readings}",
-                sensor.Id, classification.Status, classification.Reason, restingVoltage, anchors.Count, openCharge != null, selfDischarge, final?.EndedAt, samples.Count);
+                "BatteryHealthAnalyzer: sensor {SensorId} resting={Resting} onCharger={OnCharger} replayedFrom={ReplayedFrom} readings={Readings} charges={Charges}",
+                sensor.Id, restingVoltage, openCharge != null, final?.EndedAt, samples.Count, detection.Charges.Count);
         }
 
         // Readings from a point in time, or all of them, with unphysical ones
@@ -295,17 +305,15 @@ namespace garge_api.Services
         }
 
         // Makes the rows after the final charge match the replay, matching on
-        // start time, so a charge whose start moved leaves no row behind. Returns
-        // the whole finished history, oldest first.
-        private static List<BatteryChargeEvent> ApplyCharges(
+        // start time, so a charge whose start moved leaves no row behind.
+        private static void ApplyCharges(
             ApplicationDbContext db,
             int sensorId,
             List<BatteryChargeEvent> stored,
             BatteryChargeEvent? final,
             IReadOnlyList<BatteryHealthMath.ChargeWindow> charges)
         {
-            var history = final == null ? new List<BatteryChargeEvent>() : stored.Where(e => e.StartedAt <= final.StartedAt).ToList();
-            var replaced = stored.Skip(history.Count).ToDictionary(e => e.StartedAt);
+            var replaced = stored.Where(e => final == null || e.StartedAt > final.StartedAt).ToDictionary(e => e.StartedAt);
 
             foreach (var charge in charges.Where(c => !c.IsOpen))
             {
@@ -320,33 +328,10 @@ namespace garge_api.Services
                 row.DurationMinutes = (int)Math.Round((charge.EndedAt.Value - charge.StartedAt).TotalMinutes);
                 row.IsFull = charge.IsFull;
                 row.SettledVoltage = charge.SettledVoltage;
-                history.Add(row);
+                row.SelfDischargePctPerWeek = charge.SelfDischargePctPerWeek;
             }
 
             db.BatteryChargeEvents.RemoveRange(replaced.Values);
-            return history;
-        }
-
-        // The measured rest can be older than the readings this run replays, so
-        // its readings are read on their own.
-        private static async Task<float?> ComputeSelfDischargeAsync(
-            ApplicationDbContext db,
-            int sensorId,
-            List<BatteryChargeEvent> history,
-            BatteryHealthMath.ChargeWindow? openCharge,
-            DateTime latestReading,
-            DateTime now,
-            CancellationToken ct)
-        {
-            var spans = history.Select(e => new BatteryHealthMath.ChargeSpan(e.StartedAt, e.EndedAt, e.IsFull)).ToList();
-            var chargeEnd = BatteryHealthMath.FindSelfDischargeRest(spans, openCharge?.StartedAt, latestReading);
-            if (chargeEnd == null) return null;
-
-            var day0 = chargeEnd.Value.AddHours(BatteryHealthMath.SettledEndHours);
-            var from = day0.AddDays(BatteryHealthMath.SelfDischargeStartFromDay);
-            var to = day0.AddDays(BatteryHealthMath.SelfDischargeEndToDay);
-            var samples = await ReadValidSamplesAsync(db, sensorId, from, to < now ? to : now, ct);
-            return BatteryHealthMath.ComputeSelfDischarge(samples, chargeEnd.Value);
         }
     }
 }

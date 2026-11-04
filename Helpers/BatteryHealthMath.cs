@@ -22,26 +22,50 @@ namespace garge_api.Helpers
             float Plateau,
             double HeldHours,
             bool IsFull,
-            float? SettledVoltage)
+            float? SettledVoltage,
+            float? SelfDischargePctPerWeek = null)
         {
             public bool IsOpen => EndedAt == null;
         }
 
-        /// <summary>The time span of a charge, used to find a rest between charges.</summary>
-        public record ChargeSpan(DateTime StartedAt, DateTime EndedAt, bool IsFull);
+        /// <summary>A viewer's ownership stint. Same boundary rule as OwnershipWindowQueryExtensions.</summary>
+        public record OwnershipPeriod(DateTime StartedAt, DateTime? EndedAt)
+        {
+            public bool Contains(DateTime t) => t >= StartedAt && (EndedAt == null || t < EndedAt);
+        }
+
+        /// <summary>The fields of a stored charge that health is worked out from at read time.</summary>
+        public record StoredCharge(
+            DateTime StartedAt,
+            DateTime EndedAt,
+            float PeakVoltage,
+            bool IsFull,
+            float? SettledVoltage,
+            float? SelfDischargePctPerWeek);
+
+        /// <summary>What a viewer sees that is derived from the charges inside their periods.</summary>
+        public record ChargeSummary(
+            string Status,
+            float? SlopePctPerWeek,
+            DateTime? LastFullChargeAt,
+            float? LastFullChargePeak,
+            int FullChargesLast30d,
+            float? SelfDischargePctPerWeek);
 
         /// <summary>
         /// Result of a replay. <see cref="Charges"/> holds every charge after
         /// the resume point in time order, the open one last.
         /// <see cref="ResumePointChanged"/> means the readings do not continue
         /// from the resume point, so the caller must replay the whole history.
-        /// <see cref="ResumeSettledVoltage"/> is the settled voltage of the
-        /// charge the replay resumed from.
+        /// <see cref="ResumeSettledVoltage"/> and <see cref="ResumeSelfDischarge"/>
+        /// are measured for the charge the replay resumed from, which the caller
+        /// knows to be full or not.
         /// </summary>
         public record ChargeDetection(
             IReadOnlyList<ChargeWindow> Charges,
             bool ResumePointChanged,
-            float? ResumeSettledVoltage);
+            float? ResumeSettledVoltage,
+            float? ResumeSelfDischarge = null);
 
         // Charge start and end.
         public const float ChargeStartRatio = 1.03f;
@@ -91,6 +115,9 @@ namespace garge_api.Helpers
         public const float S2AttentionSlopePctWeek = 0.1f;
         public const float S2ReplaceSlopePctWeek = 0.3f;
         public const int S2MinAnchors = 3;
+
+        // Full charges counted at read time.
+        public const int FullChargeCountDays = 30;
 
         private sealed class ChargeState
         {
@@ -284,23 +311,27 @@ namespace garge_api.Helpers
             }
 
             var charges = new List<ChargeWindow>();
-            float? resumeSettled = null;
+            float? resumeSettled = null, resumeSelfDischarge = null;
             for (var i = 0; i < closed.Count; i++)
             {
                 var c = closed[i];
                 var next = i + 1 < closed.Count ? closed[i + 1].State.Start : cur?.Start ?? DateTime.MaxValue;
                 var settled = PostChargeResting(samples, c.End, next);
+                var restEnd = next == DateTime.MaxValue ? samples[^1].Timestamp : next;
                 if (resumeFromEnd != null && i == 0)
                 {
                     resumeSettled = settled;
+                    resumeSelfDischarge = ComputeRestSelfDischarge(samples, c.End, restEnd);
                     continue;
                 }
                 var held = HeldHours(c.State.Samples.Where(x => x.Timestamp < c.End).ToList(), c.State.Plateau * FullHoldRatio);
-                charges.Add(new ChargeWindow(c.State.Start, c.End, c.State.Peak, c.State.Baseline, c.State.Plateau, held, held >= FullHoldHours, settled));
+                var isFull = held >= FullHoldHours;
+                var selfDischarge = isFull ? ComputeRestSelfDischarge(samples, c.End, restEnd) : null;
+                charges.Add(new ChargeWindow(c.State.Start, c.End, c.State.Peak, c.State.Baseline, c.State.Plateau, held, isFull, settled, selfDischarge));
             }
             if (cur != null)
                 charges.Add(new ChargeWindow(cur.Start, null, cur.Peak, cur.Baseline, cur.Plateau, HeldHours(cur.Samples, cur.Plateau * FullHoldRatio), false, null));
-            return new ChargeDetection(charges, false, resumeSettled);
+            return new ChargeDetection(charges, false, resumeSettled, resumeSelfDischarge);
         }
 
         // Hours spent at or above the level, ignoring gaps in the readings.
@@ -363,20 +394,13 @@ namespace garge_api.Helpers
         }
 
         /// <summary>
-        /// The end of the charge whose rest is measured for self-discharge: the
-        /// latest full charge followed by at least 15 days of rest, counted from
-        /// day 0, 36 hours after it ended. Null when no such rest exists.
+        /// Self-discharge of the rest after a charge, once that rest has lasted at least 15 days from
+        /// day 0, 36 hours after the charge ended. Null before that.
         /// </summary>
-        public static DateTime? FindSelfDischargeRest(IReadOnlyList<ChargeSpan> charges, DateTime? openChargeStart, DateTime latestReading)
+        public static float? ComputeRestSelfDischarge(IReadOnlyList<VoltageSample> samples, DateTime chargeEndedAt, DateTime restEnd)
         {
-            for (var i = charges.Count - 1; i >= 0; i--)
-            {
-                var restEnd = i + 1 < charges.Count ? charges[i + 1].StartedAt : openChargeStart ?? latestReading;
-                if (!charges[i].IsFull) continue;
-                if ((restEnd - charges[i].EndedAt.AddHours(SettledEndHours)).TotalDays >= SelfDischargeMinRestDays)
-                    return charges[i].EndedAt;
-            }
-            return null;
+            if ((restEnd - chargeEndedAt.AddHours(SettledEndHours)).TotalDays < SelfDischargeMinRestDays) return null;
+            return ComputeSelfDischarge(samples, chargeEndedAt);
         }
 
         /// <summary>
@@ -442,6 +466,63 @@ namespace garge_api.Helpers
             var slopePerDay = num / den;
             var slopePerWeek = slopePerDay * 7;
             return (float)(slopePerWeek / meanY * 100.0);
+        }
+
+        /// <summary>
+        /// True when a time span lies inside one period. Null periods mean no limit, which is how an
+        /// admin reads.
+        /// </summary>
+        public static bool InsideOnePeriod(IReadOnlyList<OwnershipPeriod>? periods, DateTime from, DateTime to) =>
+            periods == null || periods.Any(p => p.Contains(from) && p.Contains(to));
+
+        /// <summary>
+        /// A stored charge as a viewer may see it. Null when it does not start and end inside one of
+        /// their periods. The settled voltage needs 36 hours after the end inside that period too, and
+        /// the self-discharge needs its whole measured rest inside it.
+        /// </summary>
+        public static StoredCharge? LimitChargeToPeriods(StoredCharge charge, IReadOnlyList<OwnershipPeriod>? periods)
+        {
+            if (!InsideOnePeriod(periods, charge.StartedAt, charge.EndedAt)) return null;
+            var settledEnd = charge.EndedAt.AddHours(SettledEndHours);
+            var restEnd = settledEnd.AddDays(SelfDischargeEndToDay);
+            return charge with
+            {
+                SettledVoltage = InsideOnePeriod(periods, charge.StartedAt, settledEnd) ? charge.SettledVoltage : null,
+                SelfDischargePctPerWeek = InsideOnePeriod(periods, charge.StartedAt, restEnd) ? charge.SelfDischargePctPerWeek : null,
+            };
+        }
+
+        /// <summary>A charge's baseline, or null when the 7 days before its start reach outside the viewer's period.</summary>
+        public static float? BaselineInsidePeriods(float baseline, DateTime chargeStart, IReadOnlyList<OwnershipPeriod>? periods) =>
+            InsideOnePeriod(periods, chargeStart.AddDays(-BaselineWindowDays), chargeStart) ? baseline : null;
+
+        /// <summary>A row's resting voltage, or null when its 3-day window reaches outside the viewer's period.</summary>
+        public static float? RestingInsidePeriods(float? resting, DateTime rowTimestamp, IReadOnlyList<OwnershipPeriod>? periods) =>
+            InsideOnePeriod(periods, rowTimestamp.AddDays(-RestingWindowDays), rowTimestamp) ? resting : null;
+
+        /// <summary>A row's 24-hour minimum, or null when its window reaches outside the viewer's period.</summary>
+        public static float? Min24hInsidePeriods(float? min24h, DateTime rowTimestamp, IReadOnlyList<OwnershipPeriod>? periods) =>
+            InsideOnePeriod(periods, rowTimestamp.AddHours(-24), rowTimestamp) ? min24h : null;
+
+        /// <summary>
+        /// Status and the values next to it, from the charges a viewer may see, oldest first.
+        /// </summary>
+        public static ChargeSummary SummarizeCharges(IReadOnlyList<StoredCharge> charges, DateTime now)
+        {
+            var anchors = charges
+                .Where(c => c.IsFull && c.SettledVoltage.HasValue)
+                .Select(c => new VoltageSample(c.EndedAt, c.SettledVoltage!.Value))
+                .ToList();
+            var classification = ClassifyStatus(anchors);
+            var full = charges.Where(c => c.IsFull).ToList();
+            var cutoff = now.AddDays(-FullChargeCountDays);
+            return new ChargeSummary(
+                classification.Status,
+                classification.SlopePctPerWeek,
+                full.LastOrDefault()?.EndedAt,
+                full.LastOrDefault()?.PeakVoltage,
+                full.Count(c => c.EndedAt >= cutoff),
+                full.LastOrDefault(c => c.SelfDischargePctPerWeek.HasValue)?.SelfDischargePctPerWeek);
         }
 
         public record HealthClassification(string Status, string Reason, float? DropPct, float? SlopePctPerWeek);

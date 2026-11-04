@@ -27,21 +27,12 @@ namespace garge_api.Helpers
                 p.UserId == userId && p.SensorId == bh.SensorId
                 && bh.Timestamp >= p.StartedAt && (p.EndedAt == null || bh.Timestamp < p.EndedAt)));
 
+        /// <summary>A charge counts for a viewer only when it starts and ends inside one of their periods.</summary>
         public static IQueryable<BatteryChargeEvent> WithinSensorOwnership(
             this IQueryable<BatteryChargeEvent> query, ApplicationDbContext db, string? userId, bool isAdmin = false)
             => isAdmin ? query : query.Where(e => db.SensorOwnershipPeriods.Any(p =>
                 p.UserId == userId && p.SensorId == e.SensorId
-                && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.StartedAt < p.EndedAt)));
-
-        /// <summary>
-        /// The open periods of a sensor's current owners. A share recipient also holds an open period,
-        /// but does not own the sensor, so it is left out. Battery health derives from the earliest of
-        /// these starts, so a second owner keeps the history of an owner who is still present.
-        /// </summary>
-        public static IQueryable<SensorOwnershipPeriod> CurrentOwnerPeriods(
-            this IQueryable<SensorOwnershipPeriod> periods, ApplicationDbContext db, int sensorId)
-            => periods.Where(p => p.SensorId == sensorId && p.EndedAt == null
-                && db.UserSensors.Any(us => us.UserId == p.UserId && us.SensorId == sensorId && us.IsOwner));
+                && e.StartedAt >= p.StartedAt && (p.EndedAt == null || e.EndedAt < p.EndedAt)));
 
         /// <summary>
         /// Switch reads have two access paths: a direct <see cref="SwitchOwnershipPeriod"/>, or indirect

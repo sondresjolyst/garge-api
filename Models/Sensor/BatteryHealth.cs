@@ -4,10 +4,11 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace garge_api.Models.Sensor
 {
     /// <summary>
-    /// Snapshot of a battery-voltage sensor's analyzer-computed health.
-    /// One row inserted by <c>BatteryHealthAnalyzerService</c> per analyzer
-    /// run (event-driven on new SensorData). The latest row is what the
-    /// UI reads. An offline sensor gets no new rows, so its last one stands.
+    /// Reading facts for a battery-voltage sensor at one point in time. One row
+    /// inserted by <c>BatteryHealthAnalyzerService</c> when an online sensor has
+    /// a reading newer than its latest row. <see cref="Timestamp"/> is the time
+    /// of that reading, not of the run. Nothing here depends on who owns the sensor. Status and
+    /// the values next to it are worked out for each viewer at read time.
     /// </summary>
     public class BatteryHealth
     {
@@ -20,24 +21,13 @@ namespace garge_api.Models.Sensor
         [ForeignKey("SensorId")]
         public Sensor? Sensor { get; set; }
 
-        [Required]
-        [MaxLength(20)]
-        public required string Status { get; set; }
-
         public float CurrentVoltage { get; set; }
         // Null when the last 3 days hold no rest readings.
         public float? RestingMedian { get; set; }
         public bool OnChargerNow { get; set; }
-        public DateTime? LastFullChargeAt { get; set; }
-        public float? LastFullChargePeak { get; set; }
         public float? VoltageMin24h { get; set; }
-        public int FullChargesLast30d { get; set; }
-        // Cycle-anchored slope (% per week of mean). Null when fewer than the
-        // minimum number of settled full charges have been collected.
-        public float? DailyDropPctPerWeek { get; set; }
-        // Information only, status never uses it. Null until a rest of at least 15 days exists.
-        public float? SelfDischargePctPerWeek { get; set; }
 
+        // The time of the reading this row holds, which the ownership filter compares with a viewer's periods.
         [Required]
         public DateTime Timestamp { get; set; }
     }

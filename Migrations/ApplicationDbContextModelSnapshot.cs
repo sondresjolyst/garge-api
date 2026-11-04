@@ -1244,6 +1244,9 @@ namespace garge_api.Migrations
                     b.Property<float>("RestingAtTime")
                         .HasColumnType("real");
 
+                    b.Property<float?>("SelfDischargePctPerWeek")
+                        .HasColumnType("real");
+
                     b.Property<int>("SensorId")
                         .HasColumnType("integer");
 
@@ -1272,34 +1275,14 @@ namespace garge_api.Migrations
                     b.Property<float>("CurrentVoltage")
                         .HasColumnType("real");
 
-                    b.Property<float?>("DailyDropPctPerWeek")
-                        .HasColumnType("real");
-
-                    b.Property<int>("FullChargesLast30d")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("LastFullChargeAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<float?>("LastFullChargePeak")
-                        .HasColumnType("real");
-
                     b.Property<bool>("OnChargerNow")
                         .HasColumnType("boolean");
 
                     b.Property<float?>("RestingMedian")
                         .HasColumnType("real");
 
-                    b.Property<float?>("SelfDischargePctPerWeek")
-                        .HasColumnType("real");
-
                     b.Property<int>("SensorId")
                         .HasColumnType("integer");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTime>("Timestamp")
                         .HasColumnType("timestamp with time zone");

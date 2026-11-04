@@ -28,6 +28,99 @@ public class UserControllerTests : ControllerTestBase
         return controller;
     }
 
+    [Fact]
+    public async Task ExportData_BatteryHealth_HoldsReadingFactsLimitedToThePeriod()
+    {
+        using var db = CreateDbContext();
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        db.UserProfiles.Add(new UserProfile { Id = "user-1", User = MakeDbUser() });
+        db.Sensors.Add(new garge_api.Models.Sensor.Sensor { Id = 1, Name = "v", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" });
+        db.UserSensors.Add(new garge_api.Models.Sensor.UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-1", SensorId = 1, StartedAt = start });
+        // Earlier periods of another sensor and another user must not widen the windows below.
+        db.Sensors.Add(new garge_api.Models.Sensor.Sensor { Id = 2, Name = "v2", Type = "voltage", Role = "sensor", RegistrationCode = "rc2", DefaultName = "Battery", ParentName = "gw" });
+        db.UserSensors.Add(new garge_api.Models.Sensor.UserSensor { UserId = "user-1", SensorId = 2, IsOwner = true });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-1", SensorId = 2, StartedAt = start.AddYears(-1) });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-2", SensorId = 1, StartedAt = start.AddYears(-1) });
+        db.BatteryHealthData.AddRange(
+            new garge_api.Models.Sensor.BatteryHealth { SensorId = 1, CurrentVoltage = 12.2f, RestingMedian = 12.4f, VoltageMin24h = 12.3f, Timestamp = start.AddHours(12) },
+            new garge_api.Models.Sensor.BatteryHealth { SensorId = 1, CurrentVoltage = 12.5f, RestingMedian = 12.4f, VoltageMin24h = 12.3f, Timestamp = start.AddDays(1) },
+            new garge_api.Models.Sensor.BatteryHealth { SensorId = 1, CurrentVoltage = 12.6f, RestingMedian = 12.4f, VoltageMin24h = 12.3f, Timestamp = start.AddDays(5) });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        MockUserManager.Setup(m => m.FindByIdAsync("user-1")).ReturnsAsync(MakeDbUser());
+
+        var result = Assert.IsType<OkObjectResult>(await CreateUserController(db).ExportData("user-1"));
+        var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result.Value));
+        var rows = json.RootElement.EnumerateObject().First(p => p.NameEquals("Sensors")).Value.EnumerateArray()
+            .First(s => s.GetProperty("BatteryHealth").GetArrayLength() > 0).GetProperty("BatteryHealth");
+
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, rows[0].GetProperty("VoltageMin24h").ValueKind);
+        var near = rows[1];
+        Assert.Equal(12.5f, near.GetProperty("CurrentVoltage").GetSingle());
+        Assert.Equal(System.Text.Json.JsonValueKind.Null, near.GetProperty("RestingMedian").ValueKind);
+        Assert.Equal(12.3f, near.GetProperty("VoltageMin24h").GetSingle());
+        var far = rows[2];
+        Assert.Equal(12.4f, far.GetProperty("RestingMedian").GetSingle());
+        var names = rows[0].EnumerateObject().Select(p => p.Name).OrderBy(n => n);
+        Assert.Equal(new[] { "CurrentVoltage", "OnChargerNow", "RestingMedian", "Timestamp", "VoltageMin24h" }, names);
+    }
+
+    [Fact]
+    public async Task ExportData_BatteryCharges_AreLimitedToTheViewersPeriods()
+    {
+        using var db = CreateDbContext();
+        var start = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddDays(60);
+        db.UserProfiles.Add(new UserProfile { Id = "user-1", User = MakeDbUser() });
+        db.Sensors.Add(new garge_api.Models.Sensor.Sensor { Id = 1, Name = "v", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" });
+        db.Sensors.Add(new garge_api.Models.Sensor.Sensor { Id = 2, Name = "v2", Type = "voltage", Role = "sensor", RegistrationCode = "rc2", DefaultName = "Battery", ParentName = "gw" });
+        db.UserSensors.Add(new garge_api.Models.Sensor.UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true });
+        db.UserSensors.Add(new garge_api.Models.Sensor.UserSensor { UserId = "user-1", SensorId = 2, IsOwner = true });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-1", SensorId = 1, StartedAt = start, EndedAt = end });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-1", SensorId = 2, StartedAt = start.AddYears(-1) });
+        db.SensorOwnershipPeriods.Add(new garge_api.Models.Sensor.SensorOwnershipPeriod { UserId = "user-2", SensorId = 1, StartedAt = start.AddYears(-1) });
+        garge_api.Models.Sensor.BatteryChargeEvent Charge(DateTime from) => new()
+        {
+            SensorId = 1, StartedAt = from, EndedAt = from.AddHours(24), PeakVoltage = 14.4f, RestingAtTime = 12.4f,
+            DurationMinutes = 1440, IsFull = true, SettledVoltage = 12.8f, SelfDischargePctPerWeek = 0.7f,
+        };
+        db.BatteryChargeEvents.AddRange(
+            Charge(start.AddDays(-1)),
+            Charge(start.AddDays(1)),
+            Charge(start.AddDays(20)),
+            Charge(end.AddDays(-1).AddHours(-30)),
+            Charge(end.AddHours(-12)),
+            new garge_api.Models.Sensor.BatteryChargeEvent { SensorId = 2, StartedAt = start.AddDays(5), EndedAt = start.AddDays(6), PeakVoltage = 15f, RestingAtTime = 12f, DurationMinutes = 1440, IsFull = true });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        MockUserManager.Setup(m => m.FindByIdAsync("user-1")).ReturnsAsync(MakeDbUser());
+
+        var result = Assert.IsType<OkObjectResult>(await CreateUserController(db).ExportData("user-1"));
+        var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(result.Value));
+        var sensors = json.RootElement.GetProperty("Sensors").EnumerateArray().ToDictionary(s => s.GetProperty("Id").GetInt32());
+        var charges = sensors[1].GetProperty("BatteryCharges");
+        Assert.Equal(15f, sensors[2].GetProperty("BatteryCharges").EnumerateArray().Single().GetProperty("PeakVoltage").GetSingle());
+
+        // The charge before the period and the one crossing its end are left out.
+        Assert.Equal(3, charges.GetArrayLength());
+        const System.Text.Json.JsonValueKind Null = System.Text.Json.JsonValueKind.Null;
+
+        // The first has under 7 days of the period before it.
+        Assert.Equal(Null, charges[0].GetProperty("RestingAtTime").ValueKind);
+        Assert.Equal(12.8f, charges[0].GetProperty("SettledVoltage").GetSingle());
+        Assert.Equal(0.7f, charges[0].GetProperty("SelfDischargePctPerWeek").GetSingle());
+
+        Assert.Equal(12.4f, charges[1].GetProperty("RestingAtTime").GetSingle());
+
+        // The last ends 30 hours before the period does, so its windows reach past the end.
+        Assert.Equal(Null, charges[2].GetProperty("SettledVoltage").ValueKind);
+        Assert.Equal(Null, charges[2].GetProperty("SelfDischargePctPerWeek").ValueKind);
+        Assert.Equal(14.4f, charges[2].GetProperty("PeakVoltage").GetSingle());
+        Assert.True(charges[2].GetProperty("IsFull").GetBoolean());
+        Assert.Equal(1440, charges[2].GetProperty("DurationMinutes").GetInt32());
+        var names = charges[0].EnumerateObject().Select(p => p.Name).OrderBy(n => n);
+        Assert.Equal(new[] { "DurationMinutes", "EndedAt", "IsFull", "PeakVoltage", "RestingAtTime", "SelfDischargePctPerWeek", "SettledVoltage", "StartedAt" }, names);
+    }
+
     private static User MakeDbUser(string id = "user-1") => new()
     {
         Id = id, UserName = "userone", Email = "user@test.com",
