@@ -27,7 +27,7 @@ namespace garge_api.Dtos.Sensor
         public DateTime StartedAt { get; set; }
         public DateTime EndedAt { get; set; }
         public float PeakVoltage { get; set; }
-        // Null when the 7 days before the start are not inside one of the viewer's periods.
+        // Admins only. Null for everyone else, since it can come from readings of any age.
         public float? RestingAtTime { get; set; }
         public int DurationMinutes { get; set; }
         public bool IsFull { get; set; }

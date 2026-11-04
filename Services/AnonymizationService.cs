@@ -79,10 +79,25 @@ namespace garge_api.Services
                 .ToListAsync(ct);
             _db.BatteryHealthData.RemoveRange(batteryHealth);
 
-            var chargeEvents = await _db.BatteryChargeEvents
-                .Where(e => e.SensorId == sensorId && e.StartedAt >= start && e.StartedAt < end
+            // Rows just after the period hold values worked out from the readings moved above.
+            var derivedEnd = end.AddDays(BatteryHealthMath.RestingWindowDays);
+            var derivedRows = await _db.BatteryHealthData
+                .Where(b => b.SensorId == sensorId && b.Timestamp >= end && b.Timestamp < derivedEnd
                     && !_db.SensorOwnershipPeriods.Any(q => q.Id != period.Id && q.SensorId == sensorId
-                        && e.StartedAt >= q.StartedAt && (q.EndedAt == null || e.StartedAt < q.EndedAt)))
+                        && b.Timestamp >= q.StartedAt && (q.EndedAt == null || b.Timestamp < q.EndedAt)))
+                .ToListAsync(ct);
+            foreach (var row in derivedRows)
+            {
+                row.RestingMedian = null;
+                row.VoltageMin24h = null;
+            }
+
+            // A charge that overlaps the period holds its readings, unless another period covers the
+            // whole charge. A later analyzer run or admin rebuild can find a new charge in what is left.
+            var chargeEvents = await _db.BatteryChargeEvents
+                .Where(e => e.SensorId == sensorId && e.StartedAt < end && e.EndedAt >= start
+                    && !_db.SensorOwnershipPeriods.Any(q => q.Id != period.Id && q.SensorId == sensorId
+                        && e.StartedAt >= q.StartedAt && (q.EndedAt == null || e.EndedAt < q.EndedAt)))
                 .ToListAsync(ct);
             _db.BatteryChargeEvents.RemoveRange(chargeEvents);
 

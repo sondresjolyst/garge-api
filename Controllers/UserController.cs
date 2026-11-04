@@ -351,7 +351,8 @@ namespace garge_api.Controllers
                             c.Event.StartedAt,
                             c.Event.EndedAt,
                             c.Event.PeakVoltage,
-                            RestingAtTime = BatteryHealthMath.BaselineInsidePeriods(c.Event.RestingAtTime, c.Event.StartedAt, BatteryPeriodsOf(s.Id)),
+                            // Admins only, since the baseline can come from readings of any age.
+                            RestingAtTime = (float?)null,
                             c.Event.DurationMinutes,
                             c.Event.IsFull,
                             c.Limited!.SettledVoltage,

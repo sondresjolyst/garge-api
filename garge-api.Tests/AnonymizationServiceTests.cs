@@ -24,6 +24,161 @@ public class AnonymizationServiceTests : ControllerTestBase
     private static readonly DateTime Jul = new(2020, 7, 1, 0, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Sep = new(2020, 9, 1, 0, 0, 0, DateTimeKind.Utc);
 
+    private static Sensor VoltSensor() => new() { Id = 1, Name = "garge_volt", Type = "voltage", Role = "sensor", RegistrationCode = "rc", DefaultName = "Battery", ParentName = "gw" };
+
+    private static BatteryHealth RowAt(DateTime at) =>
+        new() { SensorId = 1, CurrentVoltage = 12.5f, RestingMedian = 12.4f, VoltageMin24h = 12.3f, OnChargerNow = false, Timestamp = at };
+
+    private static BatteryChargeEvent ChargeAt(DateTime from, DateTime to) =>
+        new() { SensorId = 1, StartedAt = from, EndedAt = to, PeakVoltage = 14.4f, RestingAtTime = 12.4f, DurationMinutes = 60, IsFull = true, SettledVoltage = 12.8f };
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_RowsInThreeDaysAfterThePeriod_LoseValuesFromErasedReadings()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Jan, EndedAt = Jun };
+        db.SensorOwnershipPeriods.Add(period);
+        var justAfter = RowAt(Jun);
+        var nearEnd = RowAt(Jun.AddDays(3).AddMinutes(-1));
+        var past = RowAt(Jun.AddDays(3));
+        db.BatteryHealthData.AddRange(RowAt(Mar), justAfter, nearEnd, past);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, db.BatteryHealthData.Count());
+        Assert.Null(justAfter.RestingMedian);
+        Assert.Null(justAfter.VoltageMin24h);
+        Assert.Equal(12.5f, justAfter.CurrentVoltage);
+        Assert.Null(nearEnd.RestingMedian);
+        Assert.Null(nearEnd.VoltageMin24h);
+        Assert.Equal(12.4f, past.RestingMedian);
+        Assert.Equal(12.3f, past.VoltageMin24h);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_RowCoveredByAnotherPeriod_KeepsItsValues()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Jan, EndedAt = Jun };
+        db.SensorOwnershipPeriods.AddRange(period, new SensorOwnershipPeriod { UserId = "user-B", SensorId = 1, StartedAt = Jun });
+        var row = RowAt(Jun.AddDays(1));
+        db.BatteryHealthData.Add(row);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(12.4f, row.RestingMedian);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_RowOfAnotherSensorOrBeforeThePeriod_KeepsItsValues()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Mar, EndedAt = Jun };
+        db.SensorOwnershipPeriods.Add(period);
+        var other = RowAt(Jun.AddDays(1));
+        other.SensorId = 2;
+        var before = RowAt(Jan);
+        db.BatteryHealthData.AddRange(other, before);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(12.4f, other.RestingMedian);
+        Assert.Equal(12.4f, before.RestingMedian);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_NextClaimantWithTheFirstOwnerStart_GetsNoErasedValue()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var sold = Jun;
+        var seller = new SensorOwnershipPeriod { UserId = "seller", SensorId = 1, StartedAt = SensorOwnershipPeriod.FirstOwnerStart, EndedAt = sold };
+        db.SensorOwnershipPeriods.Add(seller);
+        db.SensorData.AddRange(
+            new SensorData { SensorId = 1, Value = "10.5", Timestamp = sold.AddDays(-1) },
+            new SensorData { SensorId = 1, Value = "12.7", Timestamp = sold.AddDays(1) });
+        db.BatteryHealthData.AddRange(
+            new BatteryHealth { SensorId = 1, CurrentVoltage = 10.5f, RestingMedian = 10.5f, VoltageMin24h = 10.5f, Timestamp = sold.AddDays(-1) },
+            new BatteryHealth { SensorId = 1, CurrentVoltage = 12.7f, RestingMedian = 10.5f, VoltageMin24h = 10.5f, Timestamp = sold.AddDays(1) });
+        db.BatteryChargeEvents.AddRange(
+            ChargeAt(sold.AddDays(-10), sold.AddDays(-9)),
+            ChargeAt(sold.AddHours(-2), sold.AddHours(5)));
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(seller.Id, TestContext.Current.CancellationToken);
+
+        Assert.False(db.SensorOwnershipPeriods.Any(p => p.SensorId == 1));
+        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = "later", SensorId = 1, StartedAt = SensorOwnershipPeriod.FirstOwnerStart });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        var clock = new FixedClock(sold.AddDays(2));
+        var reader = new BatteryHealthReadService(db, RealMapper, clock);
+
+        var latest = await reader.GetLatestAsync(1, "later", false, TestContext.Current.CancellationToken);
+        Assert.NotNull(latest);
+        Assert.Equal(12.7f, latest.CurrentVoltage);
+        Assert.Null(latest.RestingMedian);
+        Assert.Null(latest.VoltageMin24h);
+        Assert.Null(latest.LastFullChargeAt);
+        Assert.Equal("learning", latest.Status);
+        Assert.Empty(await reader.GetEventsAsync(1, "later", false, null, TestContext.Current.CancellationToken));
+    }
+
+    private sealed class FixedClock(DateTime now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(now);
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_ChargeOverlappingThePeriod_IsDeleted()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Mar, EndedAt = Jun };
+        db.SensorOwnershipPeriods.Add(period);
+        var before = ChargeAt(Jan, Mar.AddHours(-1));
+        var after = ChargeAt(Jun, Jun.AddDays(1));
+        db.BatteryChargeEvents.AddRange(
+            ChargeAt(Mar.AddDays(-1), Mar),
+            ChargeAt(Mar.AddDays(1), Mar.AddDays(2)),
+            ChargeAt(Jun.AddHours(-2), Jun.AddHours(5)),
+            before,
+            after);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new[] { before.StartedAt, after.StartedAt }, db.BatteryChargeEvents.Select(e => e.StartedAt).OrderBy(t => t));
+    }
+
+    [Fact]
+    public async Task AnonymizeSensorPeriod_ChargeKeptOnlyWhenAnotherPeriodCoversAllOfIt()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(VoltSensor());
+        var period = new SensorOwnershipPeriod { UserId = "user-A", SensorId = 1, StartedAt = Jan, EndedAt = Jul };
+        db.SensorOwnershipPeriods.AddRange(period, new SensorOwnershipPeriod { UserId = "user-B", SensorId = 1, StartedAt = Mar, EndedAt = Jun });
+        var whole = ChargeAt(Apr, Apr.AddDays(1));
+        var endsPast = ChargeAt(Jun.AddHours(-2), Jun.AddHours(2));
+        var endsAtEnd = ChargeAt(Jun.AddHours(-2), Jun);
+        var startsBefore = ChargeAt(Mar.AddHours(-2), Mar.AddHours(2));
+        var otherSensor = ChargeAt(Feb, Feb.AddDays(1));
+        otherSensor.SensorId = 2;
+        db.BatteryChargeEvents.AddRange(whole, endsPast, endsAtEnd, startsBefore, otherSensor);
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);
+
+        Assert.Equal(new[] { Feb, Apr }, db.BatteryChargeEvents.Select(e => e.StartedAt).OrderBy(t => t));
+    }
+
+    private static readonly DateTime Feb = new(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc);
+
     [Fact]
     public async Task AnonymizeSensorPeriod_MovesExclusiveReadings_DeletesOriginalsAndDerived()
     {

@@ -492,9 +492,12 @@ namespace garge_api.Helpers
             };
         }
 
-        /// <summary>A charge's baseline, or null when the 7 days before its start reach outside the viewer's period.</summary>
-        public static float? BaselineInsidePeriods(float baseline, DateTime chargeStart, IReadOnlyList<OwnershipPeriod>? periods) =>
-            InsideOnePeriod(periods, chargeStart.AddDays(-BaselineWindowDays), chargeStart) ? baseline : null;
+        /// <summary>A <c>since</c> value from a query string as UTC. A value with no zone is taken as UTC.</summary>
+        public static DateTime SinceAsUtc(DateTime since) => since.Kind switch
+        {
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(since, DateTimeKind.Utc),
+            _ => since.ToUniversalTime(),
+        };
 
         /// <summary>A row's resting voltage, or null when its 3-day window reaches outside the viewer's period.</summary>
         public static float? RestingInsidePeriods(float? resting, DateTime rowTimestamp, IReadOnlyList<OwnershipPeriod>? periods) =>
@@ -525,7 +528,7 @@ namespace garge_api.Helpers
                 full.LastOrDefault(c => c.SelfDischargePctPerWeek.HasValue)?.SelfDischargePctPerWeek);
         }
 
-        public record HealthClassification(string Status, string Reason, float? DropPct, float? SlopePctPerWeek);
+        public record HealthClassification(string Status, float? SlopePctPerWeek);
 
         /// <summary>
         /// Status from the settled voltages of full charges, oldest first. S1 is
@@ -536,7 +539,7 @@ namespace garge_api.Helpers
         {
             var slope = ComputeCycleSlopePercentPerWeek(anchors, S2MinAnchors);
             if (anchors.Count < 2)
-                return new HealthClassification("learning", $"{anchors.Count} settled full charge(s), needs 2 to compare", null, slope);
+                return new HealthClassification("learning", slope);
 
             // Median of earlier charges, so one unusually high anchor cannot set the reference.
             var reference = Median(anchors.Take(anchors.Count - 1).Select(a => a.Value).OrderBy(v => v).ToList());
@@ -552,7 +555,7 @@ namespace garge_api.Helpers
                 1 => "attention",
                 _ => "replace"
             };
-            return new HealthClassification(status, $"settled drop {drop:F1}%, decline {decline:F2}%/wk", drop, slope);
+            return new HealthClassification(status, slope);
         }
     }
 }

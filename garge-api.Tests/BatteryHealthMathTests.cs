@@ -47,29 +47,32 @@ public class BatteryHealthMathTests
         return BatteryHealthMath.ClassifyStatus(anchors).Status;
     }
 
-    // Real-shaped traces. Expected values are the replay results of the same readings.
+    // Synthetic traces of the shapes detection has to tell apart. Expected values are the detection results.
 
     [Fact]
     public void Fixture_LongRestSlowRamp_ThreeFullChargesWithOneSlowRampAndOneLowPeak()
     {
         AssertCharges(BatteryFixtures.LongRestSlowRamp,
-            new(981.565, 1109.267, true, 12.823f, 13.523f, 11.957f),
+            new(981.723, 1109.397, true, 12.829f, 13.521f, 12.289f),
             // A slow ramp after an early spike stays one charge.
-            new(2215.880, 2625.696, true, 12.816f, 14.125f, 12.271f),
-            // Peaks at only 13.725 V and still counts as full.
-            new(3845.854, 4380.629, true, 12.753f, 13.725f, 12.275f));
+            new(2216.612, 2625.993, true, 12.830f, 14.124f, 12.307f),
+            // A low plateau whose peak stays under 1.08 x rest still counts as full.
+            new(3846.401, 4380.953, true, 12.764f, 13.724f, 12.253f));
         Assert.Equal("good", StatusOf(BatteryFixtures.LongRestSlowRamp));
+
+        var low = BatteryHealthMath.DetectCharges(BatteryFixtures.Samples(BatteryFixtures.LongRestSlowRamp)).Charges[2];
+        Assert.True(low.PeakVoltage < 1.08f * low.SettledVoltage!.Value);
     }
 
     [Fact]
     public void Fixture_SuddenDrop_ChargeEndsAtTheDrop()
     {
         AssertCharges(BatteryFixtures.SuddenDrop,
-            new(1391.707, 1488.544, true, 12.754f, 14.550f, 12.126f),
+            new(1391.799, 1488.617, true, 12.750f, 14.542f, 12.295f),
             // The end moves to the sudden drop, and the settled voltage follows it.
-            new(2319.998, 2380.941, true, 12.717f, 14.522f, 12.345f),
-            new(3673.619, 3773.498, true, 12.684f, 14.563f, 12.179f),
-            new(4592.984, 4684.868, true, 12.651f, 14.557f, 12.249f));
+            new(2320.526, 2381.642, true, 12.721f, 14.514f, 12.364f),
+            new(3674.085, 3773.973, true, 12.681f, 14.553f, 12.261f),
+            new(4593.772, 4685.492, true, 12.648f, 14.549f, 12.301f));
         Assert.Equal("good", StatusOf(BatteryFixtures.SuddenDrop));
     }
 
@@ -77,14 +80,14 @@ public class BatteryHealthMathTests
     public void Fixture_TwoCloseCharges_StayTwoChargesWithSevenFull()
     {
         AssertCharges(BatteryFixtures.TwoCloseCharges,
-            new(506.631, 537.566, false, 12.872f, 14.126f, 11.502f),
-            new(1151.416, 1244.199, true, 13.014f, 13.564f, 12.478f),
-            new(1795.699, 1844.577, true, 13.092f, 14.114f, 12.700f),
-            new(2384.231, 2433.101, true, 13.105f, 14.125f, 12.692f),
-            new(3015.372, 3057.224, true, 13.116f, 14.120f, 12.669f),
-            new(3547.949, 3596.830, true, 13.047f, 14.126f, 12.671f),
-            new(4007.011, 4055.897, true, 13.071f, 14.126f, 12.713f),
-            new(4092.798, 4689.942, true, 13.160f, 14.126f, 13.057f));
+            new(506.874, 511.784, false, 13.167f, 14.143f, 11.424f),
+            new(1151.484, 1244.438, true, 12.938f, 13.525f, 12.420f),
+            new(1796.077, 1845.104, true, 13.086f, 14.143f, 12.695f),
+            new(2385.080, 2434.007, true, 13.095f, 14.143f, 12.769f),
+            new(3015.664, 3057.723, true, 13.091f, 14.143f, 12.750f),
+            new(3548.376, 3597.376, true, 13.042f, 14.143f, 12.736f),
+            new(4007.081, 4056.194, true, 13.066f, 14.143f, 12.723f),
+            new(4093.084, 4689.916, true, 13.140f, 14.143f, 13.058f));
         Assert.Equal("good", StatusOf(BatteryFixtures.TwoCloseCharges));
     }
 
@@ -92,15 +95,16 @@ public class BatteryHealthMathTests
     public void Fixture_RegularCycles_AllChargesFull()
     {
         AssertCharges(BatteryFixtures.RegularCycles,
-            new(74.431, 183.006, true, 13.166f, 14.013f, 13.049f),
-            new(461.029, 507.871, true, 13.313f, 14.149f, 13.023f),
-            new(1093.034, 1142.861, true, 13.359f, 14.199f, 12.965f),
-            new(1770.613, 1819.427, true, 13.312f, 14.175f, 13.019f),
-            new(1948.979, 2020.733, true, 13.325f, 14.199f, 13.191f),
-            new(2532.125, 2582.956, true, 13.297f, 14.199f, 13.020f),
-            new(3248.519, 3297.336, true, 13.266f, 14.164f, 12.923f),
-            new(3705.892, 3756.706, true, 13.240f, 14.188f, 12.919f),
-            new(4402.466, 4452.290, true, 13.203f, 14.154f, 12.823f));
+            // A charger that cycles off within a day stays one charge.
+            new(74.884, 183.699, true, 13.112f, 14.001f, 13.071f),
+            new(461.354, 508.404, true, 13.300f, 14.154f, 12.972f),
+            new(1093.719, 1143.188, true, 13.341f, 14.204f, 13.038f),
+            new(1770.901, 1819.411, true, 13.292f, 14.173f, 13.058f),
+            new(1949.770, 2021.036, true, 13.300f, 14.206f, 13.226f),
+            new(2532.709, 2583.494, true, 13.281f, 14.205f, 13.077f),
+            new(3248.785, 3297.816, true, 13.245f, 14.164f, 12.978f),
+            new(3706.304, 3756.960, true, 13.228f, 14.195f, 13.015f),
+            new(4403.358, 4452.315, true, 13.176f, 14.155f, 12.863f));
         Assert.Equal("good", StatusOf(BatteryFixtures.RegularCycles));
     }
 
@@ -108,8 +112,8 @@ public class BatteryHealthMathTests
     public void Fixture_LongFloat_FourDayChargeIsOneCharge()
     {
         AssertCharges(BatteryFixtures.LongFloat,
-            new(1671.791, 1767.527, true, 14.021f, 15.713f, 13.446f),
-            new(3773.726, 3869.486, true, 13.969f, 15.713f, 13.406f));
+            new(1672.253, 1767.525, true, 14.018f, 15.692f, 13.242f),
+            new(3773.916, 3869.879, true, 13.967f, 15.692f, 13.447f));
         Assert.Equal("good", StatusOf(BatteryFixtures.LongFloat));
     }
 
@@ -167,6 +171,12 @@ public class BatteryHealthMathTests
     public void DetectCharges_OneHighReading_IsIgnored()
     {
         Assert.Empty(Detect(new BatteryTrace().Hold(72, 12.4f).Values(14.8f).Hold(72, 12.4f)));
+    }
+
+    [Fact]
+    public void DetectCharges_TwoHighReadingsApart_DoNotStart()
+    {
+        Assert.Empty(Detect(new BatteryTrace().Hold(72, 12.4f).Values(14.8f, 12.4f, 14.8f, 12.4f).Hold(10, 12.4f)));
     }
 
     [Fact]
@@ -561,6 +571,15 @@ public class BatteryHealthMathTests
     }
 
     [Fact]
+    public void DetectCharges_DropFromExactly50MillivoltsAboveTheLow_MovesTheEnd()
+    {
+        const float low = 12.7f;
+        var high = low + BatteryHealthMath.SlowClimbAboveLowVolts;
+        var trace = RestThenCharge().Hold(12, low).Values(high, 12.6f).Hold(30, 12.65f);
+        Assert.Equal(72 + 24 + 13, HoursOf(Detect(trace).Single().EndedAt!.Value));
+    }
+
+    [Fact]
     public void DetectCharges_DropFrom55MillivoltsAboveTheLow_MovesTheEnd()
     {
         var trace = RestThenCharge().Hold(12, 12.7f).Values(12.755f, 12.6f).Hold(30, 12.65f);
@@ -929,7 +948,6 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample>());
         Assert.Equal("learning", result.Status);
-        Assert.Null(result.DropPct);
         Assert.Null(result.SlopePctPerWeek);
     }
 
@@ -938,7 +956,6 @@ public class BatteryHealthMathTests
     {
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample> { new(T0, 12.8f) });
         Assert.Equal("learning", result.Status);
-        Assert.Null(result.DropPct);
     }
 
     [Theory]
@@ -961,30 +978,33 @@ public class BatteryHealthMathTests
     public void Status_LatestRising_DropIsZero()
     {
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample> { new(T0, 12f), new(T0.AddDays(30), 13f) });
-        Assert.Equal(0f, result.DropPct);
         Assert.Equal("good", result.Status);
     }
 
-    [Fact]
-    public void Status_DropIsMeasuredAgainstMedianOfEarlier()
+    [Theory]
+    [InlineData(12.8f, "good")]
+    [InlineData(12.5f, "attention")]
+    public void Status_DropIsMeasuredAgainstMedianOfEarlier(float latest, string expected)
     {
-        // Earlier values 12, 14 and 13 have median 13.
+        // Earlier values 14, 12 and 13 have median 13. The first, the lowest and the highest give other answers.
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample>
         {
-            new(T0, 12f), new(T0.AddDays(1000), 14f), new(T0.AddDays(2000), 13f), new(T0.AddDays(3000), 12.74f),
+            new(T0, 14f), new(T0.AddDays(1000), 12f), new(T0.AddDays(2000), 13f), new(T0.AddDays(3000), latest),
         });
-        Assert.Equal(2f, result.DropPct!.Value, 0.01f);
+        Assert.Equal(expected, result.Status);
     }
 
-    [Fact]
-    public void Status_DropMedianOfEvenCount_AveragesTheMiddle()
+    [Theory]
+    [InlineData(12.87f, "good")]
+    [InlineData(12.6f, "attention")]
+    public void Status_DropMedianOfEvenCount_AveragesTheMiddle(float latest, string expected)
     {
-        // Earlier values 12 and 14 have median 13, and the latest is 1 % below it.
+        // Earlier values 12 and 14 have median 13.
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample>
         {
-            new(T0, 12f), new(T0.AddDays(1000), 14f), new(T0.AddDays(2000), 12.87f),
+            new(T0, 12f), new(T0.AddDays(1000), 14f), new(T0.AddDays(2000), latest),
         });
-        Assert.Equal(1f, result.DropPct!.Value, 0.01f);
+        Assert.Equal(expected, result.Status);
     }
 
     [Theory]
@@ -999,7 +1019,6 @@ public class BatteryHealthMathTests
         for (var i = 0; i < 3; i++) anchors.Add(new Sample(T0.AddDays(7 * i), 100f - declinePctWeek * i));
         var result = BatteryHealthMath.ClassifyStatus(anchors);
         Assert.Equal(expected, result.Status);
-        Assert.True(result.DropPct < BatteryHealthMath.S1AttentionDropPct);
     }
 
     [Fact]
@@ -1015,7 +1034,6 @@ public class BatteryHealthMathTests
     public void Status_WorstSignalWins_S2OverS1()
     {
         var result = BatteryHealthMath.ClassifyStatus(new List<Sample> { new(T0, 100f), new(T0.AddDays(7), 99.5f), new(T0.AddDays(14), 99f) });
-        Assert.True(result.DropPct < BatteryHealthMath.S1AttentionDropPct);
         Assert.Equal("replace", result.Status);
     }
 
@@ -1321,12 +1339,16 @@ public class BatteryHealthMathTests
     }
 
     [Fact]
-    public void Baseline_WindowReachingBeforeThePeriod_IsNull()
+    public void SinceAsUtc_NoZoneIsTakenAsUtc()
     {
-        var start = T0.AddDays(10);
-        Assert.Equal(12.4f, BatteryHealthMath.BaselineInsidePeriods(12.4f, start, new[] { new BatteryHealthMath.OwnershipPeriod(start.AddDays(-7), null) }));
-        Assert.Null(BatteryHealthMath.BaselineInsidePeriods(12.4f, start, new[] { new BatteryHealthMath.OwnershipPeriod(start.AddDays(-7).AddMinutes(1), null) }));
-        Assert.Equal(12.4f, BatteryHealthMath.BaselineInsidePeriods(12.4f, start, null));
+        var plain = new DateTime(2026, 1, 1, 8, 0, 0);
+        var utc = BatteryHealthMath.SinceAsUtc(plain);
+        Assert.Equal(DateTimeKind.Utc, utc.Kind);
+        Assert.Equal(plain.Ticks, utc.Ticks);
+
+        var local = new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc).ToLocalTime();
+        Assert.Equal(new DateTime(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc), BatteryHealthMath.SinceAsUtc(local));
+        Assert.Equal(DateTimeKind.Utc, BatteryHealthMath.SinceAsUtc(local).Kind);
     }
 
     [Fact]

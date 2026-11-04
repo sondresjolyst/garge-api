@@ -10,7 +10,7 @@ namespace garge_api.Services
     /// Server-side battery-health analyzer. Replaces the firmware's NVS
     /// state machine. On new <c>SensorData</c> inserts for a voltage
     /// sensor, at most once per <see cref="ReadingAnalysisInterval"/>,
-    /// replay charge detection across the whole sensor history, bring
+    /// replay charge detection from the latest final charge, across owners, bring
     /// <c>BatteryChargeEvents</c> in line with the result and add a new
     /// <c>BatteryHealth</c> row of reading facts when a reading has arrived since
     /// the latest row. Anything that depends on the
@@ -297,7 +297,7 @@ namespace garge_api.Services
             var samples = new List<BatteryHealthMath.VoltageSample>(rawSamples.Count);
             foreach (var s in rawSamples)
             {
-                if (!float.TryParse(s.Value, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
+                if (!float.TryParse(s.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) continue;
                 if (!float.IsFinite(v) || v < MinPlausibleVolt || v > MaxPlausibleVolt) continue;
                 samples.Add(new BatteryHealthMath.VoltageSample(s.Timestamp, v));
             }
