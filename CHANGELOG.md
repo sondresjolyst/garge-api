@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.1](https://github.com/sondresjolyst/garge-api/compare/v2.22.0...v2.22.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **battery:** clear values measured from erased readings and generate test fixtures from invented schedules ([#550](https://github.com/sondresjolyst/garge-api/issues/550)) ([8032d83](https://github.com/sondresjolyst/garge-api/commit/8032d8326a1c4e2b1f841e9b12425cc193bdff21))
+* **battery:** update erasure, migrated rows and baseline access ([#548](https://github.com/sondresjolyst/garge-api/issues/548)) ([6f284f6](https://github.com/sondresjolyst/garge-api/commit/6f284f61c4d6acc22ca4fc4dde5395c79df7c965))
+
 ## [2.22.0](https://github.com/sondresjolyst/garge-api/compare/v2.21.1...v2.22.0) (2026-11-04)
 
 
