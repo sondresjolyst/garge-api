@@ -196,6 +196,7 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
     [InlineData("NaN")]
     [InlineData("Infinity")]
     [InlineData("-Infinity")]
+    [InlineData("1,3")]
     public async Task Analyze_InvalidLatestReading_IsDropped(string bad)
     {
         var trace = ChargesWithRest((24, 12.7f));
@@ -1389,7 +1390,7 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task EventsBaseline_NearAPeriodStart_IsNullForThatViewerOnly()
+    public async Task EventsBaseline_IsNullForEveryoneButAnAdmin()
     {
         var trace = ChargesWithRest((24, 12.9f));
         var h = new Harness(NowAfter(trace));
@@ -1398,9 +1399,30 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         await Own(h, "old", -1000);
         await Own(h, "near", 70);
 
-        Assert.Equal(12.4f, Assert.Single(await h.EventsFor("old")).RestingAtTime);
+        Assert.Null(Assert.Single(await h.EventsFor("old")).RestingAtTime);
         Assert.Null(Assert.Single(await h.EventsFor("near")).RestingAtTime);
         Assert.Equal(12.4f, Assert.Single(await h.EventsFor(null, isAdmin: true)).RestingAtTime);
+    }
+
+    [Fact]
+    public async Task OnChargerNow_ReadsFalseOnceTheRowIsOlderThanTheOfflineLimit()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(30, 14.4f);
+        var last = trace.Samples[^1].Timestamp;
+        var h = new Harness(last.AddMinutes(5));
+        await h.Seed(trace.Samples);
+        await Own(h, "owner", -1000);
+        await h.Analyze();
+        Assert.True((await h.View("owner"))!.OnChargerNow);
+
+        h.Clock.Now = last.AddDays(3);
+        Assert.True((await h.View("owner"))!.OnChargerNow);
+
+        h.Clock.Now = last.AddDays(3).AddMinutes(1);
+        var row = (await h.View("owner"))!;
+        Assert.False(row.OnChargerNow);
+        Assert.Equal(14.4f, row.CurrentVoltage);
+        Assert.False((await h.LatestHealth()).OnChargerNow);
     }
 
     [Fact]
@@ -1458,6 +1480,21 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         Assert.Equal(12.7f, row.CurrentVoltage);
         Assert.Equal(14.4f, row.LastFullChargePeak);
         Assert.Single(await h.EventsFor(null, isAdmin: true));
+    }
+
+    [Fact]
+    public async Task EventsFor_SinceWithNoZoneIsTakenAsUtc()
+    {
+        var trace = ChargesWithRest((24, 12.9f), (24, 12.9f));
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await h.Analyze();
+        var second = (await h.Events())[1].StartedAt;
+
+        var since = await h.WithDb(db => new BatteryHealthReadService(db, RealMapper, h.Clock)
+            .GetEventsAsync(SensorId, null, true, DateTime.SpecifyKind(second, DateTimeKind.Unspecified), Ct));
+
+        Assert.Equal(second, Assert.Single(since).StartedAt);
     }
 
     [Fact]

@@ -54,7 +54,7 @@ The baseline is what the battery reads at rest, and a charge start is measured a
 | After that, the baseline is capped at that settling low | 7 days after the charge | `BaselineCapDays` |
 
 With too few rest readings, the baseline is the settling low if a charge has ended. Otherwise it is the
-latest rest reading. The baseline freezes when a charge starts and is stored as `RestingAtTime`.
+latest rest reading, however old. The baseline freezes when a charge starts and is stored as `RestingAtTime`.
 
 Rest readings do not carry across a charge. Readings during the settling time do not count as rest readings.
 
@@ -149,9 +149,10 @@ results from one row. A period holds for a time from its `StartedAt` up to, but 
 - **`VoltageMin24h`** is null for a viewer when the row's 24-hour window reaches before their period start.
 - **`CurrentVoltage` and `OnChargerNow`** come from the row itself. A row is timed by its reading, so the ownership
   filter on `Timestamp` leaves out any row whose reading came before the viewer's period. A viewer who claims a
-  quiet sensor has no row to read until a new reading arrives, so `GET latest` returns no body until then.
-- **`RestingAtTime`** in `GET events` and the data export is null for a viewer when the 7 days before the charge
-  start are not inside one of their periods, since the baseline is measured from those days.
+  quiet sensor has no row to read until a new reading arrives, so `GET latest` returns 204 with no body until then.
+  `OnChargerNow` reads as false when the row is older than `OfflineAfter`, for every viewer.
+- **`RestingAtTime`** in `GET events` and the data export is null for everyone but an admin, since a baseline can
+  come from readings of any age, also from an earlier owner.
 
 `GET /api/battery-health/name/{sensorName}/events` also leaves out a settled voltage or self-discharge value that
 does not count for the caller. An admin sees every value.
@@ -204,7 +205,7 @@ state of charge.
 |---|---|
 | `StartedAt`, `EndedAt`, `DurationMinutes` | When the charge ran. Unique per sensor by `StartedAt`. |
 | `PeakVoltage` | The highest reading in the charge. |
-| `RestingAtTime` | The baseline frozen at the start. Limited per viewer in responses, see [Health across owners](#health-across-owners). |
+| `RestingAtTime` | The baseline frozen at the start. Admins only in responses. |
 | `IsFull` | The full charge rule was met. |
 | `SettledVoltage` | The settled voltage, or null. |
 | `SelfDischargePctPerWeek` | The self-discharge of the rest after this charge, or null. |
@@ -245,7 +246,26 @@ If a replay finds that a later reading changes the final charge, or the reading 
 replays the whole history instead. This can happen after the service was down past the 5-day limit.
 
 A run that resumes must give the same charges as one full replay. `IncrementalRuns_EqualOneFullReplay` tests
-this on real-shaped traces under `garge-api.Tests/Fixtures/Battery`. Readings that arrive late, with a time
+this on synthetic traces under `garge-api.Tests/Fixtures/Battery`. Readings that arrive late, with a time
 before the final charge, only count after an admin rebuild.
 
 An admin rebuild replaces the sensor's charge rows with a full replay of its whole history.
+
+After the upgrade that adds this code, no charge rows exist, so status reads `learning` until each sensor's first
+analyzer run rebuilds its charges. An online sensor does this on its next reading or sweep. An offline sensor needs
+an admin reanalyze. The upgrade moves each health row to the time of its reading, and deletes a row with no valid
+reading in the 3 days before its run.
+
+## Erasure
+
+When `AnonymizationService` erases an ownership period, it moves the readings only that period covers and removes the
+derived data:
+
+- A health row inside the period that no other period covers is deleted.
+- A health row in the 3 days after the period that no other period covers keeps its reading facts, but its
+  `RestingMedian` and `VoltageMin24h` become null, since they were worked out from the erased readings.
+- A charge that overlaps the period is deleted, unless another single period covers the whole charge.
+
+The next analyzer run replays from the latest final charge that is left. It, or an admin rebuild, can find a new charge
+in the readings that remain, for example the part of a charge after the erased period. That charge then holds only
+remaining readings.

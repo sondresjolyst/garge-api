@@ -50,8 +50,8 @@ internal sealed class BatteryTrace
 }
 
 /// <summary>
-/// Readings from real batteries, as hours since the first reading and volts,
-/// for the shapes that synthetic traces do not cover well.
+/// Longer synthetic traces, as hours since the first reading and volts, with
+/// the shapes detection has to tell apart and a little noise.
 /// </summary>
 internal static class BatteryFixtures
 {

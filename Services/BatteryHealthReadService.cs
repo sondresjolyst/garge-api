@@ -45,11 +45,13 @@ namespace garge_api.Services
                 .Select(c => BatteryHealthMath.LimitChargeToPeriods(ToStoredCharge(c), periods))
                 .OfType<BatteryHealthMath.StoredCharge>()
                 .ToList();
-            var summary = BatteryHealthMath.SummarizeCharges(limited, _time.GetUtcNow().UtcDateTime);
-
             var dto = _mapper.Map<BatteryHealthDto>(latest);
+            // A sensor that went quiet while charging is not known to be on the charger now.
+            var now = _time.GetUtcNow().UtcDateTime;
+            dto.OnChargerNow = latest.OnChargerNow && latest.Timestamp >= now - BatteryHealthAnalyzerService.OfflineAfter;
             dto.RestingMedian = BatteryHealthMath.RestingInsidePeriods(latest.RestingMedian, latest.Timestamp, periods);
             dto.VoltageMin24h = BatteryHealthMath.Min24hInsidePeriods(latest.VoltageMin24h, latest.Timestamp, periods);
+            var summary = BatteryHealthMath.SummarizeCharges(limited, now);
             dto.Status = summary.Status;
             dto.DailyDropPctPerWeek = summary.SlopePctPerWeek;
             dto.LastFullChargeAt = summary.LastFullChargeAt;
@@ -61,8 +63,8 @@ namespace garge_api.Services
 
         /// <summary>
         /// The stored charges a viewer may see for a sensor, newest first. A settled voltage or
-        /// self-discharge measured past the end of the viewer's period is left out, and so is a
-        /// baseline that reaches before the start of it.
+        /// self-discharge measured past the end of the viewer's period is left out. The baseline
+        /// goes to admins only.
         /// </summary>
         public async Task<List<BatteryChargeEventDto>> GetEventsAsync(int sensorId, string? userId, bool isAdmin, DateTime? since, CancellationToken ct)
         {
@@ -74,7 +76,7 @@ namespace garge_api.Services
                 var limited = BatteryHealthMath.LimitChargeToPeriods(ToStoredCharge(charge), periods);
                 if (limited == null) continue;
                 var dto = _mapper.Map<BatteryChargeEventDto>(charge);
-                dto.RestingAtTime = BatteryHealthMath.BaselineInsidePeriods(charge.RestingAtTime, charge.StartedAt, periods);
+                dto.RestingAtTime = isAdmin ? charge.RestingAtTime : null;
                 dto.SettledVoltage = limited.SettledVoltage;
                 dto.SelfDischargePctPerWeek = limited.SelfDischargePctPerWeek;
                 result.Add(dto);
@@ -96,7 +98,11 @@ namespace garge_api.Services
             var query = _db.BatteryChargeEvents
                 .Where(e => e.SensorId == sensorId)
                 .WithinSensorOwnership(_db, userId, isAdmin);
-            if (since != null) query = query.Where(e => e.StartedAt >= since.Value);
+            if (since != null)
+            {
+                var sinceUtc = BatteryHealthMath.SinceAsUtc(since.Value);
+                query = query.Where(e => e.StartedAt >= sinceUtc);
+            }
             return await query.OrderBy(e => e.StartedAt).ToListAsync(ct);
         }
 

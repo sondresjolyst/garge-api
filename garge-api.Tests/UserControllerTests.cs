@@ -104,12 +104,11 @@ public class UserControllerTests : ControllerTestBase
         Assert.Equal(3, charges.GetArrayLength());
         const System.Text.Json.JsonValueKind Null = System.Text.Json.JsonValueKind.Null;
 
-        // The first has under 7 days of the period before it.
         Assert.Equal(Null, charges[0].GetProperty("RestingAtTime").ValueKind);
         Assert.Equal(12.8f, charges[0].GetProperty("SettledVoltage").GetSingle());
         Assert.Equal(0.7f, charges[0].GetProperty("SelfDischargePctPerWeek").GetSingle());
 
-        Assert.Equal(12.4f, charges[1].GetProperty("RestingAtTime").GetSingle());
+        Assert.Equal(Null, charges[1].GetProperty("RestingAtTime").ValueKind);
 
         // The last ends 30 hours before the period does, so its windows reach past the end.
         Assert.Equal(Null, charges[2].GetProperty("SettledVoltage").ValueKind);
