@@ -6,7 +6,8 @@ namespace garge_api.Models.Sensor
     /// <summary>
     /// Reading facts for a battery-voltage sensor at one point in time. One row
     /// inserted by <c>BatteryHealthAnalyzerService</c> when an online sensor has
-    /// a reading newer than its latest row. Nothing here depends on who owns the sensor. Status and
+    /// a reading newer than its latest row. <see cref="Timestamp"/> is the time
+    /// of that reading, not of the run. Nothing here depends on who owns the sensor. Status and
     /// the values next to it are worked out for each viewer at read time.
     /// </summary>
     public class BatteryHealth
@@ -26,6 +27,7 @@ namespace garge_api.Models.Sensor
         public bool OnChargerNow { get; set; }
         public float? VoltageMin24h { get; set; }
 
+        // The time of the reading this row holds, which the ownership filter compares with a viewer's periods.
         [Required]
         public DateTime Timestamp { get; set; }
     }

@@ -128,7 +128,7 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
 
         Assert.Single(await h.Health());
         var row = await h.LatestHealth();
-        Assert.Equal(h.Clock.Now, row.Timestamp);
+        Assert.Equal(trace.Samples[^1].Timestamp, row.Timestamp);
         Assert.Equal("good", row.Status);
         Assert.Equal(12.7f, row.CurrentVoltage);
         Assert.Equal(12.7f, row.RestingMedian);
@@ -479,12 +479,13 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         await h.Analyzer.SweepStaleSensorsAsync(Ct);
         Assert.Single(await h.Health());
 
-        await AddReading(h, h.Clock.Now.AddMinutes(1), "12.7");
-        h.Clock.Now = h.Clock.Now.AddMinutes(90);
+        var rowTime = (await h.LatestHealth()).Timestamp;
+        await AddReading(h, rowTime.AddMinutes(1), "12.7");
+        h.Clock.Now = rowTime.AddMinutes(90);
         await h.Analyzer.SweepStaleSensorsAsync(Ct);
         Assert.Single(await h.Health());
 
-        h.Clock.Now = h.Clock.Now.AddMinutes(1);
+        h.Clock.Now = rowTime.AddMinutes(91);
         await h.Analyzer.SweepStaleSensorsAsync(Ct);
         Assert.Equal(2, (await h.Health()).Count);
     }
@@ -855,7 +856,7 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         var h = new Harness(NowAfter(trace));
         await h.Seed(trace.Samples);
         await h.Analyze();
-        await AddReading(h, h.Clock.Now, "12.6");
+        await AddReading(h, trace.Samples[^1].Timestamp, "12.6");
 
         h.Clock.Now = h.Clock.Now.AddHours(1);
         await h.Analyze();
@@ -912,11 +913,13 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         var h = new Harness(NowAfter(trace));
         await h.Seed(trace.Samples);
         await h.Analyze();
+        var first = (await h.LatestHealth()).Timestamp;
         await AddReading(h, h.Clock.Now.AddMinutes(1), "12.6");
         h.Clock.Now = h.Clock.Now.AddMinutes(2);
         await h.Analyze();
         Assert.Equal(2, (await h.Health()).Count);
 
+        await AddReading(h, first.AddMinutes(1), "12.5");
         h.Clock.Now = h.Clock.Now.AddMinutes(30);
         await h.Analyze();
 
@@ -938,6 +941,121 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         await h.Analyze();
 
         Assert.Single(await h.Health(), row => row.SensorId == SensorId);
+    }
+
+    [Fact]
+    public async Task Row_IsTimedByItsReadingNotByTheRun()
+    {
+        var trace = ChargesWithRest((24, 12.7f));
+        var h = new Harness(trace.Samples[^1].Timestamp.AddHours(10));
+        await h.Seed(trace.Samples);
+
+        await h.Analyze();
+
+        Assert.Equal(trace.Samples[^1].Timestamp, Assert.Single(await h.Health()).Timestamp);
+    }
+
+    [Fact]
+    public async Task Sweep_QuietSensor_DoesNotReplay()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Hold(48, 12.7f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await h.Analyze();
+        await h.WithDb(async db =>
+        {
+            (await db.BatteryChargeEvents.SingleAsync(Ct)).PeakVoltage = 1f;
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        h.Clock.Now = h.Clock.Now.AddHours(2);
+        await h.Analyzer.SweepStaleSensorsAsync(Ct);
+
+        Assert.Equal(1f, Assert.Single(await h.Events()).PeakVoltage);
+        Assert.Single(await h.Health());
+    }
+
+    [Fact]
+    public async Task Sweep_ReadingOfAnotherSensor_DoesNotCountAsNew()
+    {
+        var trace = new BatteryTrace().Hold(72, 12.4f).Hold(24, 14.4f).Hold(48, 12.7f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await h.Analyze();
+        await h.WithDb(async db =>
+        {
+            (await db.BatteryChargeEvents.SingleAsync(Ct)).PeakVoltage = 1f;
+            db.SensorData.Add(new SensorData { SensorId = 2, Value = "12.5", Timestamp = h.Clock.Now });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        h.Clock.Now = h.Clock.Now.AddHours(2);
+        await h.Analyzer.SweepStaleSensorsAsync(Ct);
+
+        Assert.Equal(1f, Assert.Single(await h.Events()).PeakVoltage);
+    }
+
+    [Fact]
+    public async Task Sweep_NoRowYet_GetsARow()
+    {
+        var trace = new BatteryTrace().Hold(10, 12.4f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+
+        await h.Analyzer.SweepStaleSensorsAsync(Ct);
+
+        Assert.Single(await h.Health());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReadingBeforeAClaim_NoRunBetween_NeverReachesTheNewOwner(bool bySweep)
+    {
+        var trace = new BatteryTrace().Hold(10, 12.5f);
+        var h = new Harness(NowAfter(trace));
+        await h.Seed(trace.Samples);
+        await h.Analyze();
+        var firstRow = (await h.LatestHealth()).Timestamp;
+
+        // A reading arrives, no run happens, then the claim, and the sensor stays quiet.
+        var preClaim = firstRow.AddMinutes(10);
+        await AddReading(h, preClaim, "11.11");
+        var claimed = preClaim.AddMinutes(1);
+        await Own(h, "buyer", (claimed - T0).TotalHours);
+        h.Clock.Now = claimed.AddHours(2);
+        if (bySweep) await h.Analyzer.SweepStaleSensorsAsync(Ct);
+        else await h.Reanalyze();
+
+        // The run holds that reading in a row timed before the claim, for an admin only.
+        var admin = await h.LatestHealth();
+        Assert.Equal(11.11f, admin.CurrentVoltage);
+        Assert.Equal(preClaim, admin.Timestamp);
+        Assert.Null(await h.View("buyer"));
+
+        await AddReading(h, h.Clock.Now, "12.65");
+        h.Clock.Now = h.Clock.Now.AddMinutes(1);
+        await h.Analyze();
+
+        Assert.Equal(12.65f, (await h.View("buyer"))!.CurrentVoltage);
+    }
+
+    [Fact]
+    public async Task RowsWithTheSameTimestamp_LatestIsTheNewestRow()
+    {
+        // Rows moved to their reading time by the migration can share a time.
+        var at = T0.AddDays(1);
+        var h = new Harness(at.AddHours(1));
+        await h.Seed(Array.Empty<Sample>());
+        await h.WithDb(async db =>
+        {
+            db.BatteryHealthData.Add(new BatteryHealth { SensorId = SensorId, CurrentVoltage = 12.1f, Timestamp = at });
+            await db.SaveChangesAsync(Ct);
+            db.BatteryHealthData.Add(new BatteryHealth { SensorId = SensorId, CurrentVoltage = 12.2f, Timestamp = at });
+            return await db.SaveChangesAsync(Ct);
+        });
+
+        Assert.Equal(12.2f, (await h.LatestHealth()).CurrentVoltage);
     }
 
     [Fact]

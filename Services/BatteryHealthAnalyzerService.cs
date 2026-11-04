@@ -23,8 +23,9 @@ namespace garge_api.Services
     /// the existing service stays focused.
     ///
     /// Fallback timer: every hour, scan for voltage sensors whose latest
-    /// BatteryHealth row is older than 90 min (or missing) and run the
-    /// analyzer for them. Covers missed notifications.
+    /// BatteryHealth row is older than 90 min (or missing) and that have a
+    /// reading newer than it, and run the analyzer for them. Covers missed
+    /// notifications.
     /// </summary>
     public class BatteryHealthAnalyzerService : BackgroundService
     {
@@ -146,6 +147,15 @@ namespace garge_api.Services
                         .Select(bh => (DateTime?)bh.Timestamp)
                         .FirstOrDefaultAsync(ct);
                     if (latest != null && latest >= cutoff) continue;
+
+                    // A row is timed by its reading, so a quiet sensor's row stays old.
+                    // With no reading since that row there is nothing to replay.
+                    var latestReading = await db.SensorData
+                        .Where(sd => sd.SensorId == sensorId)
+                        .OrderByDescending(sd => sd.Timestamp)
+                        .Select(sd => (DateTime?)sd.Timestamp)
+                        .FirstOrDefaultAsync(ct);
+                    if (latest != null && latestReading <= latest) continue;
                     staleSensorIds.Add(sensorId);
                 }
             }
@@ -224,9 +234,10 @@ namespace garge_api.Services
                 return;
             }
 
-            // A row counts as inside a viewer's period by its own time, so a new row
-            // needs a reading newer than the latest row. Otherwise a run after a claim
-            // would show a new owner a reading from before their period.
+            // A row is timed by the reading it holds, so the ownership filter on
+            // Timestamp keeps a reading from before a viewer's period away from them.
+            // Only a reading newer than the latest row gives a new row, so a rerun adds
+            // no duplicate.
             var latestRow = await db.BatteryHealthData
                 .Where(bh => bh.SensorId == sensor.Id)
                 .OrderByDescending(bh => bh.Timestamp)
@@ -253,7 +264,7 @@ namespace garge_api.Services
                 RestingMedian = restingVoltage,
                 OnChargerNow = openCharge != null,
                 VoltageMin24h = voltageMin24h,
-                Timestamp = now,
+                Timestamp = samples[^1].Timestamp,
             });
 
             _logger.LogInformation(

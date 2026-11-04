@@ -35,6 +35,7 @@ namespace garge_api.Services
                 .Where(bh => bh.SensorId == sensorId)
                 .WithinSensorOwnership(_db, userId, isAdmin)
                 .OrderByDescending(bh => bh.Timestamp)
+                .ThenByDescending(bh => bh.Id)
                 .FirstOrDefaultAsync(ct);
             if (latest == null) return null;
 

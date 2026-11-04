@@ -21,13 +21,14 @@ not depend on the voltage level, so a calibration offset does not move them.
 - **After a new reading.** A database trigger notifies the API, and a sensor is analyzed at most once every
   15 minutes.
 - **In an hourly sweep.** The sweep analyzes a sensor whose latest health row is older than 90 minutes or
-  missing. This covers missed notifications.
+  missing, if a reading has arrived since that row. This covers missed notifications, and a quiet sensor costs
+  only two timestamp lookups.
 - **On an admin request.** `POST /api/battery-health/admin/reanalyze` handles all voltage sensors and
   `POST /api/battery-health/admin/reanalyze/{sensorId}` handles one. Both rebuild from the whole history.
 
 A run replays charges and then adds one row to `BatteryHealthData` when the sensor is online and a valid reading
 has arrived since its latest row. A sensor with no row yet gets one if it is online. This holds on every path,
-including an admin rebuild, because a row counts as inside a viewer's period by its own time. `GET /api/battery-health/name/{sensorName}/latest`
+including an admin rebuild. The row's `Timestamp` is the time of the reading it holds, not of the run. `GET /api/battery-health/name/{sensorName}/latest`
 reads the latest row inside the caller's periods and works out the rest as described in
 [Health across owners](#health-across-owners).
 
@@ -146,8 +147,9 @@ results from one row. A period holds for a time from its `StartedAt` up to, but 
 - **A self-discharge value** counts only when its measured rest, up to day 15, is also inside that period.
 - **`RestingMedian`** is null for a viewer when the row's 3-day window reaches before their period start.
 - **`VoltageMin24h`** is null for a viewer when the row's 24-hour window reaches before their period start.
-- **`CurrentVoltage` and `OnChargerNow`** come from the row itself. A viewer who claims a quiet sensor has no row
-  to read until a new reading arrives, so `GET latest` returns no body until then.
+- **`CurrentVoltage` and `OnChargerNow`** come from the row itself. A row is timed by its reading, so the ownership
+  filter on `Timestamp` leaves out any row whose reading came before the viewer's period. A viewer who claims a
+  quiet sensor has no row to read until a new reading arrives, so `GET latest` returns no body until then.
 - **`RestingAtTime`** in `GET events` and the data export is null for a viewer when the 7 days before the charge
   start are not inside one of their periods, since the baseline is measured from those days.
 
@@ -215,7 +217,7 @@ state of charge.
 | `RestingMedian` | The resting voltage, or null. |
 | `OnChargerNow` | A charge is open at the latest reading. |
 | `VoltageMin24h` | The lowest valid reading in the last 24 hours. |
-| `Timestamp` | When the run happened. |
+| `Timestamp` | The time of the reading the row holds. |
 
 `GET latest` adds these for the caller at read time:
 

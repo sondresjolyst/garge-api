@@ -16,6 +16,7 @@ namespace garge_api.Dtos.Sensor
         public float? DailyDropPctPerWeek { get; set; }
         public float? SelfDischargePctPerWeek { get; set; }
 
+        // The time of the latest reading this row holds.
         public DateTime Timestamp { get; set; }
     }
 
