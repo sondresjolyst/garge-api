@@ -49,7 +49,8 @@ namespace garge_api.Services
             if (Erased(day0.AddDays(BatteryHealthMath.SelfDischargeStartFromDay), day0.AddDays(BatteryHealthMath.SelfDischargeEndToDay)))
                 charge.SelfDischargePctPerWeek = null;
 
-            if (charge.StartedAt.AddDays(-BatteryHealthMath.BaselineWindowDays) < erasedTo && charge.StartedAt >= erasedFrom)
+            // A baseline can come from a reading of any age, so any charge after the period may hold one.
+            if (charge.StartedAt >= erasedFrom)
                 charge.RestingAtTime = null;
         }
 

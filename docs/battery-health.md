@@ -275,7 +275,8 @@ derived data:
     single period covers that window.
   - `SelfDischargePctPerWeek` becomes null when its measured rest, day 2 to 15, overlaps the period, unless another
     single period covers that rest.
-  - `RestingAtTime` becomes null when the 7 days before the start overlap the period.
+  - `RestingAtTime` becomes null on every charge that starts at or after the period's start, since a baseline can
+    come from a reading of any age.
 
 The next analyzer run replays from the latest final charge that is left. It, or an admin rebuild, can find a new charge
 in the readings that remain, for example the part of a charge after the erased period. That charge then holds only

@@ -256,15 +256,16 @@ public class AnonymizationServiceTests : ControllerTestBase
     }
 
     [Theory]
-    [InlineData(-8, -7, true)] // Ends exactly as the 7 days start.
-    [InlineData(-8, -6.5, false)]
-    [InlineData(-1, -0.5, false)]
-    public async Task AnonymizeSensorPeriod_BaselineWindowOverlappingThePeriod_ClearsTheBaseline(double fromDays, double toDays, bool kept)
+    [InlineData(-60, -59)] // A baseline can come from a reading of any age.
+    [InlineData(-8, -7)]
+    [InlineData(-8, -6.5)]
+    [InlineData(-1, -0.5)]
+    public async Task AnonymizeSensorPeriod_PeriodBeforeTheChargeStart_ClearsTheBaseline(double fromDays, double toDays)
     {
         var end = Apr;
         var start = end.AddHours(-20);
         var charge = await EraseAround(end, start.AddDays(fromDays), start.AddDays(toDays));
-        Assert.Equal(kept, charge.RestingAtTime.HasValue);
+        Assert.Null(charge.RestingAtTime);
     }
 
     [Fact]

@@ -31,7 +31,7 @@ namespace garge_api.Models.Sensor
         public float PeakVoltage { get; set; }
 
         // The baseline that was frozen when the charge started. Null once erasure has
-        // removed readings from the 7 days before the start.
+        // removed readings from before the start.
         public float? RestingAtTime { get; set; }
 
         [Required]
