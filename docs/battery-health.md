@@ -151,11 +151,15 @@ results from one row. A period holds for a time from its `StartedAt` up to, but 
   filter on `Timestamp` leaves out any row whose reading came before the viewer's period. A viewer who claims a
   quiet sensor has no row to read until a new reading arrives, so `GET latest` returns 204 with no body until then.
   `OnChargerNow` reads as false when the row is older than `OfflineAfter`, for every viewer.
-- **`RestingAtTime`** in `GET events` and the data export is null for everyone but an admin, since a baseline can
-  come from readings of any age, also from an earlier owner.
+- **`RestingAtTime`** in `GET events` is shown to admins only, and the data export never holds it, since a baseline
+  can come from readings of any age, also from an earlier owner.
 
 `GET /api/battery-health/name/{sensorName}/events` also leaves out a settled voltage or self-discharge value that
 does not count for the caller. An admin sees every value.
+
+`OnChargerNow` states whether a charge is open at the row's reading, also when that charge began before the viewer's
+period. It holds no voltage value. Whether a charge inside a period is detected can depend on readings before it, while
+no such value is shown.
 
 A share recipient follows their own period the same way, so an owner and a co-owner can see different statuses on
 one sensor. A former owner keeps their own period's data only as long as they still have access to the sensor,
@@ -254,7 +258,8 @@ An admin rebuild replaces the sensor's charge rows with a full replay of its who
 After the upgrade that adds this code, no charge rows exist, so status reads `learning` until each sensor's first
 analyzer run rebuilds its charges. An online sensor does this on its next reading or sweep. An offline sensor needs
 an admin reanalyze. The upgrade moves each health row to the time of its reading, and deletes a row with no valid
-reading in the 3 days before its run.
+reading in the 3 days before its run. Down of `BatteryHealthReadingFacts` cannot restore the run times or the deleted
+rows.
 
 ## Erasure
 
