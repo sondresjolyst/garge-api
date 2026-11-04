@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.22.0](https://github.com/sondresjolyst/garge-api/compare/v2.21.1...v2.22.0) (2026-11-04)
+
+
+### Features
+
+* **battery:** ratio-based charge detection and settled voltage status ([#545](https://github.com/sondresjolyst/garge-api/issues/545)) ([78ebe02](https://github.com/sondresjolyst/garge-api/commit/78ebe02389effbf89082d2ee4ad92d609edbd424))
+* **battery:** work out battery health for each viewer from their own ownership periods ([#547](https://github.com/sondresjolyst/garge-api/issues/547)) ([82f893a](https://github.com/sondresjolyst/garge-api/commit/82f893aba20b0728b550c2f30098ff8dab383a37))
+
 ## [2.21.1](https://github.com/sondresjolyst/garge-api/compare/v2.21.0...v2.21.1) (2026-10-25)
 
 
