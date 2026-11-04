@@ -505,7 +505,7 @@ public class BatteryHealthAnalyzerServiceTests : ControllerTestBase
         await h.Reanalyze();
         var second = await h.Events();
 
-        Assert.Equal(8, first.Count);
+        Assert.Equal(10, first.Count);
         Assert.Equal(Comparable(first), Comparable(second));
         Assert.Equal(first.Select(e => e.Id), second.Select(e => e.Id));
     }

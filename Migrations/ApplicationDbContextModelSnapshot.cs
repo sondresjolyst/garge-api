@@ -1241,7 +1241,7 @@ namespace garge_api.Migrations
                     b.Property<float>("PeakVoltage")
                         .HasColumnType("real");
 
-                    b.Property<float>("RestingAtTime")
+                    b.Property<float?>("RestingAtTime")
                         .HasColumnType("real");
 
                     b.Property<float?>("SelfDischargePctPerWeek")

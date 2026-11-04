@@ -265,6 +265,12 @@ derived data:
 - A health row in the 3 days after the period that no other period covers keeps its reading facts, but its
   `RestingMedian` and `VoltageMin24h` become null, since they were worked out from the erased readings.
 - A charge that overlaps the period is deleted, unless another single period covers the whole charge.
+- A kept charge loses the values measured from those readings:
+  - `SettledVoltage` becomes null when its window, 12 to 36 hours after the end, overlaps the period, unless another
+    single period covers that window.
+  - `SelfDischargePctPerWeek` becomes null when its measured rest, day 2 to 15, overlaps the period, unless another
+    single period covers that rest.
+  - `RestingAtTime` becomes null when the 7 days before the start overlap the period.
 
 The next analyzer run replays from the latest final charge that is left. It, or an admin rebuild, can find a new charge
 in the readings that remain, for example the part of a charge after the erased period. That charge then holds only
