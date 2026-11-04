@@ -225,6 +225,20 @@ namespace garge_api.Controllers
                 .OrderBy(bh => bh.Timestamp)
                 .ToListAsync();
 
+            var batteryPeriods = await _context.SensorOwnershipPeriods
+                .Where(p => p.UserId == id && sensorIds.Contains(p.SensorId))
+                .ToListAsync();
+            List<BatteryHealthMath.OwnershipPeriod> BatteryPeriodsOf(int sensorId) => batteryPeriods
+                .Where(p => p.SensorId == sensorId)
+                .Select(p => new BatteryHealthMath.OwnershipPeriod(p.StartedAt, p.EndedAt))
+                .ToList();
+
+            var batteryCharges = await _context.BatteryChargeEvents
+                .Where(e => sensorIds.Contains(e.SensorId))
+                .WithinSensorOwnership(_context, id)
+                .OrderBy(e => e.StartedAt)
+                .ToListAsync();
+
             var automationRules = await _context.AutomationRules
                 .Where(r => sensorIds.Contains(r.SensorId)
                             || (r.TargetType == SwitchTypes.Socket && switchIds.Contains(r.TargetId)))
@@ -312,7 +326,37 @@ namespace garge_api.Controllers
                         .FirstOrDefault(),
                     BatteryHealth = batteryHealth
                         .Where(bh => bh.SensorId == s.Id)
-                        .Select(bh => new { bh.Status, bh.Timestamp })
+                        .Select(bh =>
+                        {
+                            var periods = BatteryPeriodsOf(s.Id);
+                            return new
+                            {
+                                bh.CurrentVoltage,
+                                RestingMedian = BatteryHealthMath.RestingInsidePeriods(bh.RestingMedian, bh.Timestamp, periods),
+                                bh.OnChargerNow,
+                                VoltageMin24h = BatteryHealthMath.Min24hInsidePeriods(bh.VoltageMin24h, bh.Timestamp, periods),
+                                bh.Timestamp,
+                            };
+                        }),
+                    BatteryCharges = batteryCharges
+                        .Where(e => e.SensorId == s.Id)
+                        .Select(e => new
+                        {
+                            Event = e,
+                            Limited = BatteryHealthMath.LimitChargeToPeriods(BatteryHealthReadService.ToStoredCharge(e), BatteryPeriodsOf(s.Id)),
+                        })
+                        .Where(c => c.Limited != null)
+                        .Select(c => new
+                        {
+                            c.Event.StartedAt,
+                            c.Event.EndedAt,
+                            c.Event.PeakVoltage,
+                            RestingAtTime = BatteryHealthMath.BaselineInsidePeriods(c.Event.RestingAtTime, c.Event.StartedAt, BatteryPeriodsOf(s.Id)),
+                            c.Event.DurationMinutes,
+                            c.Event.IsFull,
+                            c.Limited!.SettledVoltage,
+                            c.Limited!.SelfDischargePctPerWeek,
+                        })
                 }),
                 Switches = switches.Select(sw => new
                 {

@@ -1,4 +1,3 @@
-using MapsterMapper;
 using garge_api.Constants;
 using garge_api.Dtos.Sensor;
 using garge_api.Helpers;
@@ -22,21 +21,21 @@ namespace garge_api.Controllers
     public class BatteryHealthController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IMapper _mapper;
         private readonly ILogger<BatteryHealthController> _logger;
         private readonly BatteryHealthAnalyzerService _analyzer;
+        private readonly BatteryHealthReadService _reader;
         private static readonly List<string> AdminRoles = new() { "SensorAdmin", "admin" };
 
         public BatteryHealthController(
             ApplicationDbContext context,
-            IMapper mapper,
             ILogger<BatteryHealthController> logger,
-            BatteryHealthAnalyzerService analyzer)
+            BatteryHealthAnalyzerService analyzer,
+            BatteryHealthReadService reader)
         {
             _context = context;
-            _mapper = mapper;
             _logger = logger;
             _analyzer = analyzer;
+            _reader = reader;
         }
 
         private bool IsAdmin() =>
@@ -50,17 +49,6 @@ namespace garge_api.Controllers
             return await _context.UserSensors.AnyAsync(us => us.UserId == userId && us.SensorId == sensorId);
         }
 
-        // Bound derived battery data to the caller's own ownership window(s) so a new owner of a
-        // re-claimed/resold sensor never sees the previous owner's history. Admins see everything.
-        private IQueryable<BatteryHealth> WithinOwnershipWindow(IQueryable<BatteryHealth> query)
-            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
-
-        private IQueryable<BatteryChargeEvent> WithinOwnershipWindow(IQueryable<BatteryChargeEvent> query)
-            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
-
-        private IQueryable<SensorData> WithinOwnershipWindow(IQueryable<SensorData> query)
-            => query.WithinSensorOwnership(_context, User.GetUserId(), IsAdmin());
-
         /// <summary>True when the caller has this owned sensor suspended (turned off / over quota). Admins are never suspended.</summary>
         private async Task<bool> IsSensorSuspendedForCallerAsync(int sensorId)
         {
@@ -70,7 +58,9 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
-        /// Returns the latest battery health record for the voltage sensor identified by name.
+        /// Returns the latest battery health record for the voltage sensor identified by name. Status
+        /// and the values next to it are worked out from the charges inside the caller's own ownership
+        /// periods, so two viewers of one sensor can get different results.
         /// </summary>
         [HttpGet("name/{sensorName}/latest")]
         [SwaggerOperation(Summary = "Returns the latest battery health record for a voltage sensor by name.")]
@@ -97,22 +87,13 @@ namespace garge_api.Controllers
             if (await IsSensorSuspendedForCallerAsync(sensor.Id))
                 return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
-            var latest = await WithinOwnershipWindow(
-                    _context.BatteryHealthData.Where(bh => bh.SensorId == sensor.Id))
-                .OrderByDescending(bh => bh.Timestamp)
-                .FirstOrDefaultAsync();
-
-            if (latest == null)
-            {
+            var dto = await _reader.GetLatestAsync(sensor.Id, User.GetUserId(), IsAdmin(), HttpContext.RequestAborted);
+            if (dto == null)
                 _logger.LogInformation("GetLatestBatteryHealth no data for sensor: {SensorName}", LogSanitizer.Sanitize(sensorName));
-                return Ok((BatteryHealthDto?)null);
-            }
-
-            var dto = _mapper.Map<BatteryHealthDto>(latest);
             return Ok(dto);
         }
 
-        /// <summary>Returns detected charge events for a voltage sensor, optionally since a given timestamp.</summary>
+        /// <summary>Returns detected charge events inside the caller's ownership periods, optionally since a given timestamp.</summary>
         [HttpGet("name/{sensorName}/events")]
         [SwaggerOperation(Summary = "Returns detected battery charge events for a voltage sensor.")]
         [SwaggerResponse(200, "Charge events.", typeof(IEnumerable<BatteryChargeEventDto>))]
@@ -124,18 +105,15 @@ namespace garge_api.Controllers
             if (await IsSensorSuspendedForCallerAsync(sensor.Id))
                 return StatusCode(403, new { message = "Sensor is suspended. Re-subscribe or turn it back on to view its data.", suspended = true });
 
-            var query = WithinOwnershipWindow(_context.BatteryChargeEvents.Where(e => e.SensorId == sensor.Id));
-            if (since.HasValue) query = query.Where(e => e.StartedAt >= since.Value);
-            var events = await query.OrderByDescending(e => e.StartedAt).ToListAsync();
-            return Ok(_mapper.Map<List<BatteryChargeEventDto>>(events));
+            return Ok(await _reader.GetEventsAsync(sensor.Id, User.GetUserId(), IsAdmin(), since, HttpContext.RequestAborted));
         }
 
         /// <summary>
         /// Admin: rebuild every voltage sensor from its whole reading history.
         /// Replaces each sensor's charge events with a full replay and bypasses
-        /// the 90-min staleness gate. Every sensor with a valid reading gets a new
-        /// health row, also when it is offline. The same readings always give the
-        /// same charge events.
+        /// the 90-min staleness gate. An online sensor with a reading newer than its
+        /// latest health row also gets a new row. Status comes from the rebuilt charges
+        /// at read time. The same readings always give the same charge events.
         /// </summary>
         [HttpPost("admin/reanalyze")]
         [Authorize(Policy = "Admin")]
@@ -170,8 +148,8 @@ namespace garge_api.Controllers
 
         /// <summary>
         /// Admin: rebuild one voltage sensor from its whole reading history.
-        /// Replaces its charge events with a full replay. The sensor gets a new
-        /// health row if it has a valid reading, also when it is offline.
+        /// Replaces its charge events with a full replay. An online sensor with a
+        /// reading newer than its latest health row also gets a new row.
         /// </summary>
         [HttpPost("admin/reanalyze/{sensorId:int}")]
         [Authorize(Policy = "Admin")]

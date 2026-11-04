@@ -87,6 +87,25 @@ public class OwnershipWindowQueryExtensionsTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task WithinSensorOwnership_BatteryChargeEvent_MustEndInsideTheSamePeriod()
+    {
+        using var db = CreateDbContext();
+        db.Sensors.Add(MakeSensor(1));
+        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = U, SensorId = 1, StartedAt = Jan, EndedAt = Jan.AddDays(10) });
+        db.SensorOwnershipPeriods.Add(new SensorOwnershipPeriod { UserId = U, SensorId = 1, StartedAt = Jan.AddDays(20) });
+        db.BatteryChargeEvents.AddRange(
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(1), EndedAt = Jan.AddDays(9), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 },
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(9), EndedAt = Jan.AddDays(10), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 },
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(5).AddHours(1), EndedAt = Jan.AddDays(21), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 },
+            new BatteryChargeEvent { SensorId = 1, StartedAt = Jan.AddDays(22), EndedAt = Jan.AddDays(23), PeakVoltage = 13, RestingAtTime = 12, DurationMinutes = 60 });
+        await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+
+        var result = await db.BatteryChargeEvents.WithinSensorOwnership(db, U).OrderBy(e => e.StartedAt).ToListAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(new[] { Jan.AddDays(1), Jan.AddDays(22) }, result.Select(e => e.StartedAt));
+    }
+
+    [Fact]
     public async Task WithinSensorOwnership_BatteryChargeEvent_BoundsByStartedAt()
     {
         using var db = CreateDbContext();

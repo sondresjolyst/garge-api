@@ -80,6 +80,7 @@ namespace garge_api
             builder.Services.AddSingleton<CoalescingDispatcher>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<CoalescingDispatcher>());
             builder.Services.AddSingleton<IDeviceSettingsPublisher>(sp => sp.GetRequiredService<CoalescingDispatcher>());
+            builder.Services.AddScoped<BatteryHealthReadService>();
             builder.Services.AddSingleton<BatteryHealthAnalyzerService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<BatteryHealthAnalyzerService>());
             builder.Services.AddHostedService<PostgresNotificationService>();

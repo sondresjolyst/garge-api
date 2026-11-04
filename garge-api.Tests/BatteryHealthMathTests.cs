@@ -1134,57 +1134,261 @@ public class BatteryHealthMathTests
         Assert.NotNull(BatteryHealthMath.ComputeSelfDischarge(samples, T0));
     }
 
-    private static BatteryHealthMath.ChargeSpan Span(double startHours, double endHours, bool full = true) =>
-        new(T0.AddHours(startHours), T0.AddHours(endHours), full);
-
-    private const double FifteenDaysPlusSettle = 36 + 15 * 24;
+    // Stored self-discharge per charge. The charge ends at hour 96, so day 0 is hour 132.
 
     [Fact]
-    public void SelfDischargeRest_NeedsFifteenDaysFromDayZero()
+    public void RestSelfDischarge_NeedsFifteenDaysFromDayZero()
     {
-        var charges = new[] { Span(0, 10) };
-        Assert.Null(BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(10 + FifteenDaysPlusSettle - 1)));
-        Assert.Equal(T0.AddHours(10), BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(10 + FifteenDaysPlusSettle)));
+        var samples = Rest(36 + 48, 36 + 360, _ => 13f);
+        Assert.Null(BatteryHealthMath.ComputeRestSelfDischarge(samples, T0, T0.AddHours(36 + 360 - 1)));
+        Assert.NotNull(BatteryHealthMath.ComputeRestSelfDischarge(samples, T0, T0.AddHours(36 + 360)));
+    }
+
+    private static BatteryTrace FullChargeThenRest(int restHours) =>
+        RestThenCharge().Ramp(restHours, 13f, 12.8f);
+
+    [Fact]
+    public void DetectCharges_RestShorterThanFifteenDays_HasNoSelfDischarge()
+    {
+        Assert.Null(Detect(FullChargeThenRest(36 + 359)).Single().SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_NoCharges_IsNull()
+    public void DetectCharges_LongRest_HasSelfDischargeFromTheWindows()
     {
-        Assert.Null(BatteryHealthMath.FindSelfDischargeRest(Array.Empty<BatteryHealthMath.ChargeSpan>(), null, T0));
+        var trace = FullChargeThenRest(36 + 365);
+        var charge = Detect(trace).Single();
+        Assert.NotNull(charge.SelfDischargePctPerWeek);
+        Assert.Equal(BatteryHealthMath.ComputeSelfDischarge(trace.Samples, charge.EndedAt!.Value), charge.SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_PicksTheLatestLongRest()
+    public void DetectCharges_NextChargeEndsTheRest_OnlyAfterThatRestQualifies()
     {
-        var charges = new[] { Span(0, 10), Span(1000, 1010), Span(2000, 2010), Span(2200, 2210) };
-        Assert.Equal(T0.AddHours(1010), BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(2300)));
+        // A short rest before the next charge and a long one after it.
+        var charges = Detect(FullChargeThenRest(200).Hold(24, 14.4f).Ramp(500, 13f, 12.8f));
+        Assert.Equal(2, charges.Count);
+        Assert.Null(charges[0].SelfDischargePctPerWeek);
+        Assert.NotNull(charges[1].SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_CurrentRestCounts()
+    public void DetectCharges_LongRestBeforeANextCharge_KeepsItsValue()
     {
-        var charges = new[] { Span(0, 10), Span(1000, 1010) };
-        Assert.Equal(T0.AddHours(1010), BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(2000)));
+        var charges = Detect(FullChargeThenRest(500).Hold(24, 14.4f).Hold(50, 12.8f));
+        Assert.NotNull(charges[0].SelfDischargePctPerWeek);
+        Assert.Null(charges[1].SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_AnOpenChargeEndsTheRest()
+    public void DetectCharges_AnOpenChargeEndsTheRest()
     {
-        Assert.Null(BatteryHealthMath.FindSelfDischargeRest(new[] { Span(0, 10) }, T0.AddHours(100), T0.AddHours(2000)));
+        var charges = Detect(FullChargeThenRest(200).Hold(400, 14.4f));
+        Assert.True(charges[1].IsOpen);
+        Assert.Null(charges[0].SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_ANextChargeEndsTheRest()
+    public void DetectCharges_PartialCharge_HasNoSelfDischarge()
     {
-        // The middle charge has 354 hours from day 0 to the next charge, under the 360 needed.
-        var charges = new[] { Span(0, 10), Span(1000, 1010), Span(1400, 1410) };
-        Assert.Equal(T0.AddHours(10), BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(1420)));
+        var charge = Detect(new BatteryTrace().Hold(72, 12.4f).Hold(6, 14.4f).Ramp(500, 13f, 12.8f)).Single();
+        Assert.False(charge.IsFull);
+        Assert.Null(charge.SelfDischargePctPerWeek);
     }
 
     [Fact]
-    public void SelfDischargeRest_SkipsARestAfterAPartialCharge()
+    public void Resume_ReturnsTheSelfDischargeOfTheResumedCharge()
     {
-        var charges = new[] { Span(0, 10), Span(1000, 1010, full: false) };
-        Assert.Equal(T0.AddHours(10), BatteryHealthMath.FindSelfDischargeRest(charges, null, T0.AddHours(2000)));
+        var trace = FullChargeThenRest(500);
+        var full = Detect(trace).Single();
+        var resumed = ResumeAt(trace, 72 + 24);
+        Assert.NotNull(resumed.ResumeSelfDischarge);
+        Assert.Equal(full.SelfDischargePctPerWeek, resumed.ResumeSelfDischarge);
+    }
+
+    // Viewer limits. A charge from hour 100 to 200, with a value measured up to hour 200 + 36 + 360.
+
+    private static readonly BatteryHealthMath.StoredCharge Charge = new(T0.AddHours(100), T0.AddHours(200), 14.4f, true, 12.8f, 0.7f);
+
+    private static BatteryHealthMath.OwnershipPeriod Period(double from, double? to) =>
+        new(T0.AddHours(from), to == null ? null : T0.AddHours(to.Value));
+
+    private static BatteryHealthMath.StoredCharge? Limit(params BatteryHealthMath.OwnershipPeriod[] periods) =>
+        BatteryHealthMath.LimitChargeToPeriods(Charge, periods);
+
+    [Fact]
+    public void Period_IncludesItsStartAndNotItsEnd()
+    {
+        var period = Period(10, 20);
+        Assert.True(period.Contains(T0.AddHours(10)));
+        Assert.False(period.Contains(T0.AddHours(9.9)));
+        Assert.True(period.Contains(T0.AddHours(19.9)));
+        Assert.False(period.Contains(T0.AddHours(20)));
+        Assert.True(Period(10, null).Contains(T0.AddYears(50)));
+    }
+
+    [Fact]
+    public void InsideOnePeriod_BothEndsMustShareAPeriod()
+    {
+        var periods = new[] { Period(0, 10), Period(20, 30) };
+        Assert.True(BatteryHealthMath.InsideOnePeriod(periods, T0.AddHours(1), T0.AddHours(9)));
+        Assert.False(BatteryHealthMath.InsideOnePeriod(periods, T0.AddHours(1), T0.AddHours(25)));
+        Assert.False(BatteryHealthMath.InsideOnePeriod(periods, T0.AddHours(11), T0.AddHours(12)));
+        Assert.False(BatteryHealthMath.InsideOnePeriod(Array.Empty<BatteryHealthMath.OwnershipPeriod>(), T0, T0));
+        Assert.True(BatteryHealthMath.InsideOnePeriod(null, T0, T0));
+    }
+
+    [Fact]
+    public void LimitCharge_NoPeriodsMeansAnAdmin_NothingIsLimited()
+    {
+        Assert.Equal(Charge, BatteryHealthMath.LimitChargeToPeriods(Charge, null));
+    }
+
+    [Fact]
+    public void LimitCharge_InsideAnOpenPeriod_KeepsEverything()
+    {
+        Assert.Equal(Charge, Limit(Period(100, null)));
+    }
+
+    [Theory]
+    [InlineData(101, null)]
+    [InlineData(0d, 200d)]
+    [InlineData(150d, 300d)]
+    public void LimitCharge_CrossingABoundary_IsLeftOut(double from, double? to)
+    {
+        Assert.Null(Limit(Period(from, to)));
+    }
+
+    [Fact]
+    public void LimitCharge_StartInOnePeriodEndInAnother_IsLeftOut()
+    {
+        Assert.Null(Limit(Period(0, 150), Period(160, null)));
+    }
+
+    [Fact]
+    public void LimitCharge_EndsJustInsideThePeriod_CountsWithoutSettledOrRest()
+    {
+        var limited = Limit(Period(100, 200.5));
+        Assert.NotNull(limited);
+        Assert.Null(limited.SettledVoltage);
+        Assert.Null(limited.SelfDischargePctPerWeek);
+        Assert.Equal(14.4f, limited.PeakVoltage);
+    }
+
+    [Theory]
+    [InlineData(236, false)]
+    [InlineData(236.5, true)]
+    public void LimitCharge_SettledNeedsThirtySixHoursInside(double periodEnd, bool counts)
+    {
+        var limited = Limit(Period(100, periodEnd));
+        Assert.Equal(counts, limited!.SettledVoltage.HasValue);
+        Assert.Null(limited.SelfDischargePctPerWeek);
+    }
+
+    [Theory]
+    [InlineData(596, false)]
+    [InlineData(596.5, true)]
+    public void LimitCharge_SelfDischargeNeedsTheMeasuredRestInside(double periodEnd, bool counts)
+    {
+        var limited = Limit(Period(100, periodEnd));
+        Assert.True(limited!.SettledVoltage.HasValue);
+        Assert.Equal(counts, limited.SelfDischargePctPerWeek.HasValue);
+    }
+
+    [Fact]
+    public void LimitCharge_RestInsideALaterPeriod_DoesNotCount()
+    {
+        // The charge is in the first period and the end of its rest in the second.
+        var limited = Limit(Period(100, 210), Period(220, null));
+        Assert.NotNull(limited);
+        Assert.Null(limited.SettledVoltage);
+        Assert.Null(limited.SelfDischargePctPerWeek);
+    }
+
+    [Fact]
+    public void RestingAndMinimum_WindowReachingBeforeThePeriod_AreNull()
+    {
+        var row = T0.AddDays(10);
+        var justInsideResting = new[] { new BatteryHealthMath.OwnershipPeriod(row.AddDays(-3), null) };
+        var tooLate = new[] { new BatteryHealthMath.OwnershipPeriod(row.AddDays(-3).AddMinutes(1), null) };
+        Assert.Equal(12.5f, BatteryHealthMath.RestingInsidePeriods(12.5f, row, justInsideResting));
+        Assert.Null(BatteryHealthMath.RestingInsidePeriods(12.5f, row, tooLate));
+
+        var justInsideMin = new[] { new BatteryHealthMath.OwnershipPeriod(row.AddHours(-24), null) };
+        var tooLateMin = new[] { new BatteryHealthMath.OwnershipPeriod(row.AddHours(-24).AddMinutes(1), null) };
+        Assert.Equal(12.1f, BatteryHealthMath.Min24hInsidePeriods(12.1f, row, justInsideMin));
+        Assert.Null(BatteryHealthMath.Min24hInsidePeriods(12.1f, row, tooLateMin));
+    }
+
+    [Fact]
+    public void Baseline_WindowReachingBeforeThePeriod_IsNull()
+    {
+        var start = T0.AddDays(10);
+        Assert.Equal(12.4f, BatteryHealthMath.BaselineInsidePeriods(12.4f, start, new[] { new BatteryHealthMath.OwnershipPeriod(start.AddDays(-7), null) }));
+        Assert.Null(BatteryHealthMath.BaselineInsidePeriods(12.4f, start, new[] { new BatteryHealthMath.OwnershipPeriod(start.AddDays(-7).AddMinutes(1), null) }));
+        Assert.Equal(12.4f, BatteryHealthMath.BaselineInsidePeriods(12.4f, start, null));
+    }
+
+    [Fact]
+    public void RestingAndMinimum_Admin_AreKept()
+    {
+        Assert.Equal(12.5f, BatteryHealthMath.RestingInsidePeriods(12.5f, T0, null));
+        Assert.Equal(12.1f, BatteryHealthMath.Min24hInsidePeriods(12.1f, T0, null));
+    }
+
+    private static BatteryHealthMath.StoredCharge Stored(int day, float settled = 12.8f, bool full = true, float? selfDischarge = null, float peak = 14.4f) =>
+        new(T0.AddDays(day), T0.AddDays(day).AddHours(24), peak, full, settled, selfDischarge);
+
+    [Fact]
+    public void Summary_NoCharges_IsLearningWithNothingElse()
+    {
+        var s = BatteryHealthMath.SummarizeCharges(Array.Empty<BatteryHealthMath.StoredCharge>(), T0);
+        Assert.Equal("learning", s.Status);
+        Assert.Null(s.SlopePctPerWeek);
+        Assert.Null(s.LastFullChargeAt);
+        Assert.Null(s.LastFullChargePeak);
+        Assert.Equal(0, s.FullChargesLast30d);
+        Assert.Null(s.SelfDischargePctPerWeek);
+    }
+
+    [Fact]
+    public void Summary_LastFullAndCountSkipPartialCharges()
+    {
+        var charges = new[] { Stored(0, peak: 14.1f), Stored(100, peak: 14.2f), Stored(120, full: false, peak: 15f) };
+        var s = BatteryHealthMath.SummarizeCharges(charges, T0.AddDays(125));
+        Assert.Equal(T0.AddDays(100).AddHours(24), s.LastFullChargeAt);
+        Assert.Equal(14.2f, s.LastFullChargePeak);
+        Assert.Equal(1, s.FullChargesLast30d);
+    }
+
+    [Fact]
+    public void Summary_CountIncludesExactlyThirtyDays()
+    {
+        var end = T0.AddDays(100).AddHours(24);
+        var charges = new[] { Stored(100) };
+        Assert.Equal(1, BatteryHealthMath.SummarizeCharges(charges, end.AddDays(30)).FullChargesLast30d);
+        Assert.Equal(0, BatteryHealthMath.SummarizeCharges(charges, end.AddDays(30).AddMinutes(1)).FullChargesLast30d);
+    }
+
+    [Fact]
+    public void Summary_StatusUsesFullChargesWithSettledVoltage()
+    {
+        // The partial charge settled low. The third has no settled voltage after limiting.
+        var charges = new[]
+        {
+            Stored(0), Stored(100), Stored(120, settled: 10f, full: false),
+            Stored(140) with { SettledVoltage = null },
+        };
+        var s = BatteryHealthMath.SummarizeCharges(charges, T0.AddDays(150));
+        Assert.Equal("good", s.Status);
+        Assert.Null(s.SlopePctPerWeek);
+        Assert.Equal(T0.AddDays(140).AddHours(24), s.LastFullChargeAt);
+    }
+
+    [Fact]
+    public void Summary_SelfDischargeIsTheLatestChargeWithAValue()
+    {
+        var charges = new[] { Stored(0, selfDischarge: 0.5f), Stored(100, selfDischarge: 0.9f), Stored(120) };
+        Assert.Equal(0.9f, BatteryHealthMath.SummarizeCharges(charges, T0.AddDays(150)).SelfDischargePctPerWeek);
     }
 }

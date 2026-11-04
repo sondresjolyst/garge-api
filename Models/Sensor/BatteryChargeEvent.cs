@@ -43,5 +43,8 @@ namespace garge_api.Models.Sensor
 
         // Median 12 to 36 hours after the end. Null with too few readings.
         public float? SettledVoltage { get; set; }
+
+        // For the rest after this charge, once that rest has lasted long enough. Full charges only.
+        public float? SelfDischargePctPerWeek { get; set; }
     }
 }

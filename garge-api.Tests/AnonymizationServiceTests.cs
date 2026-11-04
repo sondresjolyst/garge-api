@@ -36,7 +36,7 @@ public class AnonymizationServiceTests : ControllerTestBase
             new SensorData { SensorId = 1, Value = "12.6", Timestamp = Mar },
             new SensorData { SensorId = 1, Value = "12.7", Timestamp = Apr },
             new SensorData { SensorId = 1, Value = "13.0", Timestamp = Jul }); // outside the period window
-        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Status = "ok", Timestamp = Mar });
+        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Timestamp = Mar });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 
         var moved = await Service(db).AnonymizeSensorPeriodAsync(period.Id, TestContext.Current.CancellationToken);

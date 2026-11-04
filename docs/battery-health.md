@@ -25,8 +25,11 @@ not depend on the voltage level, so a calibration offset does not move them.
 - **On an admin request.** `POST /api/battery-health/admin/reanalyze` handles all voltage sensors and
   `POST /api/battery-health/admin/reanalyze/{sensorId}` handles one. Both rebuild from the whole history.
 
-Each run adds one row to `BatteryHealthData`. The only exception is an automatic run on an offline sensor.
-The latest row is what clients read.
+A run replays charges and then adds one row to `BatteryHealthData` when the sensor is online and a valid reading
+has arrived since its latest row. A sensor with no row yet gets one if it is online. This holds on every path,
+including an admin rebuild, because a row counts as inside a viewer's period by its own time. `GET /api/battery-health/name/{sensorName}/latest`
+reads the latest row inside the caller's periods and works out the rest as described in
+[Health across owners](#health-across-owners).
 
 ## Valid readings
 
@@ -116,41 +119,52 @@ exist and is never stored as 0.
 ## Offline sensors
 
 A sensor is offline when its latest reading is more than 3 days old (`OfflineAfter`). An automatic run, from
-a new reading or the sweep, then adds no health row and leaves the last one standing, so a quiet sensor keeps
-its status. Charge rows stay untouched too. The check reads only the latest timestamp, so the sweep stays cheap
-for these sensors.
+a new reading or the sweep, then adds no health row and leaves the charge rows untouched. The check reads only
+the latest timestamp, so the sweep stays cheap for these sensors. A quiet sensor keeps its status, since status
+comes from its stored charges.
 
 A sensor whose latest readings are all invalid also counts as offline, after a run has read its readings.
 
-An admin rebuild replaces the charge rows of an offline sensor and adds a health row if the sensor has a valid
-reading. `RestingMedian` and `VoltageMin24h` are null in that row, because no readings are that recent.
+An admin rebuild replaces the charge rows of an offline sensor and adds no health row. Its status at read time
+comes from the rebuilt charges.
 
 ## Health across owners
 
-A sensor can change owner. Charges are detected and stored across the whole sensor history, but a new health
-row uses only charges and rests from the time the current owners have held the sensor.
+Battery health follows each viewer's own ownership periods, exactly like sensor data. A user who owned a sensor
+all of 2025, not in 2026, and again all of 2027 sees 2025 and 2027 and nothing from 2026.
 
-`Status`, `DailyDropPctPerWeek`, `LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d` and
-`SelfDischargePctPerWeek` use only charges that started at or after the earliest start among the current owners'
-periods in `SensorOwnershipPeriods`. This is the same boundary `GET /api/battery-health/name/{sensorName}/events` applies.
-After a sale with no owner left from before, the new owner therefore starts at `learning` with no last full
-charge, until their own charges exist. The period of a sensor's first owner covers all its earlier readings, so they keep that history.
+Detection runs across the whole sensor history, and nothing that depends on the viewer is stored. A health row
+holds only reading facts. `BatteryHealthReadService` works out the rest at read time from the stored charges
+inside the caller's periods in `SensorOwnershipPeriods`. Two viewers of one sensor can therefore get different
+results from one row. A period holds for a time from its `StartedAt` up to, but not including, its `EndedAt`.
 
-- **A charge that started before the claim** belongs to the earlier period, even if it ends after the claim.
-- **A share recipient** also holds a period but is not an owner, so a share changes nothing here.
-- **Several current owners:** the earliest period start applies, so a new owner on a sensor with an owner still
-  present sees status derived from that earlier history. Once the earlier owner's period ends, the next run limits
-  to the remaining owner's start.
-- **No current owner:** nothing limits the row, so it uses the whole history. After a sale only admins can read
-  such a row, since it falls outside the ended period and before any later claim. On a sensor that has never
-  had an owner, the first owner can read it, and that history is theirs.
+- **A charge** counts only when it starts and ends inside one of the viewer's periods. A charge that crosses a
+  period boundary counts for nobody on that side. `GET /api/battery-health/name/{sensorName}/events` applies the
+  same rule.
+- **A settled voltage** counts only when 36 hours after the charge end is also inside that period. Otherwise the
+  charge still counts, but not as an anchor for status.
+- **A self-discharge value** counts only when its measured rest, up to day 15, is also inside that period.
+- **`RestingMedian`** is null for a viewer when the row's 3-day window reaches before their period start.
+- **`VoltageMin24h`** is null for a viewer when the row's 24-hour window reaches before their period start.
+- **`CurrentVoltage` and `OnChargerNow`** come from the row itself. A viewer who claims a quiet sensor has no row
+  to read until a new reading arrives, so `GET latest` returns no body until then.
+- **`RestingAtTime`** in `GET events` and the data export is null for a viewer when the 7 days before the charge
+  start are not inside one of their periods, since the baseline is measured from those days.
 
-`CurrentVoltage`, `RestingMedian`, `OnChargerNow` and `VoltageMin24h` describe the latest readings and are not
-limited this way.
+`GET /api/battery-health/name/{sensorName}/events` also leaves out a settled voltage or self-discharge value that
+does not count for the caller. An admin sees every value.
+
+A share recipient follows their own period the same way, so an owner and a co-owner can see different statuses on
+one sensor. A former owner keeps their own period's data only as long as they still have access to the sensor,
+which is the same access check as for sensor data. An admin sees the whole history with no limit.
+
+`FullChargesLast30d` is counted at read time, so it stays current for an offline sensor too.
+
+The data export holds the viewer's reading facts and their charges, limited the same way. It holds no status.
 
 ## Status
 
-Status uses full charges with a settled voltage inside the current owners' time, as described above, oldest first. These are
+Status uses the full charges with a settled voltage that count for the viewer, oldest first. These are
 called anchors below.
 
 - **Fewer than 2 anchors:** `learning`.
@@ -168,8 +182,9 @@ The status limits are starting values. They have not yet been tested on a failin
 
 `SelfDischargePctPerWeek` is for information only and never affects status.
 
-It measures the latest rest of at least 15 days (`SelfDischargeMinRestDays`) after a full charge inside the
-current owners' time. A rest ends
+The analyzer stores a value on each full charge once the rest after it has lasted at least 15 days
+(`SelfDischargeMinRestDays`). `GET latest` shows the value of the latest charge that has one and counts for the
+viewer. A rest ends
 at the next charge start or at the latest reading. Day 0 is 36 hours after the charge ended
 (`SettledEndHours`). A rest after a partial charge is skipped, since the battery did not start from the same
 state of charge.
@@ -187,21 +202,28 @@ state of charge.
 |---|---|
 | `StartedAt`, `EndedAt`, `DurationMinutes` | When the charge ran. Unique per sensor by `StartedAt`. |
 | `PeakVoltage` | The highest reading in the charge. |
-| `RestingAtTime` | The baseline frozen at the start. |
+| `RestingAtTime` | The baseline frozen at the start. Limited per viewer in responses, see [Health across owners](#health-across-owners). |
 | `IsFull` | The full charge rule was met. |
 | `SettledVoltage` | The settled voltage, or null. |
+| `SelfDischargePctPerWeek` | The self-discharge of the rest after this charge, or null. |
 
-`BatteryHealthData` holds one row per run.
+`BatteryHealthData` holds reading facts only, at most one row per new reading.
+
+| Field | Meaning |
+|---|---|
+| `CurrentVoltage` | The latest valid reading. |
+| `RestingMedian` | The resting voltage, or null. |
+| `OnChargerNow` | A charge is open at the latest reading. |
+| `VoltageMin24h` | The lowest valid reading in the last 24 hours. |
+| `Timestamp` | When the run happened. |
+
+`GET latest` adds these for the caller at read time:
 
 | Field | Meaning |
 |---|---|
 | `Status` | `learning`, `good`, `attention` or `replace`. |
-| `CurrentVoltage` | The latest valid reading. |
-| `RestingMedian` | The resting voltage, or null. |
-| `OnChargerNow` | A charge is open at the latest reading. |
 | `LastFullChargeAt`, `LastFullChargePeak` | The end and peak of the latest full charge. |
-| `VoltageMin24h` | The lowest valid reading in the last 24 hours. |
-| `FullChargesLast30d` | Full charges that ended in the last 30 days. |
+| `FullChargesLast30d` | Full charges that ended in the last 30 days (`FullChargeCountDays`). |
 | `DailyDropPctPerWeek` | The S2 slope, or null. |
 | `SelfDischargePctPerWeek` | The self-discharge, or null. |
 
@@ -214,13 +236,11 @@ a later reading can reach back.
 2. It replays detection from there, with the settling state seeded from that end.
 3. It makes the rows after the final charge match the result, by updating, inserting and deleting. Rows match
    on `StartedAt`, so a charge whose start moved leaves no duplicate.
-4. It also refreshes the settled voltage of the final charge, which a late run may not have had readings for.
+4. It also refreshes the settled voltage and self-discharge of the final charge, since its rest continues past
+   the point the replay resumes from.
 
 If a replay finds that a later reading changes the final charge, or the reading at its end is gone, the run
 replays the whole history instead. This can happen after the service was down past the 5-day limit.
-
-`LastFullChargeAt`, `LastFullChargePeak`, `FullChargesLast30d`, status and slope come from the stored full
-charges plus this run, limited to the current owners, so history older than the readings read is kept.
 
 A run that resumes must give the same charges as one full replay. `IncrementalRuns_EqualOneFullReplay` tests
 this on real-shaped traces under `garge-api.Tests/Fixtures/Battery`. Readings that arrive late, with a time

@@ -70,7 +70,7 @@ public class AccountCleanupTests : ControllerTestBase
         db.SensorData.AddRange(
             new SensorData { SensorId = 1, Value = "12.5", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) },
             new SensorData { SensorId = 1, Value = "12.6", Timestamp = new DateTime(2020, 3, 1, 0, 0, 0, DateTimeKind.Utc) });
-        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Status = "ok", Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) });
+        db.BatteryHealthData.Add(new BatteryHealth { SensorId = 1, Timestamp = new DateTime(2020, 2, 1, 0, 0, 0, DateTimeKind.Utc) });
         db.SensorPhotos.Add(new SensorPhoto { UserId = user.Id, SensorId = 1, ContentType = "image/jpeg", Data = "AQID" });
         await db.SaveChangesAsync(TestContext.Current.CancellationToken);
 

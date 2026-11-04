@@ -26,9 +26,11 @@ namespace garge_api.Dtos.Sensor
         public DateTime StartedAt { get; set; }
         public DateTime EndedAt { get; set; }
         public float PeakVoltage { get; set; }
-        public float RestingAtTime { get; set; }
+        // Null when the 7 days before the start are not inside one of the viewer's periods.
+        public float? RestingAtTime { get; set; }
         public int DurationMinutes { get; set; }
         public bool IsFull { get; set; }
         public float? SettledVoltage { get; set; }
+        public float? SelfDischargePctPerWeek { get; set; }
     }
 }
