@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.22.2](https://github.com/sondresjolyst/garge-api/compare/v2.22.1...v2.22.2) (2026-11-08)
+
+
+### Dependencies
+
+* **docker:** update mcr.microsoft.com/dotnet/aspnet to 1a48394 ([dfa9dfb](https://github.com/sondresjolyst/garge-api/commit/dfa9dfb53bc59657ffec8cc5eace5f47ede7e543))
+* **docker:** update mcr.microsoft.com/dotnet/sdk to 212fe4c ([dfa9dfb](https://github.com/sondresjolyst/garge-api/commit/dfa9dfb53bc59657ffec8cc5eace5f47ede7e543))
+* **nuget:** update Microsoft.AspNetCore.DataProtection.EntityFrameworkCore from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.AspNetCore.Identity.EntityFrameworkCore from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.AspNetCore.OpenApi from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.AspNetCore.SignalR.Client from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.AspNetCore.TestHost from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.EntityFrameworkCore from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.EntityFrameworkCore.Design from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.EntityFrameworkCore.InMemory from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Microsoft.EntityFrameworkCore.Tools from 10.0.13 to 10.0.14 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Swashbuckle.AspNetCore from 10.3.0 to 10.3.1 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+* **nuget:** update Swashbuckle.AspNetCore.Annotations from 10.3.0 to 10.3.1 ([210a8bc](https://github.com/sondresjolyst/garge-api/commit/210a8bc1b426ede5dfbb030ed027767ced662c0f))
+
 ## [2.22.1](https://github.com/sondresjolyst/garge-api/compare/v2.22.0...v2.22.1) (2026-11-04)
 
 
