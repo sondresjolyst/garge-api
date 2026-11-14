@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.22.3](https://github.com/sondresjolyst/garge-api/compare/v2.22.2...v2.22.3) (2026-11-14)
+
+
+### Dependencies
+
+* **nuget:** bump the nuget group with 1 update ([#557](https://github.com/sondresjolyst/garge-api/issues/557)) ([41a1211](https://github.com/sondresjolyst/garge-api/commit/41a1211c94edb9b814a3a34891ca7739336ac96c))
+
 ## [2.22.2](https://github.com/sondresjolyst/garge-api/compare/v2.22.1...v2.22.2) (2026-11-08)
 
 
