@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.23.0](https://github.com/sondresjolyst/garge-api/compare/v2.22.2...v2.23.0) (2026-11-15)
+
+
+### Features
+
+* **pairing:** add a pairing token status endpoint ([#563](https://github.com/sondresjolyst/garge-api/issues/563)) ([685b670](https://github.com/sondresjolyst/garge-api/commit/685b670e2e8a666979f2d33a73704b6572d84fcd))
+
+
+### Dependencies
+
+* **docker:** update mcr.microsoft.com/dotnet/aspnet from 1a48394 to bfd912c ([bd8e42e](https://github.com/sondresjolyst/garge-api/commit/bd8e42ead22baac26647b73d82e4568a9c5d2e38))
+* **docker:** update mcr.microsoft.com/dotnet/sdk from 212fe4c to fe0fd4e ([bd8e42e](https://github.com/sondresjolyst/garge-api/commit/bd8e42ead22baac26647b73d82e4568a9c5d2e38))
+* **nuget:** bump the nuget group with 1 update ([#557](https://github.com/sondresjolyst/garge-api/issues/557)) ([41a1211](https://github.com/sondresjolyst/garge-api/commit/41a1211c94edb9b814a3a34891ca7739336ac96c))
+* **nuget:** update Mapster from 10.0.13 to 10.0.14 ([77c02dc](https://github.com/sondresjolyst/garge-api/commit/77c02dc15d0447b3fd2442f218df16cc86a5f142))
+* **nuget:** update Mapster.DependencyInjection from 10.0.13 to 10.0.14 ([77c02dc](https://github.com/sondresjolyst/garge-api/commit/77c02dc15d0447b3fd2442f218df16cc86a5f142))
+
 ## [2.22.2](https://github.com/sondresjolyst/garge-api/compare/v2.22.1...v2.22.2) (2026-11-08)
 
 
