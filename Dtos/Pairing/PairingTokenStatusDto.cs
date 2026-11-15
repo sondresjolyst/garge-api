@@ -6,8 +6,12 @@ namespace garge_api.Dtos.Pairing
         public const string Provisioned = "provisioned";
         public const string Paired = "paired";
         public const string Expired = "expired";
+        public const string OwnedByOther = "ownedByOther";
 
-        /// <summary>One of <c>waiting</c>, <c>provisioned</c>, <c>paired</c> or <c>expired</c>.</summary>
+        /// <summary>
+        /// One of <c>waiting</c>, <c>provisioned</c>, <c>paired</c>, <c>expired</c> or
+        /// <c>ownedByOther</c>, the last when provisioning was refused because another user owns the device.
+        /// </summary>
         public required string Status { get; set; }
 
         /// <summary>

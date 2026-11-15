@@ -1074,6 +1074,9 @@ namespace garge_api.Migrations
                     b.Property<DateTime>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("ProvisionRejectedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("ProvisionedAt")
                         .HasColumnType("timestamp with time zone");
 

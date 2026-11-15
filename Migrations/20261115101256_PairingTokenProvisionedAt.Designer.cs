@@ -12,7 +12,7 @@ using garge_api.Models;
 namespace garge_api.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20261115100234_PairingTokenProvisionedAt")]
+    [Migration("20261115101256_PairingTokenProvisionedAt")]
     partial class PairingTokenProvisionedAt
     {
         /// <inheritdoc />
@@ -1075,6 +1075,9 @@ namespace garge_api.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProvisionRejectedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("ProvisionedAt")

@@ -498,6 +498,7 @@ public class PairingControllerTests : ControllerTestBase
         var result = await CreateController(db, "device").ProvisionDevice(Provision());
 
         Assert.IsType<ConflictObjectResult>(result);
+        Assert.NotNull(db.PairingTokens.Single().ProvisionRejectedAt);
         Assert.Empty(db.EMQXMqttUsers); // no credentials minted for a device someone else owns
         Assert.Empty(db.EMQXMqttAcls);
     }
@@ -565,7 +566,7 @@ public class PairingControllerTests : ControllerTestBase
     }
 
     [Fact]
-    public async Task GetPairingTokenStatus_FailedProvision_StaysWaiting()
+    public async Task GetPairingTokenStatus_ProvisionRefusedOwnedByOther_OwnedByOther()
     {
         using var db = CreateDbContext();
         db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
@@ -575,9 +576,93 @@ public class PairingControllerTests : ControllerTestBase
         await db.SaveChangesAsync();
 
         Assert.IsType<ConflictObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
-        Assert.Null(db.PairingTokens.Single().ProvisionedAt);
+        var token = db.PairingTokens.Single();
+        Assert.Null(token.ProvisionedAt);
+        Assert.NotNull(token.ProvisionRejectedAt);
+        Assert.Null(token.ConsumedAt);
 
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.OwnedByOther);
+        Assert.Empty(dto.SensorIds);
+        Assert.Empty(dto.SwitchIds);
+    }
+
+    [Fact]
+    public async Task ProvisionDevice_OtherFailures_DoNotSetProvisionRejectedAt()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1", "EXPXYZ", expiresAt: DateTime.UtcNow.AddMinutes(-1)));
+        db.PairingTokens.Add(MakeToken("user-1", "USEDXY", consumedAt: DateTime.UtcNow.AddMinutes(-1)));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "nothex")));
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(token: "ZZZ999")));
+        Assert.Equal(410, Assert.IsType<ObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(token: "EXPXYZ"))).StatusCode);
+        Assert.Equal(410, Assert.IsType<ObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(token: "USEDXY"))).StatusCode);
+
+        Assert.All(db.PairingTokens, t =>
+        {
+            Assert.Null(t.ProvisionRejectedAt);
+            Assert.Null(t.ProvisionedAt);
+        });
         AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Waiting);
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("EXPXYZ"), PairingTokenStatusDto.Expired);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_OwnedByOtherPastExpiry_StaysOwnedByOther()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        var token = MakeToken("user-1", expiresAt: DateTime.UtcNow.AddMinutes(-1));
+        token.ProvisionRejectedAt = DateTime.UtcNow.AddMinutes(-3);
+        db.PairingTokens.Add(token);
+        await db.SaveChangesAsync();
+
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.OwnedByOther);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_ConsumedAfterRefusal_Paired()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.Sensors.Add(MakeSensor(1));
+        db.UserSensors.Add(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true });
+        var token = MakeToken("user-1", consumedAt: DateTime.UtcNow.AddMinutes(-1));
+        token.ConsumedByParentName = "gw";
+        token.ProvisionRejectedAt = DateTime.UtcNow.AddMinutes(-2);
+        db.PairingTokens.Add(token);
+        await db.SaveChangesAsync();
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Paired);
+        Assert.Equal(new[] { 1 }, dto.SensorIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_RefusedThenProvisioned_Provisioned()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.Add(MakeSensor(1, parentName: DeviceName));
+        var foreignOwner = new UserSensor { UserId = "other", SensorId = 1, IsOwner = true };
+        db.UserSensors.Add(foreignOwner);
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ConflictObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.OwnedByOther);
+
+        // The other owner releases the device, so the next attempt succeeds.
+        db.UserSensors.Remove(foreignOwner);
+        await db.SaveChangesAsync();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        var token = db.PairingTokens.Single();
+        Assert.Null(token.ProvisionRejectedAt);
+        Assert.NotNull(token.ProvisionedAt);
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Provisioned);
     }
 
     [Fact]

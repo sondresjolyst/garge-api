@@ -12,6 +12,12 @@ namespace garge_api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<DateTime>(
+                name: "ProvisionRejectedAt",
+                table: "PairingTokens",
+                type: "timestamp with time zone",
+                nullable: true);
+
+            migrationBuilder.AddColumn<DateTime>(
                 name: "ProvisionedAt",
                 table: "PairingTokens",
                 type: "timestamp with time zone",
@@ -21,6 +27,10 @@ namespace garge_api.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropColumn(
+                name: "ProvisionRejectedAt",
+                table: "PairingTokens");
+
             migrationBuilder.DropColumn(
                 name: "ProvisionedAt",
                 table: "PairingTokens");

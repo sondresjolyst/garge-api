@@ -144,6 +144,10 @@ namespace garge_api.Controllers
                     .OrderBy(id => id)
                     .ToListAsync();
             }
+            else if (pairingToken.ProvisionRejectedAt != null)
+            {
+                result.Status = PairingTokenStatusDto.OwnedByOther;
+            }
             else if (pairingToken.ExpiresAt <= DateTime.UtcNow)
             {
                 result.Status = PairingTokenStatusDto.Expired;
@@ -419,6 +423,10 @@ namespace garge_api.Controllers
             if (sensorOwnedByOther || switchOwnedByOther)
             {
                 _logger.LogWarning("ProvisionDevice conflict: Device owned by another user {@LogData}", new { deviceName, token.UserId });
+
+                // Recorded so the status endpoint can tell the app, since claim never runs for this token.
+                token.ProvisionRejectedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
                 return Conflict(new { message = "Device is owned by another user." });
             }
 
@@ -454,6 +462,7 @@ namespace garge_api.Controllers
             }
 
             token.ProvisionedAt = DateTime.UtcNow;
+            token.ProvisionRejectedAt = null;
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("ProvisionDevice credentials issued {@LogData}", new
