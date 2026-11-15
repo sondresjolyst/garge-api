@@ -96,6 +96,75 @@ namespace garge_api.Controllers
         }
 
         /// <summary>
+        /// Reports how far pairing has come for one of the caller's tokens, so the setup wizard can
+        /// catch up when it missed the live <c>device-created</c> event. A paired token lists the
+        /// devices under the paired parent that the caller owns.
+        /// </summary>
+        [HttpGet("token/{token}")]
+        [SwaggerOperation(Summary = "Reports the pairing status of one of the caller's pairing tokens.")]
+        [SwaggerResponse(200, "The token status, with the caller's device ids once paired.", typeof(PairingTokenStatusDto))]
+        [SwaggerResponse(404, "Unknown token, or a token that belongs to another user.")]
+        public async Task<IActionResult> GetPairingTokenStatus(string token)
+        {
+            var userId = User.GetUserId();
+            _logger.LogInformation("GetPairingTokenStatus called by {@LogData}", new { CallerUserId = userId });
+
+            var normalizedToken = (token ?? string.Empty).Trim().ToUpperInvariant();
+            var pairingToken = await _context.PairingTokens.FirstOrDefaultAsync(t => t.Token == normalizedToken);
+
+            // Unknown and foreign tokens get the same answer, so a caller cannot probe other users' tokens.
+            if (pairingToken == null || userId == null || pairingToken.UserId != userId)
+            {
+                _logger.LogWarning("GetPairingTokenStatus not found: Unknown pairing token {@LogData}", new { CallerUserId = userId });
+                return NotFound(new { message = "Unknown pairing token." });
+            }
+
+            var result = new PairingTokenStatusDto { Status = PairingTokenStatusDto.Waiting };
+
+            if (pairingToken.ConsumedAt != null)
+            {
+                var parentName = pairingToken.ConsumedByParentName;
+                result.Status = PairingTokenStatusDto.Paired;
+
+                result.SensorIds = await _context.Sensors
+                    .Where(s => s.ParentName == parentName)
+                    .Where(s => _context.UserSensors.Any(us => us.SensorId == s.Id && us.UserId == userId && us.IsOwner))
+                    .Select(s => s.Id)
+                    .OrderBy(id => id)
+                    .ToListAsync();
+
+                // Switches hang off the parent through the discovered-device chain, as in ClaimPairing.
+                var switchNames = _context.DiscoveredDevices
+                    .Where(dd => dd.DiscoveredBy == parentName)
+                    .Select(dd => dd.Target);
+                result.SwitchIds = await _context.Switches
+                    .Where(s => switchNames.Contains(s.Name))
+                    .Where(s => _context.UserSwitches.Any(us => us.SwitchId == s.Id && us.UserId == userId && us.IsOwner))
+                    .Select(s => s.Id)
+                    .OrderBy(id => id)
+                    .ToListAsync();
+            }
+            else if (pairingToken.ExpiresAt <= DateTime.UtcNow)
+            {
+                result.Status = PairingTokenStatusDto.Expired;
+            }
+            else if (pairingToken.ProvisionedAt != null)
+            {
+                result.Status = PairingTokenStatusDto.Provisioned;
+            }
+
+            _logger.LogInformation("GetPairingTokenStatus returned {@LogData}", new
+            {
+                CallerUserId = userId,
+                pairingToken.Id,
+                result.Status,
+                Sensors = result.SensorIds.Count,
+                Switches = result.SwitchIds.Count
+            });
+            return Ok(result);
+        }
+
+        /// <summary>
         /// Redeems a pairing token for a parent device: claims every sensor under the parent name
         /// (and every switch its gateway discovered) for the token's user. Called by the operator
         /// service after the device sends the token over MQTT. Devices the user already has, and
@@ -384,6 +453,7 @@ namespace garge_api.Controllers
                 }
             }
 
+            token.ProvisionedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
             _logger.LogInformation("ProvisionDevice credentials issued {@LogData}", new

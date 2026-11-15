@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Text.Json;
 using Xunit;
 
 namespace garge_api.Tests;
@@ -524,5 +525,173 @@ public class PairingControllerTests : ControllerTestBase
         Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "nothex")));
         Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "a1b2c3d4e5f6aa"))); // too long
         Assert.IsType<BadRequestObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision(chipId: "g1b2c3d4e5f6"))); // non-hex char
+    }
+
+    private static PairingTokenStatusDto AssertStatus(IActionResult result, string expected)
+    {
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<PairingTokenStatusDto>(ok.Value);
+        Assert.Equal(expected, dto.Status);
+        return dto;
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_FreshToken_Waiting()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Waiting);
+        Assert.Empty(dto.SensorIds);
+        Assert.Empty(dto.SwitchIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_AfterSuccessfulProvision_Provisioned()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        Assert.NotNull(db.PairingTokens.Single().ProvisionedAt);
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Provisioned);
+        Assert.Empty(dto.SensorIds);
+        Assert.Empty(dto.SwitchIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_FailedProvision_StaysWaiting()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.Add(MakeSensor(1, parentName: DeviceName));
+        db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 1, IsOwner = true });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ConflictObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        Assert.Null(db.PairingTokens.Single().ProvisionedAt);
+
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Waiting);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_AfterClaim_PairedWithOnlyCallerOwnedIds()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.AddRange(MakeSensor(3), MakeSensor(1), MakeSensor(5), MakeSensor(9, parentName: "elsewhere"));
+        db.Switches.AddRange(MakeSwitch(4), MakeSwitch(2), MakeSwitch(6), MakeSwitch(8));
+        db.DiscoveredDevices.AddRange(
+            new DiscoveredDevice { DiscoveredBy = "gw", Target = "garge_socket_4", Type = "switch", Timestamp = DateTime.UtcNow },
+            new DiscoveredDevice { DiscoveredBy = "gw", Target = "garge_socket_2", Type = "switch", Timestamp = DateTime.UtcNow },
+            new DiscoveredDevice { DiscoveredBy = "gw", Target = "garge_socket_6", Type = "switch", Timestamp = DateTime.UtcNow },
+            new DiscoveredDevice { DiscoveredBy = "other-gw", Target = "garge_socket_8", Type = "switch", Timestamp = DateTime.UtcNow });
+        // Owned by another user, so the claim skips them and the status leaves them out.
+        db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 5, IsOwner = true });
+        db.UserSwitches.Add(new UserSwitch { UserId = "other", SwitchId = 6, IsOwner = true });
+        // Owned by the caller but not under the paired parent.
+        db.UserSensors.Add(new UserSensor { UserId = "user-1", SensorId = 9, IsOwner = true });
+        db.UserSwitches.Add(new UserSwitch { UserId = "user-1", SwitchId = 8, IsOwner = true });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, "op").ClaimPairing(Claim()));
+        // A shared, non-owner row does not count as the caller's device.
+        db.UserSensors.Add(new UserSensor { UserId = "user-1", SensorId = 5, IsOwner = false });
+        db.UserSwitches.Add(new UserSwitch { UserId = "user-1", SwitchId = 6, IsOwner = false });
+        await db.SaveChangesAsync();
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Paired);
+        Assert.Equal(new[] { 1, 3 }, dto.SensorIds);
+        Assert.Equal(new[] { 2, 4 }, dto.SwitchIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_DeviceOwnedByAnotherUser_PairedWithEmptyLists()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.Add(MakeSensor(1));
+        db.Switches.Add(MakeSwitch(2));
+        db.DiscoveredDevices.Add(new DiscoveredDevice { DiscoveredBy = "gw", Target = "garge_socket_2", Type = "switch", Timestamp = DateTime.UtcNow });
+        db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 1, IsOwner = true });
+        db.UserSwitches.Add(new UserSwitch { UserId = "other", SwitchId = 2, IsOwner = true });
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, "op").ClaimPairing(Claim()));
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Paired);
+        Assert.Empty(dto.SensorIds);
+        Assert.Empty(dto.SwitchIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_ExpiredToken_Expired()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        var token = MakeToken("user-1", expiresAt: DateTime.UtcNow.AddMinutes(-1));
+        token.ProvisionedAt = DateTime.UtcNow.AddMinutes(-2);
+        db.PairingTokens.Add(token);
+        await db.SaveChangesAsync();
+
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Expired);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_ConsumedThenPastExpiry_StillPaired()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.Sensors.Add(MakeSensor(1));
+        db.UserSensors.Add(new UserSensor { UserId = "user-1", SensorId = 1, IsOwner = true });
+        var token = MakeToken("user-1", expiresAt: DateTime.UtcNow.AddMinutes(-1), consumedAt: DateTime.UtcNow.AddMinutes(-5));
+        token.ConsumedByParentName = "gw";
+        db.PairingTokens.Add(token);
+        await db.SaveChangesAsync();
+
+        var dto = AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Paired);
+        Assert.Equal(new[] { 1 }, dto.SensorIds);
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_OtherUsersToken_NotFoundLikeUnknown()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.PairingTokens.Add(MakeToken("other"));
+        await db.SaveChangesAsync();
+
+        var foreign = Assert.IsType<NotFoundObjectResult>(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"));
+        var unknown = Assert.IsType<NotFoundObjectResult>(await CreateController(db, "user-1").GetPairingTokenStatus("ZZZ999"));
+        Assert.Equal(JsonSerializer.Serialize(unknown.Value), JsonSerializer.Serialize(foreign.Value));
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_UnknownToken_NotFound()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<NotFoundObjectResult>(await CreateController(db, "user-1").GetPairingTokenStatus("ZZZ999"));
+    }
+
+    [Fact]
+    public async Task GetPairingTokenStatus_LowercaseToken_Accepted()
+    {
+        using var db = CreateDbContext();
+        db.Users.Add(MakeUser("user-1"));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus(" abc234 "), PairingTokenStatusDto.Waiting);
     }
 }
