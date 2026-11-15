@@ -425,7 +425,9 @@ namespace garge_api.Controllers
                 _logger.LogWarning("ProvisionDevice conflict: Device owned by another user {@LogData}", new { deviceName, token.UserId });
 
                 // Recorded so the status endpoint can tell the app, since claim never runs for this token.
+                // The latest provision attempt decides the status.
                 token.ProvisionRejectedAt = DateTime.UtcNow;
+                token.ProvisionedAt = null;
                 await _context.SaveChangesAsync();
                 return Conflict(new { message = "Device is owned by another user." });
             }

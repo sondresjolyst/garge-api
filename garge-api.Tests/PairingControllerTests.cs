@@ -624,6 +624,29 @@ public class PairingControllerTests : ControllerTestBase
     }
 
     [Fact]
+    public async Task GetPairingTokenStatus_ProvisionedThenRefused_OwnedByOther()
+    {
+        using var db = CreateDbContext();
+        db.Users.AddRange(MakeUser("user-1"), MakeUser("other", "other@example.com"));
+        db.Sensors.Add(MakeSensor(1, parentName: DeviceName));
+        db.PairingTokens.Add(MakeToken("user-1"));
+        await db.SaveChangesAsync();
+
+        Assert.IsType<OkObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.Provisioned);
+
+        // Another user claims the device before this token is redeemed.
+        db.UserSensors.Add(new UserSensor { UserId = "other", SensorId = 1, IsOwner = true });
+        await db.SaveChangesAsync();
+
+        Assert.IsType<ConflictObjectResult>(await CreateController(db, "device").ProvisionDevice(Provision()));
+        var token = db.PairingTokens.Single();
+        Assert.Null(token.ProvisionedAt);
+        Assert.NotNull(token.ProvisionRejectedAt);
+        AssertStatus(await CreateController(db, "user-1").GetPairingTokenStatus("ABC234"), PairingTokenStatusDto.OwnedByOther);
+    }
+
+    [Fact]
     public async Task GetPairingTokenStatus_ConsumedAfterRefusal_Paired()
     {
         using var db = CreateDbContext();

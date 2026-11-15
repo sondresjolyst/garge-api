@@ -25,7 +25,10 @@ namespace garge_api.Models.Pairing
 
         public DateTime ExpiresAt { get; set; }
 
-        /// <summary>When a device last exchanged this token for MQTT credentials, or null if none has.</summary>
+        /// <summary>
+        /// When a device last exchanged this token for MQTT credentials. Null if none has, or if a
+        /// later attempt was refused.
+        /// </summary>
         public DateTime? ProvisionedAt { get; set; }
 
         /// <summary>
