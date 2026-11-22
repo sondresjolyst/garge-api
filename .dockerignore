@@ -1,4 +1,5 @@
 .github
-.bin
-obj
 .editorconfig
+**/bin
+**/obj
+garge-api.Tests
