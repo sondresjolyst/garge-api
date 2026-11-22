@@ -5,7 +5,7 @@ and [garge-operator](https://github.com/sondresjolyst/garge-operator).
 
 ## Stack
 
-ASP.NET Core 10, PostgreSQL through EF Core and Npgsql, ASP.NET Identity with
+ASP.NET Core 11, PostgreSQL through EF Core and Npgsql, ASP.NET Identity with
 JWT, SignalR, Mapster, Serilog, PuppeteerSharp, Brevo.
 
 ## Quick start
