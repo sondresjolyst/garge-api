@@ -6,7 +6,7 @@ ASP.NET Core Web API backend for the Garge smart garage system. Handles all busi
 
 | Concern | Library |
 |---|---|
-| Framework | ASP.NET Core 10 Web API |
+| Framework | ASP.NET Core 11 Web API |
 | Language | C# 14 (nullable reference types, implicit usings) |
 | Database | PostgreSQL via Entity Framework Core 10 (Npgsql) |
 | Auth | JWT Bearer + ASP.NET Identity |
