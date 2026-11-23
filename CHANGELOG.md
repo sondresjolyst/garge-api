@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.23.1](https://github.com/sondresjolyst/garge-api/compare/v2.23.0...v2.23.1) (2026-11-22)
+
+
+### Bug Fixes
+
+* **docker:** ignore bin, obj and the test project at any depth in the build context ([#579](https://github.com/sondresjolyst/garge-api/issues/579)) ([c82f057](https://github.com/sondresjolyst/garge-api/commit/c82f05746fb136ed7d7e0a0dabfb631775ce2d3c))
+
+
+### Dependencies
+
+* **docker:** update mcr.microsoft.com/dotnet/aspnet from bfd912c to 12b1135 ([c75602d](https://github.com/sondresjolyst/garge-api/commit/c75602db26202bc371f0fd76d54d1938e88f3cf3))
+* **docker:** update mcr.microsoft.com/dotnet/sdk from fe0fd4e to bef136a ([c75602d](https://github.com/sondresjolyst/garge-api/commit/c75602db26202bc371f0fd76d54d1938e88f3cf3))
+* **dotnet:** upgrade to .net 11 ([#576](https://github.com/sondresjolyst/garge-api/issues/576)) ([ee2f75e](https://github.com/sondresjolyst/garge-api/commit/ee2f75e93ce97bc19a2deab3d1856c8bb8df36ed))
+* **nuget:** update Microsoft.AspNetCore.DataProtection.EntityFrameworkCore from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.AspNetCore.Identity.EntityFrameworkCore from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.AspNetCore.OpenApi from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.AspNetCore.SignalR.Client from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.AspNetCore.TestHost from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.EntityFrameworkCore from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.EntityFrameworkCore.Design from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.EntityFrameworkCore.InMemory from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.EntityFrameworkCore.Tools from 10.0.14 to 10.0.15 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update Microsoft.NET.Test.Sdk from 18.11.0 to 18.12.0 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+* **nuget:** update SjolystInnovation.AppKit.AdminStats from 1.0.1 to 1.0.2 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update SjolystInnovation.AppKit.Auth from 1.1.1 to 1.1.2 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update SjolystInnovation.AppKit.Hosting from 1.1.1 to 1.1.2 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update SjolystInnovation.AppKit.Pdf from 1.1.1 to 1.1.2 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update SjolystInnovation.AppKit.SiteSettings from 1.2.0 to 1.2.1 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update SjolystInnovation.AppKit.Vipps from 1.4.0 to 1.4.1 ([e1e69ca](https://github.com/sondresjolyst/garge-api/commit/e1e69ca13c5518e49e4ed412f57719cf17e0ce23))
+* **nuget:** update xunit.v3 from 4.0.2 to 4.0.3 ([0c39252](https://github.com/sondresjolyst/garge-api/commit/0c392526ea8fd5c4a7e7f38662e0a89b6dd8af37))
+
 ## [2.23.0](https://github.com/sondresjolyst/garge-api/compare/v2.22.2...v2.23.0) (2026-11-15)
 
 
